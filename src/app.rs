@@ -2,7 +2,7 @@ use crate::backend::WindowBackend;
 use crate::backend::RawOSEvent;
 
 pub struct ViewKitApp {
-    backend: Box<dyn WindowBackend>,
+    pub(crate) backend: Box<dyn WindowBackend>,
     width: u32,
     height: u32,
     screen_buffer: Vec<u32>,
