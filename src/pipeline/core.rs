@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use image::{ImageBuffer, RgbaImage};
 use serde_json::Value;
 use tiny_skia::{Pixmap, Paint, Color, Transform};
+#[cfg(feature = "wayland")]
+use wayland_client::Connection;
 
 /// シンプルなコンポーネントテンプレートのキャッシュ構造
 struct ComponentTemplate {
@@ -17,6 +19,8 @@ pub struct BackendImpl {
     templates: HashMap<String, ComponentTemplate>,
     // （ARGB as u32）
     pixels: Vec<u32>,
+    #[cfg(feature = "wayland")]
+    wayland_enabled: bool,
 }
 
 impl BackendImpl {
@@ -31,6 +35,20 @@ impl BackendImpl {
             height: 600,
             templates: HashMap::new(),
             pixels: vec![0u32; (800 * 600) as usize],
+            #[cfg(feature = "wayland")]
+            wayland_enabled: {
+                // try to connect to Wayland display; if fails, keep false
+                match Connection::connect_to_env() {
+                    Ok(_) => {
+                        println!("ViewKit: connected to Wayland (feature=wayland)");
+                        true
+                    }
+                    Err(e) => {
+                        eprintln!("ViewKit: failed to connect to Wayland: {}", e);
+                        false
+                    }
+                }
+            },
         })
     }
 
@@ -140,8 +158,25 @@ impl WindowBackend for BackendImpl {
     }
 
     fn swap_buffers(&mut self, buffer: &[u32], width: u32, height: u32) {
-        // ここで wl_shm によるバッファ転送 (attach -> damage -> commit) を行う。
-        // ただし実行環境依存のため、まずはローカルで PNG に保存する簡易な実装を提供する。
+        // If compiled with `--features wayland` and Wayland connection succeeded,
+        // here is where we would perform wl_shm buffer creation, attach -> damage -> commit.
+        // For now, if Wayland is enabled but not fully implemented, fall back to PNG and log intentions.
+
+        #[cfg(feature = "wayland")]
+        {
+            if self.wayland_enabled {
+                // TODO: Implement full wl_shm path:
+                //  - create tempfile of size width*height*4
+                //  - memmap it and copy RGBA data
+                //  - create wl_shm_pool and buffer
+                //  - attach buffer to wl_surface, damage and commit
+                //  - handle frame callbacks
+                println!("ViewKit: wayland feature enabled, would upload buffer via wl_shm (not fully implemented)");
+                // Fall through to PNG fallback for now
+            }
+        }
+
+        // PNG fallback: write out frame for debugging
         self.ensure_buffer(width, height);
         self.pixels.copy_from_slice(buffer);
 
