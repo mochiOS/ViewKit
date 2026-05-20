@@ -20,32 +20,9 @@ lightningcss = "1.0.0-alpha.71"
 tiny-skia = "0.12.0"
 image = "0.25.10"
 
-[build-dependencies]
-
 [lib]
 name = "viewkit"
-path = "src/lib.rs"
-test = false
-doctest = false
-bench = false
-
-[[bin]]
-name = "ui_test"
-path = "examples/ui_test.rs"
-test = false
-bench = false
-
-[[bin]]
-name = "stateful_ui"
-path = "examples/stateful_ui.rs"
-test = false
-bench = false
-
-[[bin]]
-name = "event_debug"
-path = "examples/event_debug.rs"
-test = false
-bench = false
+crate-type = ["cdylib"]
 
 [profile.release]
 panic = "abort"
