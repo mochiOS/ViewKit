@@ -31,9 +31,7 @@ pub struct BackendImpl {
 
 impl BackendImpl {
     pub fn new() -> Result<Self, String> {
-        // NOTE: 本来はここで wayland-client / sctk を用いて Connection::connect_to_env()
-        // と registry 取得、wl_shm / wl_compositor / xdg_wm_base 等を初期化します。
-        // 実装は環境依存なので、まずはレンダリングパスとテンプレート処理を整備します。
+        // TODO: ここでWaylandと通信しようねという
         println!(
             "ViewKit: Backend initialized (Wayland connection will be established when available)"
         );
