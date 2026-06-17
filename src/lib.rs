@@ -1,6 +1,6 @@
-mod theme;
-pub mod geometry;
-pub mod edge_insets;
-pub mod paint;
 pub mod draw_command;
+pub mod edge_insets;
+pub mod geometry;
+pub mod platform;
 pub mod renderer;
+pub mod theme;

@@ -19,7 +19,19 @@ thiserror = "2.0.18"
 tiny-skia = "0.12.0"
 tracing = "0.1.44"
 ui_layout = "0.9.8"
-winit = "0.30.13"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+winit = {
+    version = "0.30.13",
+    default-features = false,
+    features = [
+        "wayland",
+        "wayland-dlopen",
+        "rwh_06",
+    ],
+}
+
+thiserror = "2"
 
 [lib]
 name = "viewkit"
