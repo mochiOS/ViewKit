@@ -1,3 +1,5 @@
+//! ViewKitのレイアウト型とui_layout-rsとの接続を定義
+
 use ui_layout::{
     AlignItems,
     Display,
@@ -25,6 +27,7 @@ use crate::view::{
 pub enum LayoutLength {
     #[default]
     Auto,
+
     Fixed(f32),
 }
 
@@ -32,6 +35,7 @@ impl LayoutLength {
     fn to_ui_length(self) -> Length {
         match self {
             Self::Auto => Length::Auto,
+
             Self::Fixed(value) => {
                 Length::Px(value.max(0.0))
             }
@@ -84,12 +88,15 @@ impl StackDistribution {
             Self::Start => JustifyContent::Start,
             Self::Center => JustifyContent::Center,
             Self::End => JustifyContent::End,
+
             Self::SpaceBetween => {
                 JustifyContent::SpaceBetween
             }
+
             Self::SpaceAround => {
                 JustifyContent::SpaceAround
             }
+
             Self::SpaceEvenly => {
                 JustifyContent::SpaceEvenly
             }
@@ -100,15 +107,20 @@ impl StackDistribution {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum StackGap {
     None,
+
     ExtraSmall,
+
     Small,
 
     #[default]
     Medium,
 
     Large,
+
     ExtraLarge,
+
     DoubleExtraLarge,
+
     Custom(f32),
 }
 
@@ -119,23 +131,44 @@ impl StackGap {
     ) -> f32 {
         match self {
             Self::None => 0.0,
-            Self::ExtraSmall => tokens.extra_small,
-            Self::Small => tokens.small,
-            Self::Medium => tokens.medium,
-            Self::Large => tokens.large,
-            Self::ExtraLarge => tokens.extra_large,
+
+            Self::ExtraSmall => {
+                tokens.extra_small
+            }
+
+            Self::Small => {
+                tokens.small
+            }
+
+            Self::Medium => {
+                tokens.medium
+            }
+
+            Self::Large => {
+                tokens.large
+            }
+
+            Self::ExtraLarge => {
+                tokens.extra_large
+            }
+
             Self::DoubleExtraLarge => {
                 tokens.double_extra_large
             }
-            Self::Custom(value) => value.max(0.0),
+
+            Self::Custom(value) => {
+                value.max(0.0)
+            }
         }
     }
 }
 
 pub struct StackChild {
     view: Box<dyn View>,
+
     width: LayoutLength,
     height: LayoutLength,
+
     flex_grow: f32,
     flex_shrink: f32,
 }
@@ -147,9 +180,23 @@ impl StackChild {
     {
         Self {
             view: Box::new(view),
+
             width: LayoutLength::Auto,
             height: LayoutLength::Auto,
+
             flex_grow: 0.0,
+            flex_shrink: 1.0,
+        }
+    }
+
+    pub(crate) fn spacer() -> Self {
+        Self {
+            view: Box::new(EmptyView),
+
+            width: LayoutLength::Auto,
+            height: LayoutLength::Auto,
+
+            flex_grow: 1.0,
             flex_shrink: 1.0,
         }
     }
@@ -158,7 +205,9 @@ impl StackChild {
         mut self,
         width: f32,
     ) -> Self {
-        self.width = LayoutLength::Fixed(width);
+        self.width =
+            LayoutLength::Fixed(width);
+
         self
     }
 
@@ -166,7 +215,9 @@ impl StackChild {
         mut self,
         height: f32,
     ) -> Self {
-        self.height = LayoutLength::Fixed(height);
+        self.height =
+            LayoutLength::Fixed(height);
+
         self
     }
 
@@ -175,8 +226,12 @@ impl StackChild {
         width: f32,
         height: f32,
     ) -> Self {
-        self.width = LayoutLength::Fixed(width);
-        self.height = LayoutLength::Fixed(height);
+        self.width =
+            LayoutLength::Fixed(width);
+
+        self.height =
+            LayoutLength::Fixed(height);
+
         self
     }
 
@@ -184,7 +239,9 @@ impl StackChild {
         mut self,
         value: f32,
     ) -> Self {
-        self.flex_grow = value.max(0.0);
+        self.flex_grow =
+            value.max(0.0);
+
         self
     }
 
@@ -192,7 +249,9 @@ impl StackChild {
         mut self,
         value: f32,
     ) -> Self {
-        self.flex_shrink = value.max(0.0);
+        self.flex_shrink =
+            value.max(0.0);
+
         self
     }
 
@@ -202,20 +261,53 @@ impl StackChild {
                 display: Display::Block,
 
                 size: SizeStyle {
-                    width: self.width.to_ui_length(),
-                    height: self.height.to_ui_length(),
+                    width:
+                    self.width.to_ui_length(),
+
+                    height:
+                    self.height.to_ui_length(),
+
                     ..Default::default()
                 },
 
                 item_style: ItemStyle {
-                    flex_grow: self.flex_grow,
-                    flex_shrink: self.flex_shrink,
+                    flex_grow:
+                    self.flex_grow,
+
+                    flex_shrink:
+                    self.flex_shrink,
+
                     ..Default::default()
                 },
 
                 ..Default::default()
             },
         )
+    }
+}
+
+pub trait IntoStackChild {
+    fn into_stack_child(
+        self,
+    ) -> StackChild;
+}
+
+impl IntoStackChild for StackChild {
+    fn into_stack_child(
+        self,
+    ) -> StackChild {
+        self
+    }
+}
+
+impl<V> IntoStackChild for V
+where
+    V: View + 'static,
+{
+    fn into_stack_child(
+        self,
+    ) -> StackChild {
+        StackChild::new(self)
     }
 }
 
@@ -232,7 +324,10 @@ View + Sized + 'static
         height: f32,
     ) -> StackChild {
         StackChild::new(self)
-            .frame(width, height)
+            .frame(
+                width,
+                height,
+            )
     }
 
     fn width(
@@ -288,14 +383,16 @@ pub(crate) fn paint_stack(
         .map(StackChild::layout_node)
         .collect::<Vec<_>>();
 
-    let flex_direction = match direction {
-        StackDirection::Vertical => {
-            FlexDirection::Column
-        }
-        StackDirection::Horizontal => {
-            FlexDirection::Row
-        }
-    };
+    let flex_direction =
+        match direction {
+            StackDirection::Vertical => {
+                FlexDirection::Column
+            }
+
+            StackDirection::Horizontal => {
+                FlexDirection::Row
+            }
+        };
 
     let mut style = Style {
         display: Display::Flex {
@@ -306,35 +403,40 @@ pub(crate) fn paint_stack(
             width: Length::Px(
                 bounds.size.width,
             ),
+
             height: Length::Px(
                 bounds.size.height,
             ),
+
             ..Default::default()
         },
 
-        align_items: alignment
-            .to_ui_alignment(),
+        align_items:
+        alignment.to_ui_alignment(),
 
-        justify_content: distribution
-            .to_ui_justification(),
+        justify_content:
+        distribution.to_ui_justification(),
 
         ..Default::default()
     };
 
     match direction {
         StackDirection::Vertical => {
-            style.row_gap = Length::Px(gap);
+            style.row_gap =
+                Length::Px(gap);
         }
 
         StackDirection::Horizontal => {
-            style.column_gap = Length::Px(gap);
+            style.column_gap =
+                Length::Px(gap);
         }
     }
 
-    let mut root = LayoutNode::with_children(
-        style,
-        child_nodes,
-    );
+    let mut root =
+        LayoutNode::with_children(
+            style,
+            child_nodes,
+        );
 
     LayoutEngine::layout(
         &mut root,
@@ -346,10 +448,12 @@ pub(crate) fn paint_stack(
         .iter()
         .zip(root.children.iter())
     {
-        let Some(child_bounds) = border_box(
-            layout_node,
-            bounds.origin,
-        ) else {
+        let Some(child_bounds) =
+            border_box(
+                layout_node,
+                bounds.origin,
+            )
+        else {
             continue;
         };
 
@@ -369,7 +473,8 @@ pub fn border_box(
         .iter()
         .next()?;
 
-    let rect = box_model.border_box;
+    let rect =
+        box_model.border_box;
 
     Some(
         Rect::new(
@@ -379,4 +484,15 @@ pub fn border_box(
             rect.height,
         ),
     )
+}
+
+struct EmptyView;
+
+impl View for EmptyView {
+    fn paint(
+        &self,
+        _bounds: Rect,
+        _context: &mut PaintContext<'_>,
+    ) {
+    }
 }
