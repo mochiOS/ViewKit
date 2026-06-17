@@ -2,7 +2,7 @@
 
 use crate::geometry::Size;
 use crate::renderer::Viewport;
-
+use crate::draw_command::DisplayList;
 use crate::platform::event::PlatformEvent;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -36,4 +36,13 @@ pub trait PlatformApplication {
         event: PlatformEvent,
         window: &dyn PlatformWindow,
     );
+
+    fn draw(
+        &mut self,
+        viewport: Viewport,
+        display_list: &mut DisplayList,
+    ) {
+        let _ = viewport;
+        let _ = display_list;
+    }
 }

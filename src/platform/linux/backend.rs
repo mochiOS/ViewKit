@@ -1,23 +1,26 @@
-use winit::application::ApplicationHandler;
-use winit::dpi::{LogicalSize, PhysicalSize};
-use winit::error::{EventLoopError, OsError};
-use winit::event::WindowEvent;
-use winit::event_loop::{
-    ActiveEventLoop,
-    ControlFlow,
-    EventLoop,
-};
-use winit::window::{Window, WindowId};
-
-use crate::geometry::Size;
-use crate::renderer::Viewport;
-
 use super::super::{
     PlatformApplication,
     PlatformEvent,
     PlatformWindow,
     WindowConfig,
 };
+use crate::draw_command::DisplayList;
+use crate::geometry::Size;
+use crate::platform::linux::SoftwareRenderer;
+use crate::renderer::{Renderer, Viewport};
+use softbuffer::Context;
+use std::rc::Rc;
+use winit::application::ApplicationHandler;
+use winit::dpi::{LogicalSize, PhysicalSize};
+use winit::error::{EventLoopError, OsError};
+use winit::event::WindowEvent;
+use winit::event_loop::OwnedDisplayHandle;
+use winit::event_loop::{
+    ActiveEventLoop,
+    ControlFlow,
+    EventLoop,
+};
+use winit::window::{Window, WindowId};
 
 #[derive(Debug, thiserror::Error)]
 pub enum LinuxBackendError {
@@ -26,6 +29,15 @@ pub enum LinuxBackendError {
 
     #[error("ウィンドウの作成に失敗しました: {0}")]
     Window(#[from] OsError),
+
+    #[error("レンダラーの処理に失敗しました: {0}")]
+    Renderer(
+        #[from]
+        crate::platform::linux::SoftwareRendererError,
+    ),
+
+    #[error("softbufferの初期化に失敗しました: {0}")]
+    SoftBuffer(#[from] softbuffer::SoftBufferError),
 }
 
 struct WinitWindow<'a> {
@@ -49,31 +61,46 @@ impl PlatformWindow for WinitWindow<'_> {
 pub struct LinuxBackend<A> {
     application: A,
     config: WindowConfig,
-    window: Option<Window>,
-    window_error: Option<OsError>,
+
+    context: Option<Context<OwnedDisplayHandle>>,
+    window: Option<Rc<Window>>,
+    renderer: Option<SoftwareRenderer>,
+
+    runtime_error: Option<LinuxBackendError>,
 }
 
 impl<A> LinuxBackend<A>
 where
     A: PlatformApplication,
 {
-    pub fn new(application: A, config: WindowConfig) -> Self {
+    pub fn new(
+        application: A,
+        config: WindowConfig,
+    ) -> Self {
         Self {
             application,
             config,
+
+            context: None,
             window: None,
-            window_error: None,
+            renderer: None,
+
+            runtime_error: None,
         }
     }
-
     pub fn run(mut self) -> Result<(), LinuxBackendError> {
         let event_loop = EventLoop::new()?;
+
         event_loop.set_control_flow(ControlFlow::Wait);
+
+        self.context = Some(Context::new(
+            event_loop.owned_display_handle(),
+        )?);
 
         let result = event_loop.run_app(&mut self);
 
-        if let Some(error) = self.window_error.take() {
-            return Err(LinuxBackendError::Window(error));
+        if let Some(error) = self.runtime_error.take() {
+            return Err(error);
         }
 
         result?;
@@ -86,9 +113,12 @@ where
             return;
         };
 
-        let window = WinitWindow { inner: window };
+        let platform_window = WinitWindow {
+            inner: window.as_ref(),
+        };
 
-        self.application.handle_event(event, &window);
+        self.application
+            .handle_event(event, &platform_window);
     }
 
     fn request_redraw(&self) {
@@ -103,7 +133,7 @@ where
     A: PlatformApplication,
 {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.window.is_some() || self.window_error.is_some() {
+        if self.window.is_some() || self.runtime_error.is_some() {
             return;
         }
 
@@ -116,17 +146,40 @@ where
             .with_resizable(self.config.resizable);
 
         let window = match event_loop.create_window(attributes) {
-            Ok(window) => window,
+            Ok(window) => Rc::new(window),
             Err(error) => {
-                self.window_error = Some(error);
+                self.runtime_error =
+                    Some(LinuxBackendError::Window(error));
+
                 event_loop.exit();
                 return;
             }
         };
 
-        let viewport = viewport_from_window(&window);
+        let viewport = viewport_from_window(window.as_ref());
+
+        let Some(context) = self.context.as_ref() else {
+            event_loop.exit();
+            return;
+        };
+
+        let renderer = match SoftwareRenderer::new(
+            context,
+            window.clone(),
+            viewport,
+        ) {
+            Ok(renderer) => renderer,
+            Err(error) => {
+                self.runtime_error =
+                    Some(LinuxBackendError::Renderer(error));
+
+                event_loop.exit();
+                return;
+            }
+        };
 
         self.window = Some(window);
+        self.renderer = Some(renderer);
 
         self.emit(PlatformEvent::Resumed { viewport });
         self.request_redraw();
@@ -139,7 +192,7 @@ where
         event: WindowEvent,
     ) {
         let Some(current_window_id) =
-            self.window.as_ref().map(Window::id)
+            self.window.as_ref().map(|window| window.id())
         else {
             return;
         };
@@ -158,11 +211,21 @@ where
                 let scale_factor = self
                     .window
                     .as_ref()
-                    .map(Window::scale_factor)
+                    .map(|window| window.scale_factor())
                     .unwrap_or(1.0);
 
                 let viewport =
                     viewport_from_physical(size, scale_factor);
+
+                if let Some(renderer) = self.renderer.as_mut() {
+                    if let Err(error) = renderer.resize(viewport) {
+                        self.runtime_error =
+                            Some(LinuxBackendError::Renderer(error));
+
+                        event_loop.exit();
+                        return;
+                    }
+                }
 
                 self.emit(PlatformEvent::Resized { viewport });
                 self.request_redraw();
@@ -173,13 +236,23 @@ where
                 ..
             } => {
                 let Some(size) =
-                    self.window.as_ref().map(Window::inner_size)
+                    self.window.as_ref().map(|window| window.inner_size())
                 else {
                     return;
                 };
 
                 let viewport =
                     viewport_from_physical(size, scale_factor);
+
+                if let Some(renderer) = self.renderer.as_mut() {
+                    if let Err(error) = renderer.resize(viewport) {
+                        self.runtime_error =
+                            Some(LinuxBackendError::Renderer(error));
+
+                        event_loop.exit();
+                        return;
+                    }
+                }
 
                 self.emit(
                     PlatformEvent::ScaleFactorChanged {
@@ -196,6 +269,33 @@ where
 
             WindowEvent::RedrawRequested => {
                 self.emit(PlatformEvent::RedrawRequested);
+
+                let Some(window) = self.window.as_ref() else {
+                    return;
+                };
+
+                let viewport = viewport_from_window(window);
+
+                let mut display_list = DisplayList::new();
+
+                self.application.draw(
+                    viewport,
+                    &mut display_list,
+                );
+
+                window.pre_present_notify();
+
+                let result = self
+                    .renderer
+                    .as_mut()
+                    .map(|renderer| renderer.render(&display_list));
+
+                if let Some(Err(error)) = result {
+                    self.runtime_error =
+                        Some(LinuxBackendError::Renderer(error));
+
+                    event_loop.exit();
+                }
             }
 
             _ => {}

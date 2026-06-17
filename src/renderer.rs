@@ -28,9 +28,15 @@ impl Viewport {
 }
 
 pub trait Renderer {
-    type Error: std::error::Error + Send + Sync + 'static;
+    type Error: std::error::Error + 'static;
 
-    fn resize(&mut self, viewport: Viewport) -> Result<(), Self::Error>;
+    fn resize(
+        &mut self,
+        viewport: Viewport,
+    ) -> Result<(), Self::Error>;
 
-    fn render(&mut self, display_list: &DisplayList) -> Result<(), Self::Error>;
+    fn render(
+        &mut self,
+        display_list: &DisplayList,
+    ) -> Result<(), Self::Error>;
 }

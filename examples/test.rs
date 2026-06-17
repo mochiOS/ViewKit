@@ -5,6 +5,12 @@ use viewkit::platform::{
     WindowConfig,
 };
 use viewkit::platform::linux::LinuxBackend;
+use viewkit::draw_command::{
+    DisplayList,
+    DrawCommand,
+};
+use viewkit::renderer::Viewport;
+use viewkit::theme::Color;
 
 struct ExampleApplication;
 
@@ -14,25 +20,17 @@ impl PlatformApplication for ExampleApplication {
         event: PlatformEvent,
         _window: &dyn PlatformWindow,
     ) {
-        match event {
-            PlatformEvent::Resumed { viewport } => {
-                println!("resumed: {viewport:?}");
-            }
+        println!("{event:?}");
+    }
 
-            PlatformEvent::Resized { viewport } => {
-                println!("resized: {viewport:?}");
-            }
-
-            PlatformEvent::RedrawRequested => {
-                println!("redraw requested");
-            }
-
-            PlatformEvent::CloseRequested => {
-                println!("close requested");
-            }
-
-            _ => {}
-        }
+    fn draw(
+        &mut self,
+        _viewport: Viewport,
+        display_list: &mut DisplayList,
+    ) {
+        display_list.push(DrawCommand::Clear {
+            color: Color::from_rgb_hex(0xf5f5f7),
+        });
     }
 }
 
