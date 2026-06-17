@@ -23,13 +23,3 @@ winit = "0.30.13"
 
 [lib]
 name = "viewkit"
-
-[profile.release]
-panic = "abort"
-
-[profile.dev]
-panic = "abort"
-
-[features]
-wayland = ["smithay-client-toolkit"]
-
