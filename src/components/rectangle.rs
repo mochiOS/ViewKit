@@ -62,7 +62,7 @@ impl Default for Rectangle {
     fn default() -> Self {
         Self {
             color: RectangleColor::Surface,
-            radius: CornerRadius::None,
+            radius: CornerRadius::Medium,
         }
     }
 }
