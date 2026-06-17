@@ -3,6 +3,7 @@ mod rectangle;
 mod spacer;
 mod vstack;
 mod divider;
+mod zstack;
 
 pub use hstack::HStack;
 pub use spacer::Spacer;
