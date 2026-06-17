@@ -6,8 +6,9 @@ use crate::view::{
     View,
 };
 
+#[doc(hidden)]
 #[derive(Clone, Copy, Debug, Default)]
-struct EmptyView;
+pub struct EmptyView;
 
 impl View for EmptyView {
     fn paint(

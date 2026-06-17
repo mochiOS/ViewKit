@@ -1,10 +1,9 @@
 use viewkit::components::{
+    Background,
     Divider,
     Rectangle,
     RectangleColor,
     VStack,
-    ZStack,
-    ZStackAlignment,
 };
 use viewkit::draw_command::{
     DisplayList,
@@ -41,60 +40,40 @@ impl ExampleApplication {
     fn new() -> Self {
         Self {
             theme: Theme::DEFAULT,
-            typography:
-            Typography::DEFAULT,
+            typography: Typography::DEFAULT,
         }
     }
 }
 
-impl PlatformApplication
-for ExampleApplication
-{
+impl PlatformApplication for ExampleApplication {
     fn handle_event(
         &mut self,
         event: PlatformEvent,
         _window: &dyn PlatformWindow,
     ) {
         match event {
-            PlatformEvent::Resumed {
-                viewport,
-            } => {
+            PlatformEvent::Resumed { viewport } => {
+                println!("resumed: {viewport:?}");
+            }
+
+            PlatformEvent::Resized { viewport } => {
+                println!("resized: {viewport:?}");
+            }
+
+            PlatformEvent::ScaleFactorChanged { viewport } => {
                 println!(
-                    "resumed: {viewport:?}"
+                    "scale factor changed: {viewport:?}"
                 );
             }
 
-            PlatformEvent::Resized {
-                viewport,
-            } => {
-                println!(
-                    "resized: {viewport:?}"
-                );
-            }
-
-            PlatformEvent::ScaleFactorChanged {
-                viewport,
-            } => {
-                println!(
-                    "scale factor changed: \
-                     {viewport:?}"
-                );
-            }
-
-            PlatformEvent::Focused(
-                focused,
-            ) => {
-                println!(
-                    "focused: {focused}"
-                );
+            PlatformEvent::Focused(focused) => {
+                println!("focused: {focused}");
             }
 
             PlatformEvent::RedrawRequested => {}
 
             PlatformEvent::CloseRequested => {
-                println!(
-                    "close requested"
-                );
+                println!("close requested");
             }
         }
     }
@@ -106,75 +85,40 @@ for ExampleApplication
     ) {
         display_list.push(
             DrawCommand::Clear {
-                color: self
-                    .theme
-                    .colors
-                    .background,
+                color: self.theme.colors.background,
             },
         );
 
-        let foreground = VStack::new()
-            .gap(
-                StackGap::Large,
-            )
-            .alignment(
-                StackAlignment::Center,
-            )
-            .distribution(
-                StackDistribution::Center,
-            )
+        let card_content = VStack::new()
+            .gap(StackGap::Large)
+            .alignment(StackAlignment::Center)
+            .distribution(StackDistribution::Center)
             .child(
                 Rectangle::new()
-                    .color(
-                        RectangleColor::Accent,
-                    )
-                    .frame(
-                        220.0,
-                        70.0,
-                    ),
+                    .color(RectangleColor::Accent)
+                    .frame(220.0, 70.0),
             )
-            .child(
-                Divider::new(),
-            )
+            .child(Divider::new())
             .child(
                 Rectangle::new()
                     .color(
                         RectangleColor::Destructive,
                     )
-                    .frame(
-                        160.0,
-                        60.0,
-                    ),
+                    .frame(160.0, 60.0),
             );
 
-        let card = ZStack::new()
-            .alignment(
-                ZStackAlignment::Center,
-            )
-            .child(
+        let card = Background::new()
+            .background(
                 Rectangle::new()
                     .color(
                         RectangleColor::ElevatedSurface,
-                    )
-                    .frame(
-                        380.0,
-                        260.0,
                     ),
             )
-            .child(
-                foreground.frame(
-                    280.0,
-                    190.0,
-                ),
-            );
+            .content(card_content);
 
-        let content = VStack::new()
-            .alignment(
-                StackAlignment::Center,
-            )
-            .distribution(
-                StackDistribution::Center,
-            )
+        let root = VStack::new()
+            .alignment(StackAlignment::Center)
+            .distribution(StackDistribution::Center)
             .child(
                 card.frame(
                     380.0,
@@ -182,49 +126,35 @@ for ExampleApplication
                 ),
             );
 
-        let mut context =
-            PaintContext {
-                display_list,
+        let mut context = PaintContext {
+            display_list,
+            theme: &self.theme,
+            typography: &self.typography,
+        };
 
-                theme:
-                &self.theme,
-
-                typography:
-                &self.typography,
-            };
-
-        content.paint(
+        root.paint(
             viewport.logical_bounds(),
             &mut context,
         );
     }
 }
 
-fn main(
-) -> Result<
-    (),
-    Box<dyn std::error::Error>,
-> {
-    let application =
-        ExampleApplication::new();
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let application = ExampleApplication::new();
 
-    let backend =
-        LinuxBackend::new(
-            application,
-
-            WindowConfig {
-                title: String::from(
-                    "ViewKit ZStack Example",
-                ),
-
-                size: Size::new(
-                    720.0,
-                    520.0,
-                ),
-
-                resizable: true,
-            },
-        );
+    let backend = LinuxBackend::new(
+        application,
+        WindowConfig {
+            title: String::from(
+                "ViewKit Components Example",
+            ),
+            size: Size::new(
+                720.0,
+                520.0,
+            ),
+            resizable: true,
+        },
+    );
 
     backend.run()?;
 
