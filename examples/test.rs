@@ -2,6 +2,7 @@ use viewkit::components::{
     HStack,
     Rectangle,
     RectangleColor,
+    Spacer,
     VStack,
 };
 use viewkit::draw_command::{
@@ -14,7 +15,6 @@ use viewkit::geometry::{
 };
 use viewkit::layout::{
     StackAlignment,
-    StackDistribution,
     StackGap,
     ViewExt,
 };
@@ -42,12 +42,15 @@ impl ExampleApplication {
     fn new() -> Self {
         Self {
             theme: Theme::DEFAULT,
-            typography: Typography::DEFAULT,
+            typography:
+            Typography::DEFAULT,
         }
     }
 }
 
-impl PlatformApplication for ExampleApplication {
+impl PlatformApplication
+for ExampleApplication
+{
     fn handle_event(
         &mut self,
         event: PlatformEvent,
@@ -111,15 +114,13 @@ impl PlatformApplication for ExampleApplication {
             },
         );
 
-        let rectangle = Rectangle::new();
+        let rectangle =
+            Rectangle::new();
 
-        let horizontal_stack = HStack::new()
+        let top_row = HStack::new()
             .gap(StackGap::Medium)
             .alignment(
                 StackAlignment::Center,
-            )
-            .distribution(
-                StackDistribution::Center,
             )
             .child(
                 rectangle
@@ -127,28 +128,9 @@ impl PlatformApplication for ExampleApplication {
                         RectangleColor::Accent,
                     )
                     .frame(
-                        130.0,
-                        90.0,
+                        120.0,
+                        80.0,
                     ),
-            )
-            .child(
-                rectangle
-                    .color(
-                        RectangleColor::Destructive,
-                    )
-                    .frame(
-                        130.0,
-                        90.0,
-                    ),
-            );
-
-        let vertical_stack = VStack::new()
-            .gap(StackGap::Large)
-            .alignment(
-                StackAlignment::Center,
-            )
-            .distribution(
-                StackDistribution::Center,
             )
             .child(
                 rectangle
@@ -156,29 +138,81 @@ impl PlatformApplication for ExampleApplication {
                         RectangleColor::ElevatedSurface,
                     )
                     .frame(
-                        300.0,
-                        120.0,
+                        180.0,
+                        80.0,
+                    ),
+            );
+
+        let bottom_row = HStack::new()
+            .gap(StackGap::Medium)
+            .alignment(
+                StackAlignment::Center,
+            )
+            .child(
+                rectangle
+                    .color(
+                        RectangleColor::Destructive,
+                    )
+                    .frame(
+                        180.0,
+                        80.0,
                     ),
             )
             .child(
-                horizontal_stack.frame(
-                    300.0,
-                    90.0,
+                rectangle
+                    .color(
+                        RectangleColor::Accent,
+                    )
+                    .frame(
+                        120.0,
+                        80.0,
+                    ),
+            );
+
+        let content = VStack::new()
+            .gap(StackGap::Large)
+            .alignment(
+                StackAlignment::Center,
+            )
+            .child(
+                top_row.frame(
+                    320.0,
+                    80.0,
+                ),
+            )
+            .child(
+                Spacer::new(),
+            )
+            .child(
+                bottom_row.frame(
+                    320.0,
+                    80.0,
                 ),
             );
 
-        let mut context = PaintContext {
-            display_list,
-            theme: &self.theme,
-            typography: &self.typography,
-        };
+        let mut context =
+            PaintContext {
+                display_list,
 
-        vertical_stack.paint(
+                theme:
+                &self.theme,
+
+                typography:
+                &self.typography,
+            };
+
+        content.paint(
             Rect::new(
                 0.0,
-                0.0,
-                viewport.logical_size.width,
-                viewport.logical_size.height,
+                40.0,
+                viewport
+                    .logical_size
+                    .width,
+
+                viewport
+                    .logical_size
+                    .height
+                    - 80.0,
             ),
             &mut context,
         );
@@ -193,21 +227,23 @@ fn main(
     let application =
         ExampleApplication::new();
 
-    let backend = LinuxBackend::new(
-        application,
-        WindowConfig {
-            title: String::from(
-                "ViewKit Stack Example",
-            ),
+    let backend =
+        LinuxBackend::new(
+            application,
 
-            size: Size::new(
-                720.0,
-                520.0,
-            ),
+            WindowConfig {
+                title: String::from(
+                    "ViewKit Spacer Example",
+                ),
 
-            resizable: true,
-        },
-    );
+                size: Size::new(
+                    720.0,
+                    520.0,
+                ),
+
+                resizable: true,
+            },
+        );
 
     backend.run()?;
 
