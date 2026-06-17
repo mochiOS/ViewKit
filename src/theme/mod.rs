@@ -2,7 +2,6 @@
 
 mod color;
 mod theme;
-pub(crate) mod typography;
 mod radius;
 mod spacing;
 

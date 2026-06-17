@@ -4,3 +4,5 @@ pub mod geometry;
 pub mod platform;
 pub mod renderer;
 pub mod theme;
+pub mod view;
+pub mod typography;

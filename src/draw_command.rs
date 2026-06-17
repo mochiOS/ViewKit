@@ -2,7 +2,7 @@
 
 use crate::geometry::{Point, Rect};
 use crate::theme::Color;
-use crate::theme::typography::TextStyle;
+use crate::typography::TextStyle;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum DrawCommand {
