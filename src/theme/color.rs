@@ -65,6 +65,18 @@ impl Color {
         )
     }
 
+    pub const fn with_alpha(
+        self,
+        alpha: u8,
+    ) -> Self {
+        Self::rgba(
+            self.red,
+            self.green,
+            self.blue,
+            alpha,
+        )
+    }
+
     pub const TRANSPARENT: Self = Self::rgba(0, 0, 0, 0);
     pub const BLACK: Self = Self::rgb(0, 0, 0);
     pub const WHITE: Self = Self::rgb(255, 255, 255);
