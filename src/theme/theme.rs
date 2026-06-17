@@ -34,4 +34,5 @@ impl Theme {
         radius: RadiusTokens::DEFAULT,
         spacing: SpacingTokens::DEFAULT,
     };
+    pub const DEFAULT: Self = Theme::LIGHT;
 }

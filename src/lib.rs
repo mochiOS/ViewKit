@@ -6,3 +6,4 @@ pub mod renderer;
 pub mod theme;
 pub mod view;
 pub mod typography;
+pub mod components;

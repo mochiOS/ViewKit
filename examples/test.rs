@@ -1,8 +1,12 @@
+use viewkit::components::Rectangle;
 use viewkit::draw_command::{
     DisplayList,
     DrawCommand,
 };
-use viewkit::geometry::Rect;
+use viewkit::geometry::{
+    Rect,
+    Size,
+};
 use viewkit::platform::linux::LinuxBackend;
 use viewkit::platform::{
     PlatformApplication,
@@ -11,9 +15,29 @@ use viewkit::platform::{
     WindowConfig,
 };
 use viewkit::renderer::Viewport;
-use viewkit::theme::Color;
+use viewkit::theme::{
+    Color,
+    Theme,
+};
+use viewkit::typography::Typography;
+use viewkit::view::{
+    PaintContext,
+    View,
+};
 
-struct ExampleApplication;
+struct ExampleApplication {
+    theme: Theme,
+    typography: Typography,
+}
+
+impl ExampleApplication {
+    fn new() -> Self {
+        Self {
+            theme: Theme::DEFAULT,
+            typography: Typography::DEFAULT,
+        }
+    }
+}
 
 impl PlatformApplication for ExampleApplication {
     fn handle_event(
@@ -38,9 +62,7 @@ impl PlatformApplication for ExampleApplication {
                 println!("focused: {focused}");
             }
 
-            PlatformEvent::RedrawRequested => {
-                println!("redraw requested");
-            }
+            PlatformEvent::RedrawRequested => {}
 
             PlatformEvent::CloseRequested => {
                 println!("close requested");
@@ -50,67 +72,103 @@ impl PlatformApplication for ExampleApplication {
 
     fn draw(
         &mut self,
-        _viewport: Viewport,
+        viewport: Viewport,
         display_list: &mut DisplayList,
     ) {
         display_list.push(DrawCommand::Clear {
-            color: Color::from_rgb_hex(0xf5f5f7),
+            color: self.theme.colors.background,
         });
 
-        display_list.push(DrawCommand::FillRect {
-            rect: Rect::new(
+        let mut context = PaintContext {
+            display_list,
+            theme: &self.theme,
+            typography: &self.typography,
+        };
+
+        let blue_rectangle = Rectangle::new(
+            self.theme.colors.accent,
+        );
+
+        blue_rectangle.paint(
+            Rect::new(
                 40.0,
                 40.0,
                 180.0,
                 100.0,
             ),
-            color: Color::from_rgb_hex(0x007aff),
-        });
+            &mut context,
+        );
 
-        display_list.push(DrawCommand::FillRoundedRect {
-            rect: Rect::new(
+        let green_rectangle = Rectangle::rounded(
+            Color::from_rgb_hex(0x34c759),
+            self.theme.radius.large,
+        );
+
+        green_rectangle.paint(
+            Rect::new(
                 40.0,
                 170.0,
                 240.0,
                 100.0,
             ),
-            radius: 18.0,
-            color: Color::from_rgb_hex(0x34c759),
-        });
+            &mut context,
+        );
 
-        display_list.push(DrawCommand::StrokeRoundedRect {
-            rect: Rect::new(
-                320.0,
-                40.0,
-                240.0,
-                100.0,
-            ),
-            radius: 18.0,
-            color: Color::from_rgb_hex(0xff3b30),
-            width: 4.0,
-        });
+        let centered_width = 260.0;
+        let centered_height = 120.0;
 
-        display_list.push(DrawCommand::StrokeRect {
-            rect: Rect::new(
-                320.0,
-                170.0,
-                240.0,
-                100.0,
+        let centered_x =
+            (viewport.logical_size.width - centered_width)
+                / 2.0;
+
+        let centered_y =
+            viewport.logical_size.height
+                - centered_height
+                - 40.0;
+
+        let centered_rectangle = Rectangle::rounded(
+            self.theme.colors.surface,
+            self.theme.radius.extra_large,
+        );
+
+        centered_rectangle.paint(
+            Rect::new(
+                centered_x,
+                centered_y,
+                centered_width,
+                centered_height,
             ),
-            color: Color::from_rgb_hex(0x5856d6),
-            width: 4.0,
-        });
+            &mut context,
+        );
+
+        context.display_list.push(
+            DrawCommand::StrokeRoundedRect {
+                rect: Rect::new(
+                    centered_x,
+                    centered_y,
+                    centered_width,
+                    centered_height,
+                ),
+                radius: self.theme.radius.extra_large,
+                color: self.theme.colors.border,
+                width: 2.0,
+            },
+        );
     }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let application = ExampleApplication::new();
+
     let backend = LinuxBackend::new(
-        ExampleApplication,
+        application,
         WindowConfig {
-            title: String::from("ViewKit Drawing Example"),
-            size: viewkit::geometry::Size::new(
-                640.0,
-                360.0,
+            title: String::from(
+                "ViewKit Component Example",
+            ),
+            size: Size::new(
+                720.0,
+                520.0,
             ),
             resizable: true,
         },
