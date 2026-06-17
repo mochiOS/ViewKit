@@ -1,4 +1,5 @@
 mod color;
+mod divider;
 mod radius;
 mod shadow;
 mod spacing;
@@ -7,6 +8,11 @@ mod theme;
 pub use color::{
     Color,
     ColorTokens,
+};
+
+pub use divider::{
+    DividerThickness,
+    DividerTokens,
 };
 
 pub use radius::{
@@ -21,4 +27,5 @@ pub use shadow::{
 };
 
 pub use spacing::SpacingTokens;
+
 pub use theme::Theme;

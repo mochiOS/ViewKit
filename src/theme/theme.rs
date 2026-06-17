@@ -1,6 +1,6 @@
 //! ViewKit全体の外観テーマを定義
 
-use super::{Color, ColorTokens, RadiusTokens, ShadowTokens, SpacingTokens};
+use super::{Color, ColorTokens, RadiusTokens, ShadowTokens, SpacingTokens, DividerTokens};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Theme {
@@ -8,8 +8,8 @@ pub struct Theme {
     pub radius: RadiusTokens,
     pub spacing: SpacingTokens,
     pub shadows: ShadowTokens,
+    pub divider: DividerTokens,
 }
-
 impl Theme {
     pub const LIGHT: Self = Self {
         colors: ColorTokens {
@@ -32,6 +32,7 @@ impl Theme {
         radius: RadiusTokens::DEFAULT,
         spacing: SpacingTokens::DEFAULT,
         shadows: ShadowTokens::DEFAULT,
+        divider: DividerTokens::DEFAULT,
     };
     pub const DEFAULT: Self = Theme::LIGHT;
 }

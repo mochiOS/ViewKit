@@ -1,8 +1,8 @@
 use viewkit::components::{
+    Divider,
     HStack,
     Rectangle,
     RectangleColor,
-    Spacer,
     VStack,
 };
 use viewkit::draw_command::{
@@ -129,7 +129,7 @@ for ExampleApplication
                     )
                     .frame(
                         120.0,
-                        80.0,
+                        90.0,
                     ),
             )
             .child(
@@ -139,7 +139,7 @@ for ExampleApplication
                     )
                     .frame(
                         180.0,
-                        80.0,
+                        90.0,
                     ),
             );
 
@@ -155,7 +155,7 @@ for ExampleApplication
                     )
                     .frame(
                         180.0,
-                        80.0,
+                        90.0,
                     ),
             )
             .child(
@@ -165,7 +165,7 @@ for ExampleApplication
                     )
                     .frame(
                         120.0,
-                        80.0,
+                        90.0,
                     ),
             );
 
@@ -177,16 +177,16 @@ for ExampleApplication
             .child(
                 top_row.frame(
                     320.0,
-                    80.0,
+                    90.0,
                 ),
             )
             .child(
-                Spacer::new(),
+                Divider::new(),
             )
             .child(
                 bottom_row.frame(
                     320.0,
-                    80.0,
+                    90.0,
                 ),
             );
 
@@ -203,16 +203,16 @@ for ExampleApplication
 
         content.paint(
             Rect::new(
-                0.0,
-                40.0,
+                80.0,
+                80.0,
                 viewport
                     .logical_size
-                    .width,
-
+                    .width
+                    - 160.0,
                 viewport
                     .logical_size
                     .height
-                    - 80.0,
+                    - 160.0,
             ),
             &mut context,
         );

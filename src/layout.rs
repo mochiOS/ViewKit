@@ -12,12 +12,15 @@ use ui_layout::{
     SizeStyle,
     Style,
 };
-
 use crate::geometry::{
     Point,
     Rect,
 };
-use crate::theme::SpacingTokens;
+use crate::theme::{
+    DividerThickness,
+    DividerTokens,
+    SpacingTokens,
+};
 use crate::view::{
     PaintContext,
     View,
@@ -34,7 +37,9 @@ pub enum LayoutLength {
 impl LayoutLength {
     fn to_ui_length(self) -> Length {
         match self {
-            Self::Auto => Length::Auto,
+            Self::Auto => {
+                Length::Auto
+            }
 
             Self::Fixed(value) => {
                 Length::Px(value.max(0.0))
@@ -58,10 +63,21 @@ pub enum StackAlignment {
 impl StackAlignment {
     fn to_ui_alignment(self) -> AlignItems {
         match self {
-            Self::Start => AlignItems::Start,
-            Self::Center => AlignItems::Center,
-            Self::End => AlignItems::End,
-            Self::Stretch => AlignItems::Stretch,
+            Self::Start => {
+                AlignItems::Start
+            }
+
+            Self::Center => {
+                AlignItems::Center
+            }
+
+            Self::End => {
+                AlignItems::End
+            }
+
+            Self::Stretch => {
+                AlignItems::Stretch
+            }
         }
     }
 }
@@ -83,11 +99,21 @@ pub enum StackDistribution {
 }
 
 impl StackDistribution {
-    fn to_ui_justification(self) -> JustifyContent {
+    fn to_ui_justification(
+        self,
+    ) -> JustifyContent {
         match self {
-            Self::Start => JustifyContent::Start,
-            Self::Center => JustifyContent::Center,
-            Self::End => JustifyContent::End,
+            Self::Start => {
+                JustifyContent::Start
+            }
+
+            Self::Center => {
+                JustifyContent::Center
+            }
+
+            Self::End => {
+                JustifyContent::End
+            }
 
             Self::SpaceBetween => {
                 JustifyContent::SpaceBetween
@@ -130,7 +156,9 @@ impl StackGap {
         tokens: &SpacingTokens,
     ) -> f32 {
         match self {
-            Self::None => 0.0,
+            Self::None => {
+                0.0
+            }
 
             Self::ExtraSmall => {
                 tokens.extra_small
@@ -163,6 +191,17 @@ impl StackGap {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum StackChildKind {
+    Normal,
+
+    Spacer,
+
+    Divider {
+        thickness: DividerThickness,
+    },
+}
+
 pub struct StackChild {
     view: Box<dyn View>,
 
@@ -171,6 +210,8 @@ pub struct StackChild {
 
     flex_grow: f32,
     flex_shrink: f32,
+
+    kind: StackChildKind,
 }
 
 impl StackChild {
@@ -186,6 +227,8 @@ impl StackChild {
 
             flex_grow: 0.0,
             flex_shrink: 1.0,
+
+            kind: StackChildKind::Normal,
         }
     }
 
@@ -198,6 +241,30 @@ impl StackChild {
 
             flex_grow: 1.0,
             flex_shrink: 1.0,
+
+            kind: StackChildKind::Spacer,
+        }
+    }
+
+    pub(crate) fn divider<V>(
+        view: V,
+        thickness: DividerThickness,
+    ) -> Self
+    where
+        V: View + 'static,
+    {
+        Self {
+            view: Box::new(view),
+
+            width: LayoutLength::Auto,
+            height: LayoutLength::Auto,
+
+            flex_grow: 0.0,
+            flex_shrink: 0.0,
+
+            kind: StackChildKind::Divider {
+                thickness,
+            },
         }
     }
 
@@ -255,17 +322,57 @@ impl StackChild {
         self
     }
 
-    fn layout_node(&self) -> LayoutNode {
+    fn layout_node(
+        &self,
+        direction: StackDirection,
+        bounds: Rect,
+        divider_tokens: &DividerTokens,
+    ) -> LayoutNode {
+        let mut width =
+            self.width.to_ui_length();
+
+        let mut height =
+            self.height.to_ui_length();
+
+        if let StackChildKind::Divider {
+            thickness,
+        } = self.kind
+        {
+            let thickness =
+                thickness.resolve(
+                    divider_tokens,
+                );
+
+            match direction {
+                StackDirection::Vertical => {
+                    width = Length::Px(
+                        bounds.size.width,
+                    );
+
+                    height = Length::Px(
+                        thickness,
+                    );
+                }
+
+                StackDirection::Horizontal => {
+                    width = Length::Px(
+                        thickness,
+                    );
+
+                    height = Length::Px(
+                        bounds.size.height,
+                    );
+                }
+            }
+        }
+
         LayoutNode::new(
             Style {
                 display: Display::Block,
 
                 size: SizeStyle {
-                    width:
-                    self.width.to_ui_length(),
-
-                    height:
-                    self.height.to_ui_length(),
+                    width,
+                    height,
 
                     ..Default::default()
                 },
@@ -356,6 +463,7 @@ where
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum StackDirection {
     Vertical,
+
     Horizontal,
 }
 
@@ -380,7 +488,13 @@ pub(crate) fn paint_stack(
 
     let child_nodes = children
         .iter()
-        .map(StackChild::layout_node)
+        .map(|child| {
+            child.layout_node(
+                direction,
+                bounds,
+                &context.theme.divider,
+            )
+        })
         .collect::<Vec<_>>();
 
     let flex_direction =

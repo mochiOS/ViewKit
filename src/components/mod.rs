@@ -4,12 +4,9 @@ mod spacer;
 mod vstack;
 
 pub use hstack::HStack;
-
+pub use spacer::Spacer;
+pub use vstack::VStack;
 pub use rectangle::{
     Rectangle,
     RectangleColor,
 };
-
-pub use spacer::Spacer;
-
-pub use vstack::VStack;
