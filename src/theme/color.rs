@@ -8,6 +8,7 @@ pub struct Color {
     pub alpha: u8,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ColorTokens {
     pub background: Color,
     pub surface: Color,

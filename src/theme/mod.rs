@@ -1,7 +1,7 @@
 //! スタイル全般のテーマを定義
 
-pub mod color;
+mod color;
+mod theme;
 
-pub struct Theme {
-    colors: color::ColorTokens
-}
+pub use color::{Color, ColorTokens};
+pub use theme::Theme;
