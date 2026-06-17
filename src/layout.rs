@@ -12,9 +12,11 @@ use ui_layout::{
     SizeStyle,
     Style,
 };
+
 use crate::geometry::{
     Point,
     Rect,
+    Size,
 };
 use crate::theme::{
     DividerThickness,
@@ -37,12 +39,23 @@ pub enum LayoutLength {
 impl LayoutLength {
     fn to_ui_length(self) -> Length {
         match self {
-            Self::Auto => {
-                Length::Auto
-            }
+            Self::Auto => Length::Auto,
 
             Self::Fixed(value) => {
                 Length::Px(value.max(0.0))
+            }
+        }
+    }
+
+    fn resolve_overlay(
+        self,
+        available: f32,
+    ) -> f32 {
+        match self {
+            Self::Auto => available.max(0.0),
+
+            Self::Fixed(value) => {
+                value.max(0.0)
             }
         }
     }
@@ -63,21 +76,10 @@ pub enum StackAlignment {
 impl StackAlignment {
     fn to_ui_alignment(self) -> AlignItems {
         match self {
-            Self::Start => {
-                AlignItems::Start
-            }
-
-            Self::Center => {
-                AlignItems::Center
-            }
-
-            Self::End => {
-                AlignItems::End
-            }
-
-            Self::Stretch => {
-                AlignItems::Stretch
-            }
+            Self::Start => AlignItems::Start,
+            Self::Center => AlignItems::Center,
+            Self::End => AlignItems::End,
+            Self::Stretch => AlignItems::Stretch,
         }
     }
 }
@@ -103,17 +105,13 @@ impl StackDistribution {
         self,
     ) -> JustifyContent {
         match self {
-            Self::Start => {
-                JustifyContent::Start
-            }
+            Self::Start => JustifyContent::Start,
 
             Self::Center => {
                 JustifyContent::Center
             }
 
-            Self::End => {
-                JustifyContent::End
-            }
+            Self::End => JustifyContent::End,
 
             Self::SpaceBetween => {
                 JustifyContent::SpaceBetween
@@ -156,25 +154,17 @@ impl StackGap {
         tokens: &SpacingTokens,
     ) -> f32 {
         match self {
-            Self::None => {
-                0.0
-            }
+            Self::None => 0.0,
 
             Self::ExtraSmall => {
                 tokens.extra_small
             }
 
-            Self::Small => {
-                tokens.small
-            }
+            Self::Small => tokens.small,
 
-            Self::Medium => {
-                tokens.medium
-            }
+            Self::Medium => tokens.medium,
 
-            Self::Large => {
-                tokens.large
-            }
+            Self::Large => tokens.large,
 
             Self::ExtraLarge => {
                 tokens.extra_large
@@ -195,8 +185,6 @@ impl StackGap {
 enum StackChildKind {
     Normal,
 
-    Spacer,
-
     Divider {
         thickness: DividerThickness,
     },
@@ -215,7 +203,9 @@ pub struct StackChild {
 }
 
 impl StackChild {
-    pub fn new<V>(view: V) -> Self
+    pub fn new<V>(
+        view: V,
+    ) -> Self
     where
         V: View + 'static,
     {
@@ -242,7 +232,7 @@ impl StackChild {
             flex_grow: 1.0,
             flex_shrink: 1.0,
 
-            kind: StackChildKind::Spacer,
+            kind: StackChildKind::Normal,
         }
     }
 
@@ -322,6 +312,31 @@ impl StackChild {
         self
     }
 
+    pub(crate) fn overlay_size(
+        &self,
+        available: Size,
+    ) -> Size {
+        Size::new(
+            self.width.resolve_overlay(
+                available.width,
+            ),
+            self.height.resolve_overlay(
+                available.height,
+            ),
+        )
+    }
+
+    pub(crate) fn paint(
+        &self,
+        bounds: Rect,
+        context: &mut PaintContext<'_>,
+    ) {
+        self.view.paint(
+            bounds,
+            context,
+        );
+    }
+
     fn layout_node(
         &self,
         direction: StackDirection,
@@ -338,10 +353,9 @@ impl StackChild {
             thickness,
         } = self.kind
         {
-            let thickness =
-                thickness.resolve(
-                    divider_tokens,
-                );
+            let thickness = thickness.resolve(
+                divider_tokens,
+            );
 
             match direction {
                 StackDirection::Vertical => {
@@ -571,7 +585,7 @@ pub(crate) fn paint_stack(
             continue;
         };
 
-        child.view.paint(
+        child.paint(
             child_bounds,
             context,
         );
