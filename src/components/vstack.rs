@@ -3,7 +3,7 @@
 use crate::geometry::Rect;
 use crate::layout::{
     paint_stack,
-    IntoStackChild,
+    IntoStackChildren,
     StackAlignment,
     StackChild,
     StackDirection,
@@ -26,14 +26,9 @@ impl Default for VStack {
     fn default() -> Self {
         Self {
             children: Vec::new(),
-
             gap: StackGap::Medium,
-
-            alignment:
-            StackAlignment::Center,
-
-            distribution:
-            StackDistribution::Start,
+            alignment: StackAlignment::Center,
+            distribution: StackDistribution::Start,
         }
     }
 }
@@ -48,10 +43,10 @@ impl VStack {
         child: C,
     ) -> Self
     where
-        C: IntoStackChild,
+        C: IntoStackChildren,
     {
-        self.children.push(
-            child.into_stack_child(),
+        self.children.extend(
+            child.into_stack_children(),
         );
 
         self
@@ -59,20 +54,16 @@ impl VStack {
 
     pub fn children<C>(
         mut self,
-        children: impl IntoIterator<
-            Item = C,
-        >,
+        children: impl IntoIterator<Item = C>,
     ) -> Self
     where
-        C: IntoStackChild,
+        C: IntoStackChildren,
     {
-        self.children.extend(
-            children
-                .into_iter()
-                .map(
-                    IntoStackChild::into_stack_child,
-                ),
-        );
+        for child in children {
+            self.children.extend(
+                child.into_stack_children(),
+            );
+        }
 
         self
     }

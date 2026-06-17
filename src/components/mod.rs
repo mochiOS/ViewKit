@@ -6,6 +6,7 @@ mod divider;
 mod zstack;
 mod background;
 mod overlay;
+mod group;
 
 pub use hstack::HStack;
 pub use spacer::Spacer;
@@ -14,6 +15,8 @@ pub use divider::Divider;
 pub use zstack::{ZStack, ZStackAlignment};
 pub use background::Background;
 pub use overlay::Overlay;
+pub use group::Group;
+
 pub use rectangle::{
     Rectangle,
     RectangleColor,

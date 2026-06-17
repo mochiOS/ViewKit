@@ -432,6 +432,25 @@ where
     }
 }
 
+pub trait IntoStackChildren {
+    fn into_stack_children(
+        self,
+    ) -> Vec<StackChild>;
+}
+
+impl<T> IntoStackChildren for T
+where
+    T: IntoStackChild,
+{
+    fn into_stack_children(
+        self,
+    ) -> Vec<StackChild> {
+        vec![
+            self.into_stack_child(),
+        ]
+    }
+}
+
 pub trait ViewExt:
 View + Sized + 'static
 {

@@ -1,11 +1,10 @@
 use viewkit::components::{
     Background,
     Divider,
-    Overlay,
+    Group,
     Rectangle,
     RectangleColor,
     VStack,
-    ZStackAlignment,
 };
 use viewkit::draw_command::{
     DisplayList,
@@ -57,13 +56,17 @@ impl PlatformApplication for ExampleApplication {
             PlatformEvent::Resumed {
                 viewport,
             } => {
-                println!("resumed: {viewport:?}");
+                println!(
+                    "resumed: {viewport:?}"
+                );
             }
 
             PlatformEvent::Resized {
                 viewport,
             } => {
-                println!("resized: {viewport:?}");
+                println!(
+                    "resized: {viewport:?}"
+                );
             }
 
             PlatformEvent::ScaleFactorChanged {
@@ -77,13 +80,17 @@ impl PlatformApplication for ExampleApplication {
             PlatformEvent::Focused(
                 focused,
             ) => {
-                println!("focused: {focused}");
+                println!(
+                    "focused: {focused}"
+                );
             }
 
             PlatformEvent::RedrawRequested => {}
 
             PlatformEvent::CloseRequested => {
-                println!("close requested");
+                println!(
+                    "close requested"
+                );
             }
         }
     }
@@ -102,14 +109,7 @@ impl PlatformApplication for ExampleApplication {
             },
         );
 
-        let card_content = VStack::new()
-            .gap(StackGap::Large)
-            .alignment(
-                StackAlignment::Center,
-            )
-            .distribution(
-                StackDistribution::Center,
-            )
+        let grouped_content = Group::new()
             .child(
                 Rectangle::new()
                     .color(
@@ -129,9 +129,33 @@ impl PlatformApplication for ExampleApplication {
                         RectangleColor::Destructive,
                     )
                     .frame(
-                        160.0,
+                        180.0,
                         60.0,
                     ),
+            )
+            .child(
+                Rectangle::new()
+                    .color(
+                        RectangleColor::Accent,
+                    )
+                    .frame(
+                        140.0,
+                        50.0,
+                    ),
+            );
+
+        let card_content = VStack::new()
+            .gap(
+                StackGap::Large,
+            )
+            .alignment(
+                StackAlignment::Center,
+            )
+            .distribution(
+                StackDistribution::Center,
+            )
+            .child(
+                grouped_content,
             );
 
         let card = Background::new()
@@ -145,23 +169,6 @@ impl PlatformApplication for ExampleApplication {
                 card_content,
             );
 
-        let card_with_overlay =
-            Overlay::new()
-                .content(card)
-                .overlay(
-                    Rectangle::new()
-                        .color(
-                            RectangleColor::Accent,
-                        )
-                        .frame(
-                            100.0,
-                            44.0,
-                        ),
-                )
-                .alignment(
-                    ZStackAlignment::TopTrailing,
-                );
-
         let root = VStack::new()
             .alignment(
                 StackAlignment::Center,
@@ -170,9 +177,9 @@ impl PlatformApplication for ExampleApplication {
                 StackDistribution::Center,
             )
             .child(
-                card_with_overlay.frame(
+                card.frame(
                     380.0,
-                    260.0,
+                    300.0,
                 ),
             );
 
@@ -189,7 +196,11 @@ impl PlatformApplication for ExampleApplication {
     }
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main(
+) -> Result<
+    (),
+    Box<dyn std::error::Error>,
+> {
     let application =
         ExampleApplication::new();
 
