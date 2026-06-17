@@ -35,3 +35,7 @@ thiserror = "2"
 
 [lib]
 name = "viewkit"
+
+[[example]]
+name = "test"
+path = "examples/test.rs"
