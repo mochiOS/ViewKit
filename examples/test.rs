@@ -9,12 +9,10 @@ use viewkit::draw_command::{
     DisplayList,
     DrawCommand,
 };
-use viewkit::geometry::{
-    Rect,
-    Size,
-};
+use viewkit::geometry::Size;
 use viewkit::layout::{
     StackAlignment,
+    StackDistribution,
     StackGap,
     ViewExt,
 };
@@ -42,15 +40,12 @@ impl ExampleApplication {
     fn new() -> Self {
         Self {
             theme: Theme::DEFAULT,
-            typography:
-            Typography::DEFAULT,
+            typography: Typography::DEFAULT,
         }
     }
 }
 
-impl PlatformApplication
-for ExampleApplication
-{
+impl PlatformApplication for ExampleApplication {
     fn handle_event(
         &mut self,
         event: PlatformEvent,
@@ -60,42 +55,33 @@ for ExampleApplication
             PlatformEvent::Resumed {
                 viewport,
             } => {
-                println!(
-                    "resumed: {viewport:?}"
-                );
+                println!("resumed: {viewport:?}");
             }
 
             PlatformEvent::Resized {
                 viewport,
             } => {
-                println!(
-                    "resized: {viewport:?}"
-                );
+                println!("resized: {viewport:?}");
             }
 
             PlatformEvent::ScaleFactorChanged {
                 viewport,
             } => {
                 println!(
-                    "scale factor changed: \
-                     {viewport:?}"
+                    "scale factor changed: {viewport:?}"
                 );
             }
 
             PlatformEvent::Focused(
                 focused,
             ) => {
-                println!(
-                    "focused: {focused}"
-                );
+                println!("focused: {focused}");
             }
 
             PlatformEvent::RedrawRequested => {}
 
             PlatformEvent::CloseRequested => {
-                println!(
-                    "close requested"
-                );
+                println!("close requested");
             }
         }
     }
@@ -114,16 +100,16 @@ for ExampleApplication
             },
         );
 
-        let rectangle =
-            Rectangle::new();
-
         let top_row = HStack::new()
             .gap(StackGap::Medium)
             .alignment(
                 StackAlignment::Center,
             )
+            .distribution(
+                StackDistribution::Center,
+            )
             .child(
-                rectangle
+                Rectangle::new()
                     .color(
                         RectangleColor::Accent,
                     )
@@ -133,7 +119,7 @@ for ExampleApplication
                     ),
             )
             .child(
-                rectangle
+                Rectangle::new()
                     .color(
                         RectangleColor::ElevatedSurface,
                     )
@@ -148,8 +134,11 @@ for ExampleApplication
             .alignment(
                 StackAlignment::Center,
             )
+            .distribution(
+                StackDistribution::Center,
+            )
             .child(
-                rectangle
+                Rectangle::new()
                     .color(
                         RectangleColor::Destructive,
                     )
@@ -159,7 +148,7 @@ for ExampleApplication
                     ),
             )
             .child(
-                rectangle
+                Rectangle::new()
                     .color(
                         RectangleColor::Accent,
                     )
@@ -173,6 +162,9 @@ for ExampleApplication
             .gap(StackGap::Large)
             .alignment(
                 StackAlignment::Center,
+            )
+            .distribution(
+                StackDistribution::Center,
             )
             .child(
                 top_row.frame(
@@ -190,30 +182,14 @@ for ExampleApplication
                 ),
             );
 
-        let mut context =
-            PaintContext {
-                display_list,
-
-                theme:
-                &self.theme,
-
-                typography:
-                &self.typography,
-            };
+        let mut context = PaintContext {
+            display_list,
+            theme: &self.theme,
+            typography: &self.typography,
+        };
 
         content.paint(
-            Rect::new(
-                80.0,
-                80.0,
-                viewport
-                    .logical_size
-                    .width
-                    - 160.0,
-                viewport
-                    .logical_size
-                    .height
-                    - 160.0,
-            ),
+            viewport.logical_bounds(),
             &mut context,
         );
     }
@@ -227,23 +203,19 @@ fn main(
     let application =
         ExampleApplication::new();
 
-    let backend =
-        LinuxBackend::new(
-            application,
-
-            WindowConfig {
-                title: String::from(
-                    "ViewKit Spacer Example",
-                ),
-
-                size: Size::new(
-                    720.0,
-                    520.0,
-                ),
-
-                resizable: true,
-            },
-        );
+    let backend = LinuxBackend::new(
+        application,
+        WindowConfig {
+            title: String::from(
+                "ViewKit Divider Example",
+            ),
+            size: Size::new(
+                720.0,
+                520.0,
+            ),
+            resizable: true,
+        },
+    );
 
     backend.run()?;
 

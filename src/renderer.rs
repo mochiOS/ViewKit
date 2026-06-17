@@ -1,7 +1,10 @@
 //! 描画処理の共通インターフェースを定義
 
 use crate::draw_command::DisplayList;
-use crate::geometry::Size;
+use crate::geometry::{
+    Rect,
+    Size,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Viewport {
@@ -24,6 +27,15 @@ impl Viewport {
             physical_height,
             scale_factor,
         }
+    }
+
+    pub const fn logical_bounds(self) -> Rect {
+        Rect::new(
+            0.0,
+            0.0,
+            self.logical_size.width,
+            self.logical_size.height,
+        )
     }
 }
 
