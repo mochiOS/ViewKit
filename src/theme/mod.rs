@@ -7,3 +7,4 @@ mod spacing;
 
 pub use color::{Color, ColorTokens};
 pub use theme::Theme;
+pub use radius::CornerRadius;
