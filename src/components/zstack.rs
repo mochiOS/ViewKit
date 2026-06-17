@@ -23,6 +23,7 @@ pub enum ZStackAlignment {
 
     #[default]
     Center,
+
     Trailing,
     BottomLeading,
     Bottom,
@@ -62,27 +63,39 @@ impl ZStackAlignment {
         }
     }
 
-    fn child_origin(
+    pub(crate) fn child_origin(
         self,
         bounds: Rect,
         child_size: Size,
     ) -> Point {
         let remaining_width =
-            bounds.size.width
-                - child_size.width;
+            bounds.size.width - child_size.width;
 
         let remaining_height =
-            bounds.size.height
-                - child_size.height;
+            bounds.size.height - child_size.height;
 
         Point::new(
             bounds.origin.x
-                + remaining_width
-                * self.horizontal_factor(),
+                + remaining_width * self.horizontal_factor(),
 
             bounds.origin.y
-                + remaining_height
-                * self.vertical_factor(),
+                + remaining_height * self.vertical_factor(),
+        )
+    }
+
+    pub(crate) fn child_bounds(
+        self,
+        bounds: Rect,
+        child_size: Size,
+    ) -> Rect {
+        let origin =
+            self.child_origin(bounds, child_size);
+
+        Rect::new(
+            origin.x,
+            origin.y,
+            child_size.width,
+            child_size.height,
         )
     }
 }
@@ -96,8 +109,7 @@ impl Default for ZStack {
     fn default() -> Self {
         Self {
             children: Vec::new(),
-            alignment:
-            ZStackAlignment::Center,
+            alignment: ZStackAlignment::Center,
         }
     }
 }
@@ -123,9 +135,7 @@ impl ZStack {
 
     pub fn children<C>(
         mut self,
-        children: impl IntoIterator<
-            Item = C,
-        >,
+        children: impl IntoIterator<Item = C>,
     ) -> Self
     where
         C: IntoStackChild,
@@ -164,23 +174,16 @@ impl View for ZStack {
 
         for child in &self.children {
             let child_size =
-                child.overlay_size(
-                    bounds.size,
-                );
+                child.overlay_size(bounds.size);
 
-            let child_origin =
-                self.alignment.child_origin(
+            let child_bounds =
+                self.alignment.child_bounds(
                     bounds,
                     child_size,
                 );
 
             child.paint(
-                Rect::new(
-                    child_origin.x,
-                    child_origin.y,
-                    child_size.width,
-                    child_size.height,
-                ),
+                child_bounds,
                 context,
             );
         }

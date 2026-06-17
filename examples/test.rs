@@ -1,9 +1,11 @@
 use viewkit::components::{
     Background,
     Divider,
+    Overlay,
     Rectangle,
     RectangleColor,
     VStack,
+    ZStackAlignment,
 };
 use viewkit::draw_command::{
     DisplayList,
@@ -52,21 +54,29 @@ impl PlatformApplication for ExampleApplication {
         _window: &dyn PlatformWindow,
     ) {
         match event {
-            PlatformEvent::Resumed { viewport } => {
+            PlatformEvent::Resumed {
+                viewport,
+            } => {
                 println!("resumed: {viewport:?}");
             }
 
-            PlatformEvent::Resized { viewport } => {
+            PlatformEvent::Resized {
+                viewport,
+            } => {
                 println!("resized: {viewport:?}");
             }
 
-            PlatformEvent::ScaleFactorChanged { viewport } => {
+            PlatformEvent::ScaleFactorChanged {
+                viewport,
+            } => {
                 println!(
                     "scale factor changed: {viewport:?}"
                 );
             }
 
-            PlatformEvent::Focused(focused) => {
+            PlatformEvent::Focused(
+                focused,
+            ) => {
                 println!("focused: {focused}");
             }
 
@@ -85,26 +95,43 @@ impl PlatformApplication for ExampleApplication {
     ) {
         display_list.push(
             DrawCommand::Clear {
-                color: self.theme.colors.background,
+                color: self
+                    .theme
+                    .colors
+                    .background,
             },
         );
 
         let card_content = VStack::new()
             .gap(StackGap::Large)
-            .alignment(StackAlignment::Center)
-            .distribution(StackDistribution::Center)
+            .alignment(
+                StackAlignment::Center,
+            )
+            .distribution(
+                StackDistribution::Center,
+            )
             .child(
                 Rectangle::new()
-                    .color(RectangleColor::Accent)
-                    .frame(220.0, 70.0),
+                    .color(
+                        RectangleColor::Accent,
+                    )
+                    .frame(
+                        220.0,
+                        70.0,
+                    ),
             )
-            .child(Divider::new())
+            .child(
+                Divider::new(),
+            )
             .child(
                 Rectangle::new()
                     .color(
                         RectangleColor::Destructive,
                     )
-                    .frame(160.0, 60.0),
+                    .frame(
+                        160.0,
+                        60.0,
+                    ),
             );
 
         let card = Background::new()
@@ -114,13 +141,36 @@ impl PlatformApplication for ExampleApplication {
                         RectangleColor::ElevatedSurface,
                     ),
             )
-            .content(card_content);
+            .content(
+                card_content,
+            );
+
+        let card_with_overlay =
+            Overlay::new()
+                .content(card)
+                .overlay(
+                    Rectangle::new()
+                        .color(
+                            RectangleColor::Accent,
+                        )
+                        .frame(
+                            100.0,
+                            44.0,
+                        ),
+                )
+                .alignment(
+                    ZStackAlignment::TopTrailing,
+                );
 
         let root = VStack::new()
-            .alignment(StackAlignment::Center)
-            .distribution(StackDistribution::Center)
+            .alignment(
+                StackAlignment::Center,
+            )
+            .distribution(
+                StackDistribution::Center,
+            )
             .child(
-                card.frame(
+                card_with_overlay.frame(
                     380.0,
                     260.0,
                 ),
@@ -140,7 +190,8 @@ impl PlatformApplication for ExampleApplication {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let application = ExampleApplication::new();
+    let application =
+        ExampleApplication::new();
 
     let backend = LinuxBackend::new(
         application,
