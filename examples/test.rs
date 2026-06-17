@@ -15,10 +15,7 @@ use viewkit::platform::{
     WindowConfig,
 };
 use viewkit::renderer::Viewport;
-use viewkit::theme::{
-    Color,
-    Theme,
-};
+use viewkit::theme::Theme;
 use viewkit::typography::Typography;
 use viewkit::view::{
     PaintContext,
@@ -85,74 +82,22 @@ impl PlatformApplication for ExampleApplication {
             typography: &self.typography,
         };
 
-        let blue_rectangle = Rectangle::new(
-            self.theme.colors.accent,
-        );
+        let width = 280.0;
+        let height = 160.0;
 
-        blue_rectangle.paint(
+        let x = (viewport.logical_size.width - width) / 2.0;
+        let y = (viewport.logical_size.height - height) / 2.0;
+
+        let rectangle = Rectangle::new();
+
+        rectangle.paint(
             Rect::new(
-                40.0,
-                40.0,
-                180.0,
-                100.0,
+                x,
+                y,
+                width,
+                height,
             ),
             &mut context,
-        );
-
-        let green_rectangle = Rectangle::rounded(
-            Color::from_rgb_hex(0x34c759),
-            self.theme.radius.large,
-        );
-
-        green_rectangle.paint(
-            Rect::new(
-                40.0,
-                170.0,
-                240.0,
-                100.0,
-            ),
-            &mut context,
-        );
-
-        let centered_width = 260.0;
-        let centered_height = 120.0;
-
-        let centered_x =
-            (viewport.logical_size.width - centered_width)
-                / 2.0;
-
-        let centered_y =
-            viewport.logical_size.height
-                - centered_height
-                - 40.0;
-
-        let centered_rectangle = Rectangle::rounded(
-            self.theme.colors.surface,
-            self.theme.radius.extra_large,
-        );
-
-        centered_rectangle.paint(
-            Rect::new(
-                centered_x,
-                centered_y,
-                centered_width,
-                centered_height,
-            ),
-            &mut context,
-        );
-
-        context.display_list.push(
-            DrawCommand::StrokeRoundedRect {
-                rect: Rect::new(
-                    centered_x,
-                    centered_y,
-                    centered_width,
-                    centered_height,
-                ),
-                radius: self.theme.radius.extra_large,
-                color: self.theme.colors.border,
-                width: 2.0,
-            },
         );
     }
 }
