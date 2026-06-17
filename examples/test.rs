@@ -1,9 +1,10 @@
 use viewkit::components::{
     Divider,
-    HStack,
     Rectangle,
     RectangleColor,
     VStack,
+    ZStack,
+    ZStackAlignment,
 };
 use viewkit::draw_command::{
     DisplayList,
@@ -40,12 +41,15 @@ impl ExampleApplication {
     fn new() -> Self {
         Self {
             theme: Theme::DEFAULT,
-            typography: Typography::DEFAULT,
+            typography:
+            Typography::DEFAULT,
         }
     }
 }
 
-impl PlatformApplication for ExampleApplication {
+impl PlatformApplication
+for ExampleApplication
+{
     fn handle_event(
         &mut self,
         event: PlatformEvent,
@@ -55,33 +59,42 @@ impl PlatformApplication for ExampleApplication {
             PlatformEvent::Resumed {
                 viewport,
             } => {
-                println!("resumed: {viewport:?}");
+                println!(
+                    "resumed: {viewport:?}"
+                );
             }
 
             PlatformEvent::Resized {
                 viewport,
             } => {
-                println!("resized: {viewport:?}");
+                println!(
+                    "resized: {viewport:?}"
+                );
             }
 
             PlatformEvent::ScaleFactorChanged {
                 viewport,
             } => {
                 println!(
-                    "scale factor changed: {viewport:?}"
+                    "scale factor changed: \
+                     {viewport:?}"
                 );
             }
 
             PlatformEvent::Focused(
                 focused,
             ) => {
-                println!("focused: {focused}");
+                println!(
+                    "focused: {focused}"
+                );
             }
 
             PlatformEvent::RedrawRequested => {}
 
             PlatformEvent::CloseRequested => {
-                println!("close requested");
+                println!(
+                    "close requested"
+                );
             }
         }
     }
@@ -100,8 +113,10 @@ impl PlatformApplication for ExampleApplication {
             },
         );
 
-        let top_row = HStack::new()
-            .gap(StackGap::Medium)
+        let foreground = VStack::new()
+            .gap(
+                StackGap::Large,
+            )
             .alignment(
                 StackAlignment::Center,
             )
@@ -114,28 +129,12 @@ impl PlatformApplication for ExampleApplication {
                         RectangleColor::Accent,
                     )
                     .frame(
-                        120.0,
-                        90.0,
+                        220.0,
+                        70.0,
                     ),
             )
             .child(
-                Rectangle::new()
-                    .color(
-                        RectangleColor::ElevatedSurface,
-                    )
-                    .frame(
-                        180.0,
-                        90.0,
-                    ),
-            );
-
-        let bottom_row = HStack::new()
-            .gap(StackGap::Medium)
-            .alignment(
-                StackAlignment::Center,
-            )
-            .distribution(
-                StackDistribution::Center,
+                Divider::new(),
             )
             .child(
                 Rectangle::new()
@@ -143,23 +142,33 @@ impl PlatformApplication for ExampleApplication {
                         RectangleColor::Destructive,
                     )
                     .frame(
-                        180.0,
-                        90.0,
+                        160.0,
+                        60.0,
                     ),
+            );
+
+        let card = ZStack::new()
+            .alignment(
+                ZStackAlignment::Center,
             )
             .child(
                 Rectangle::new()
                     .color(
-                        RectangleColor::Accent,
+                        RectangleColor::ElevatedSurface,
                     )
                     .frame(
-                        120.0,
-                        90.0,
+                        380.0,
+                        260.0,
                     ),
+            )
+            .child(
+                foreground.frame(
+                    280.0,
+                    190.0,
+                ),
             );
 
         let content = VStack::new()
-            .gap(StackGap::Large)
             .alignment(
                 StackAlignment::Center,
             )
@@ -167,26 +176,22 @@ impl PlatformApplication for ExampleApplication {
                 StackDistribution::Center,
             )
             .child(
-                top_row.frame(
-                    320.0,
-                    90.0,
-                ),
-            )
-            .child(
-                Divider::new(),
-            )
-            .child(
-                bottom_row.frame(
-                    320.0,
-                    90.0,
+                card.frame(
+                    380.0,
+                    260.0,
                 ),
             );
 
-        let mut context = PaintContext {
-            display_list,
-            theme: &self.theme,
-            typography: &self.typography,
-        };
+        let mut context =
+            PaintContext {
+                display_list,
+
+                theme:
+                &self.theme,
+
+                typography:
+                &self.typography,
+            };
 
         content.paint(
             viewport.logical_bounds(),
@@ -203,19 +208,23 @@ fn main(
     let application =
         ExampleApplication::new();
 
-    let backend = LinuxBackend::new(
-        application,
-        WindowConfig {
-            title: String::from(
-                "ViewKit Divider Example",
-            ),
-            size: Size::new(
-                720.0,
-                520.0,
-            ),
-            resizable: true,
-        },
-    );
+    let backend =
+        LinuxBackend::new(
+            application,
+
+            WindowConfig {
+                title: String::from(
+                    "ViewKit ZStack Example",
+                ),
+
+                size: Size::new(
+                    720.0,
+                    520.0,
+                ),
+
+                resizable: true,
+            },
+        );
 
     backend.run()?;
 
