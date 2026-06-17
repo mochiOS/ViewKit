@@ -29,7 +29,7 @@ impl PlatformApplication for ExampleApplication {
         display_list: &mut DisplayList,
     ) {
         display_list.push(DrawCommand::Clear {
-            color: Color::from_rgb_hex(0xf5f5f7),
+            color: Color::from_rgb_hex(0x4a78c7),
         });
     }
 }
