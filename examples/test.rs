@@ -1,25 +1,23 @@
-use ui_layout::{
-    AlignItems,
-    Display,
-    FlexDirection,
-    JustifyContent,
-    LayoutEngine,
-    LayoutNode,
-    Length,
-    SizeStyle,
-    Style,
+use viewkit::components::{
+    HStack,
+    Rectangle,
+    RectangleColor,
+    VStack,
 };
-
-use viewkit::components::Rectangle;
 use viewkit::draw_command::{
     DisplayList,
     DrawCommand,
 };
 use viewkit::geometry::{
-    Point,
+    Rect,
     Size,
 };
-use viewkit::layout::border_box;
+use viewkit::layout::{
+    StackAlignment,
+    StackDistribution,
+    StackGap,
+    ViewExt,
+};
 use viewkit::platform::linux::LinuxBackend;
 use viewkit::platform::{
     PlatformApplication,
@@ -92,7 +90,9 @@ impl PlatformApplication for ExampleApplication {
             PlatformEvent::RedrawRequested => {}
 
             PlatformEvent::CloseRequested => {
-                println!("close requested");
+                println!(
+                    "close requested"
+                );
             }
         }
     }
@@ -111,74 +111,61 @@ impl PlatformApplication for ExampleApplication {
             },
         );
 
-        let rectangle_node =
-            LayoutNode::new(
-                Style {
-                    display: Display::Block,
+        let rectangle = Rectangle::new();
 
-                    size: SizeStyle {
-                        width: Length::Px(
-                            280.0,
-                        ),
-                        height: Length::Px(
-                            160.0,
-                        ),
-                        ..Default::default()
-                    },
-
-                    ..Default::default()
-                },
-            );
-
-        let mut root =
-            LayoutNode::with_children(
-                Style {
-                    display: Display::Flex {
-                        flex_direction:
-                        FlexDirection::Column,
-                    },
-
-                    size: SizeStyle {
-                        width: Length::Px(
-                            viewport
-                                .logical_size
-                                .width,
-                        ),
-                        height: Length::Px(
-                            viewport
-                                .logical_size
-                                .height,
-                        ),
-                        ..Default::default()
-                    },
-
-                    justify_content:
-                    JustifyContent::Center,
-
-                    align_items:
-                    AlignItems::Center,
-
-                    ..Default::default()
-                },
-                vec![
-                    rectangle_node,
-                ],
-            );
-
-        LayoutEngine::layout(
-            &mut root,
-            viewport.logical_size.width,
-            viewport.logical_size.height,
-        );
-
-        let Some(rectangle_bounds) =
-            border_box(
-                &root.children[0],
-                Point::new(0.0, 0.0),
+        let horizontal_stack = HStack::new()
+            .gap(StackGap::Medium)
+            .alignment(
+                StackAlignment::Center,
             )
-        else {
-            return;
-        };
+            .distribution(
+                StackDistribution::Center,
+            )
+            .child(
+                rectangle
+                    .color(
+                        RectangleColor::Accent,
+                    )
+                    .frame(
+                        130.0,
+                        90.0,
+                    ),
+            )
+            .child(
+                rectangle
+                    .color(
+                        RectangleColor::Destructive,
+                    )
+                    .frame(
+                        130.0,
+                        90.0,
+                    ),
+            );
+
+        let vertical_stack = VStack::new()
+            .gap(StackGap::Large)
+            .alignment(
+                StackAlignment::Center,
+            )
+            .distribution(
+                StackDistribution::Center,
+            )
+            .child(
+                rectangle
+                    .color(
+                        RectangleColor::ElevatedSurface,
+                    )
+                    .frame(
+                        300.0,
+                        120.0,
+                    ),
+            )
+            .child(
+                horizontal_stack.frame(
+                    300.0,
+                    90.0,
+                ),
+            );
 
         let mut context = PaintContext {
             display_list,
@@ -186,18 +173,23 @@ impl PlatformApplication for ExampleApplication {
             typography: &self.typography,
         };
 
-        let rectangle =
-            Rectangle::new();
-
-        rectangle.paint(
-            rectangle_bounds,
+        vertical_stack.paint(
+            Rect::new(
+                0.0,
+                0.0,
+                viewport.logical_size.width,
+                viewport.logical_size.height,
+            ),
             &mut context,
         );
     }
 }
 
 fn main(
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<
+    (),
+    Box<dyn std::error::Error>,
+> {
     let application =
         ExampleApplication::new();
 
@@ -205,7 +197,7 @@ fn main(
         application,
         WindowConfig {
             title: String::from(
-                "ViewKit Layout Example",
+                "ViewKit Stack Example",
             ),
 
             size: Size::new(
