@@ -22,10 +22,7 @@ use crate::typography::{
     TextAlignment,
     TextMeasurer,
 };
-use crate::view::{
-    PaintContext,
-    View,
-};
+use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 pub struct Text {
     value: String,
@@ -136,7 +133,7 @@ impl Text {
         self
     }
 
-    pub fn measure(
+    pub fn measure_text(
         &self,
         measurer:
         &mut TextMeasurer,
@@ -252,7 +249,7 @@ impl Text {
         measurer:
         &mut TextMeasurer,
     ) -> Size {
-        self.measure(
+        self.measure_text(
             measurer,
             None,
         )
@@ -280,6 +277,28 @@ impl Text {
 }
 
 impl View for Text {
+    fn measure(
+        &self,
+        constraints: Constraints,
+        context: &mut MeasureContext<'_>,
+    ) -> Size {
+        let maximum_width =
+            if constraints.maximum.width.is_finite() {
+                Some(
+                    constraints.maximum.width.max(0.0),
+                )
+            } else {
+                None
+            };
+
+        let measured = self.measure_text(
+            context.text_measurer,
+            maximum_width,
+        );
+
+        constraints.constrain(measured)
+    }
+
     fn paint(
         &self,
         bounds: Rect,

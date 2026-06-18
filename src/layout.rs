@@ -19,10 +19,7 @@ use crate::geometry::{
     Size,
 };
 use crate::theme::{DividerThickness, DividerTokens, SpacingTokens, Theme};
-use crate::view::{
-    PaintContext,
-    View,
-};
+use crate::view::{Constraints, MeasureContext, PaintContext, View};
 use crate::event::{
     EventContext,
     EventResult,
@@ -103,15 +100,10 @@ impl StackAlignment {
 pub enum StackDistribution {
     #[default]
     Start,
-
     Center,
-
     End,
-
     SpaceBetween,
-
     SpaceAround,
-
     SpaceEvenly,
 }
 
@@ -249,6 +241,45 @@ impl StackChild {
 
             kind: StackChildKind::Normal,
         }
+    }
+
+    pub(crate) fn measure(
+        &self,
+        constraints: Constraints,
+        context: &mut MeasureContext<'_>,
+    ) -> Size {
+        let measured =
+            self.view.measure(
+                constraints,
+                context,
+            );
+
+        let width = match self.width {
+            LayoutLength::Auto => {
+                measured.width
+            }
+
+            LayoutLength::Fixed(width) => {
+                width.max(0.0)
+            }
+        };
+
+        let height = match self.height {
+            LayoutLength::Auto => {
+                measured.height
+            }
+
+            LayoutLength::Fixed(height) => {
+                height.max(0.0)
+            }
+        };
+
+        constraints.constrain(
+            Size::new(
+                width,
+                height,
+            ),
+        )
     }
 
     pub(crate) fn divider<V>(

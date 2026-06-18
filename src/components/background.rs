@@ -1,7 +1,17 @@
 //! Viewの背面へ背景を配置するBackgroundを定義
 
-use crate::geometry::Rect;
+use crate::event::{
+    EventContext,
+    EventResult,
+    ViewEvent,
+};
+use crate::geometry::{
+    Rect,
+    Size,
+};
 use crate::view::{
+    Constraints,
+    MeasureContext,
     PaintContext,
     View,
 };
@@ -16,6 +26,19 @@ impl View for EmptyView {
         _bounds: Rect,
         _context: &mut PaintContext<'_>,
     ) {
+    }
+
+    fn measure(
+        &self,
+        constraints: Constraints,
+        _context: &mut MeasureContext<'_>,
+    ) -> Size {
+        constraints.constrain(
+            Size::new(
+                0.0,
+                0.0,
+            ),
+        )
     }
 }
 
@@ -89,5 +112,29 @@ where
             bounds,
             context,
         );
+    }
+
+    fn handle_event(
+        &self,
+        bounds: Rect,
+        event: &ViewEvent,
+        context: &mut EventContext<'_>,
+    ) -> EventResult {
+        self.content.handle_event(
+            bounds,
+            event,
+            context,
+        )
+    }
+
+    fn measure(
+        &self,
+        constraints: Constraints,
+        context: &mut MeasureContext<'_>,
+    ) -> Size {
+        self.content.measure(
+            constraints,
+            context,
+        )
     }
 }

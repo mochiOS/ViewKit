@@ -6,14 +6,72 @@ use crate::event::{
     EventResult,
     ViewEvent,
 };
-use crate::geometry::Rect;
+use crate::geometry::{Rect, Size};
 use crate::theme::Theme;
-use crate::typography::Typography;
+use crate::typography::{TextMeasurer, Typography};
 
 pub struct PaintContext<'a> {
     pub display_list: &'a mut DisplayList,
     pub theme: &'a Theme,
     pub typography: &'a Typography,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Constraints {
+    pub minimum: Size,
+    pub maximum: Size,
+}
+
+impl Constraints {
+    pub fn new(
+        minimum: Size,
+        maximum: Size,
+    ) -> Self {
+        Self {
+            minimum,
+            maximum,
+        }
+    }
+
+    pub fn loose(
+        maximum: Size,
+    ) -> Self {
+        Self {
+            minimum: Size::new(0.0, 0.0),
+            maximum,
+        }
+    }
+
+    pub fn tight(
+        size: Size,
+    ) -> Self {
+        Self {
+            minimum: size,
+            maximum: size,
+        }
+    }
+
+    pub fn constrain(
+        self,
+        size: Size,
+    ) -> Size {
+        Size::new(
+            size.width.clamp(
+                self.minimum.width,
+                self.maximum.width,
+            ),
+            size.height.clamp(
+                self.minimum.height,
+                self.maximum.height,
+            ),
+        )
+    }
+}
+
+pub struct MeasureContext<'a> {
+    pub theme: &'a Theme,
+    pub typography: &'a Typography,
+    pub text_measurer: &'a mut TextMeasurer,
 }
 
 pub trait View {
@@ -30,5 +88,18 @@ pub trait View {
         _context: &mut EventContext<'_>,
     ) -> EventResult {
         EventResult::Ignored
+    }
+
+    fn measure(
+        &self,
+        constraints: Constraints,
+        _context: &mut MeasureContext<'_>,
+    ) -> Size {
+        constraints.constrain(
+            Size::new(
+                0.0,
+                0.0,
+            ),
+        )
     }
 }

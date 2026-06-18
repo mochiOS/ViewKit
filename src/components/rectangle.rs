@@ -1,17 +1,14 @@
 //! 矩形コンポーネントを定義
 
 use crate::draw_command::DrawCommand;
-use crate::geometry::Rect;
+use crate::geometry::{Rect, Size};
 use crate::theme::{
     Color,
     CornerRadius,
     Shadow,
     ShadowStyle,
 };
-use crate::view::{
-    PaintContext,
-    View,
-};
+use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum RectangleColor {
@@ -143,6 +140,16 @@ impl View for Rectangle {
                 },
             );
         }
+    }
+
+    fn measure(
+        &self,
+        constraints: Constraints,
+        _context: &mut MeasureContext<'_>,
+    ) -> Size {
+        constraints.constrain(
+            Size::new(0.0, 0.0),
+        )
     }
 }
 
