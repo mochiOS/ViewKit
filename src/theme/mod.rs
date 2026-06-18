@@ -4,6 +4,7 @@ mod radius;
 mod shadow;
 mod spacing;
 mod theme;
+mod scrollbar;
 
 pub use color::{
     Color,
@@ -24,6 +25,10 @@ pub use shadow::{
     Shadow,
     ShadowStyle,
     ShadowTokens,
+};
+
+pub use scrollbar::{
+    ScrollBarTokens,
 };
 
 pub use spacing::SpacingTokens;
