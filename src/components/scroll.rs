@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::draw_command::DrawCommand;
+use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{
     Point,
     Rect,
@@ -429,6 +430,133 @@ impl View for Scroll {
         context.display_list.push(
             DrawCommand::PopClip,
         );
+    }
+
+    fn handle_event(
+        &self,
+        bounds: Rect,
+        event: &ViewEvent,
+        context: &mut EventContext<'_>,
+    ) -> EventResult {
+        let Some(content) =
+            self.content.as_ref()
+        else {
+            return EventResult::Ignored;
+        };
+
+        let content_size =
+            content.overlay_size(
+                bounds.size,
+            );
+
+        let offset =
+            self.state.clamp_offset(
+                self.axis,
+                bounds.size,
+                content_size,
+            );
+
+        let content_bounds =
+            Rect::new(
+                bounds.origin.x
+                    - offset.x,
+
+                bounds.origin.y
+                    - offset.y,
+
+                content_size.width,
+                content_size.height,
+            );
+
+        if let ViewEvent::PointerMoved {
+            position,
+        } = event
+        {
+            if !bounds.contains(
+                *position,
+            ) {
+                return content.handle_event(
+                    content_bounds,
+                    &ViewEvent::PointerLeft,
+                    context,
+                );
+            }
+        }
+
+        if !event.requires_broadcast()
+            && !event.is_inside(bounds)
+        {
+            return EventResult::Ignored;
+        }
+
+        let child_result =
+            content.handle_event(
+                content_bounds,
+                event,
+                context,
+            );
+
+        if child_result.is_consumed() {
+            return child_result;
+        }
+
+        let ViewEvent::Scroll {
+            position,
+            delta_x,
+            delta_y,
+        } = event
+        else {
+            return child_result;
+        };
+
+        if !bounds.contains(
+            *position,
+        ) {
+            return EventResult::Ignored;
+        }
+
+        let previous_offset =
+            self.state.offset();
+
+        match self.axis {
+            ScrollAxis::Horizontal => {
+                self.state.scroll_by(
+                    *delta_x,
+                    0.0,
+                );
+            }
+
+            ScrollAxis::Vertical => {
+                self.state.scroll_by(
+                    0.0,
+                    *delta_y,
+                );
+            }
+
+            ScrollAxis::Both => {
+                self.state.scroll_by(
+                    *delta_x,
+                    *delta_y,
+                );
+            }
+        }
+
+        let current_offset =
+            self.state.clamp_offset(
+                self.axis,
+                bounds.size,
+                content_size,
+            );
+
+        if current_offset
+            == previous_offset
+        {
+            return EventResult::Ignored;
+        }
+
+        context.request_redraw();
+
+        EventResult::Consumed
     }
 }
 
