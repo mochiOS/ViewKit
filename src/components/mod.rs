@@ -10,6 +10,7 @@ mod group;
 mod scroll;
 mod button;
 mod text;
+mod padding;
 
 pub use hstack::HStack;
 pub use spacer::Spacer;
@@ -20,6 +21,7 @@ pub use background::Background;
 pub use overlay::Overlay;
 pub use group::Group;
 pub use scroll::{Scroll, ScrollAxis, ScrollState};
+pub use padding::Padding;
 
 pub use rectangle::{Rectangle, RectangleColor, };
 pub use button::{Button, ButtonColor, ButtonInteractionState};

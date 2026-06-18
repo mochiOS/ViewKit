@@ -1,7 +1,3 @@
-//! 上下左右の余白を定義
-
-use crate::geometry::Size;
-
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct EdgeInsets {
     pub top: f32,
@@ -11,57 +7,91 @@ pub struct EdgeInsets {
 }
 
 impl EdgeInsets {
-    pub const ZERO: Self = Self::all(0.0);
+    pub const ZERO: Self = Self {
+        top: 0.0,
+        right: 0.0,
+        bottom: 0.0,
+        left: 0.0,
+    };
 
-    pub const fn new(
+    pub fn new(
         top: f32,
         right: f32,
         bottom: f32,
         left: f32,
     ) -> Self {
         Self {
-            top,
-            right,
-            bottom,
-            left,
+            top: finite_non_negative(top),
+            right: finite_non_negative(right),
+            bottom: finite_non_negative(bottom),
+            left: finite_non_negative(left),
         }
     }
 
-    pub const fn all(value: f32) -> Self {
-        Self::new(value, value, value, value)
+    pub fn all(
+        value: f32,
+    ) -> Self {
+        let value =
+            finite_non_negative(value);
+
+        Self {
+            top: value,
+            right: value,
+            bottom: value,
+            left: value,
+        }
     }
 
-    pub const fn symmetric(horizontal: f32, vertical: f32) -> Self {
-        Self::new(vertical, horizontal, vertical, horizontal)
+    pub fn symmetric(
+        horizontal: f32,
+        vertical: f32,
+    ) -> Self {
+        let horizontal =
+            finite_non_negative(horizontal);
+
+        let vertical =
+            finite_non_negative(vertical);
+
+        Self {
+            top: vertical,
+            right: horizontal,
+            bottom: vertical,
+            left: horizontal,
+        }
     }
 
-    pub const fn horizontal(value: f32) -> Self {
-        Self::symmetric(value, 0.0)
+    pub fn horizontal(
+        self,
+    ) -> f32 {
+        finite_non_negative(self.left)
+            + finite_non_negative(self.right)
     }
 
-    pub const fn vertical(value: f32) -> Self {
-        Self::symmetric(0.0, value)
+    pub fn vertical(
+        self,
+    ) -> f32 {
+        finite_non_negative(self.top)
+            + finite_non_negative(self.bottom)
     }
 
-    pub const fn horizontal_sum(self) -> f32 {
-        self.left + self.right
-    }
-
-    pub const fn vertical_sum(self) -> f32 {
-        self.top + self.bottom
-    }
-
-    pub fn inset_size(self, size: Size) -> Size {
-        Size::new(
-            (size.width - self.horizontal_sum()).max(0.0),
-            (size.height - self.vertical_sum()).max(0.0),
+    pub fn sanitized(
+        self,
+    ) -> Self {
+        Self::new(
+            self.top,
+            self.right,
+            self.bottom,
+            self.left,
         )
     }
+}
 
-    pub fn outset_size(self, size: Size) -> Size {
-        Size::new(
-            size.width + self.horizontal_sum(),
-            size.height + self.vertical_sum(),
-        )
+fn finite_non_negative(
+    value: f32,
+) -> f32 {
+    if value.is_finite() {
+        value.max(0.0)
+    } else {
+        0.0
     }
 }
