@@ -1,6 +1,5 @@
 use viewkit::components::{
     Rectangle,
-    RectangleColor,
     Text,
     VStack,
     ZStack,
@@ -24,10 +23,7 @@ use viewkit::platform::{
     WindowConfig,
 };
 use viewkit::renderer::Viewport;
-use viewkit::theme::{
-    Color,
-    Theme,
-};
+use viewkit::theme::Theme;
 use viewkit::typography::Typography;
 use viewkit::view::{
     PaintContext,
@@ -61,19 +57,12 @@ impl ExampleApplication {
                     猫ははちゃめちゃに可愛く、すべてが愛らしい存在です。\
                     どちらも日々の疲れを溶かし、世界を少しだけ優しくしてくれる尊い宝です。尊...",
                 )
-                    .font_size(
-                        12.0,
-                    )
                     .line_height(
                         36.0,
                     )
                     .weight(
                         600,
                     )
-                    .frame(
-                        100.0,
-                        36.0,
-                    ),
             );
 
         VStack::new()

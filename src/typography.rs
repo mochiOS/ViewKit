@@ -1,5 +1,67 @@
 //! 文字スタイルを定義
 
+use cosmic_text::{
+    Align,
+    FontSystem,
+};
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TextAlignment {
+    #[default]
+    Start,
+    Center,
+    End,
+    Justified,
+}
+
+impl TextAlignment {
+    pub(crate) fn to_cosmic(
+        self,
+    ) -> Option<Align> {
+        match self {
+            // Noneは通常の行列配置
+            Self::Start => None,
+
+            Self::Center => {
+                Some(Align::Center)
+            }
+
+            Self::End => {
+                Some(Align::End)
+            }
+
+            Self::Justified => {
+                Some(Align::Justified)
+            }
+        }
+    }
+}
+
+pub struct TextMeasurer {
+    font_system: FontSystem,
+}
+
+impl Default for TextMeasurer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TextMeasurer {
+    pub fn new() -> Self {
+        Self {
+            font_system:
+            FontSystem::new(),
+        }
+    }
+
+    pub(crate) fn font_system_mut(
+        &mut self,
+    ) -> &mut FontSystem {
+        &mut self.font_system
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FontFamily {
     Sans,

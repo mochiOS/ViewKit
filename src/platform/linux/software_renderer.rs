@@ -856,7 +856,9 @@ fn draw_text_command(
         command.text.as_str(),
         &attrs,
         Shaping::Advanced,
-        None,
+        command
+            .alignment
+            .to_cosmic(),
     );
 
     let text_color =

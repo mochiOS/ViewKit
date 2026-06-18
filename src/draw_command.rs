@@ -2,7 +2,7 @@
 
 use crate::geometry::{Point, Rect};
 use crate::theme::Color;
-use crate::typography::TextStyle;
+use crate::typography::{TextAlignment, TextStyle};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum DrawCommand {
@@ -59,6 +59,7 @@ pub struct TextCommand {
     pub font_size: f32,
     pub line_height: f32,
     pub weight: u16,
+    pub alignment: TextAlignment,
 
     pub color: Color,
 }
