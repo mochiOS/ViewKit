@@ -100,7 +100,8 @@ impl PlatformApplication for ExampleApplication {
                 println!(
                     "close requested"
                 );
-            }
+            },
+            PlatformEvent::PointerMoved { .. } | PlatformEvent::PointerButton { .. } | PlatformEvent::PointerLeft => todo!()
         }
     }
 

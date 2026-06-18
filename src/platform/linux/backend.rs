@@ -1,9 +1,14 @@
+//! winitを使用したLinux/Waylandバックエンド
+
 use super::super::{
+    ButtonState,
     PlatformApplication,
     PlatformEvent,
     PlatformWindow,
+    PointerButton,
     WindowConfig,
 };
+
 use crate::draw_command::DisplayList;
 use crate::geometry::Size;
 use crate::platform::linux::SoftwareRenderer;
@@ -11,11 +16,15 @@ use crate::renderer::{
     Renderer,
     Viewport,
 };
+
 use softbuffer::Context;
+
 use std::rc::Rc;
+
 use winit::application::ApplicationHandler;
 use winit::dpi::{
     LogicalSize,
+    PhysicalPosition,
     PhysicalSize,
 };
 use winit::error::{
@@ -23,6 +32,8 @@ use winit::error::{
     OsError,
 };
 use winit::event::{
+    ElementState,
+    MouseButton,
     MouseScrollDelta,
     WindowEvent,
 };
@@ -38,6 +49,9 @@ use winit::window::{
 };
 
 const LINE_SCROLL_PIXELS: f32 = 40.0;
+
+const BACK_MOUSE_BUTTON_ID: u16 = 4;
+const FORWARD_MOUSE_BUTTON_ID: u16 = 5;
 
 #[derive(Debug, thiserror::Error)]
 pub enum LinuxBackendError {
@@ -188,6 +202,82 @@ where
             window.request_redraw();
         }
     }
+
+    fn resize_renderer(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        viewport: Viewport,
+    ) -> bool {
+        let Some(renderer) =
+            self.renderer.as_mut()
+        else {
+            return true;
+        };
+
+        if let Err(error) =
+            renderer.resize(
+                viewport,
+            )
+        {
+            self.runtime_error = Some(
+                LinuxBackendError::Renderer(
+                    error,
+                ),
+            );
+
+            event_loop.exit();
+
+            return false;
+        }
+
+        true
+    }
+
+    fn render(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+    ) {
+        let Some(window) =
+            self.window.as_ref()
+        else {
+            return;
+        };
+
+        let viewport =
+            viewport_from_window(
+                window.as_ref(),
+            );
+
+        let mut display_list =
+            DisplayList::new();
+
+        self.application.draw(
+            viewport,
+            &mut display_list,
+        );
+
+        window.pre_present_notify();
+
+        let Some(renderer) =
+            self.renderer.as_mut()
+        else {
+            return;
+        };
+
+        if let Err(error) =
+            renderer.render(
+                &display_list,
+            )
+        {
+            self.runtime_error = Some(
+                LinuxBackendError::Renderer(
+                    error,
+                ),
+            );
+
+            event_loop.exit();
+        }
+    }
 }
 
 impl<A> ApplicationHandler
@@ -316,9 +406,7 @@ where
             self.window
                 .as_ref()
                 .map(
-                    |window| {
-                        window.id()
-                    },
+                    |window| window.id(),
                 )
         else {
             return;
@@ -333,8 +421,7 @@ where
         match event {
             WindowEvent::CloseRequested => {
                 self.emit(
-                    PlatformEvent::
-                    CloseRequested,
+                    PlatformEvent::CloseRequested,
                 );
 
                 event_loop.exit();
@@ -360,26 +447,11 @@ where
                         scale_factor,
                     );
 
-                if let Some(renderer) =
-                    self.renderer.as_mut()
-                {
-                    if let Err(error) =
-                        renderer.resize(
-                            viewport,
-                        )
-                    {
-                        self.runtime_error =
-                            Some(
-                                LinuxBackendError::
-                                Renderer(
-                                    error,
-                                ),
-                            );
-
-                        event_loop.exit();
-
-                        return;
-                    }
+                if !self.resize_renderer(
+                    event_loop,
+                    viewport,
+                ) {
+                    return;
                 }
 
                 self.emit(
@@ -414,26 +486,11 @@ where
                         scale_factor,
                     );
 
-                if let Some(renderer) =
-                    self.renderer.as_mut()
-                {
-                    if let Err(error) =
-                        renderer.resize(
-                            viewport,
-                        )
-                    {
-                        self.runtime_error =
-                            Some(
-                                LinuxBackendError::
-                                Renderer(
-                                    error,
-                                ),
-                            );
-
-                        event_loop.exit();
-
-                        return;
-                    }
+                if !self.resize_renderer(
+                    event_loop,
+                    viewport,
+                ) {
+                    return;
                 }
 
                 self.emit(
@@ -454,6 +511,69 @@ where
                         focused,
                     ),
                 );
+            }
+
+            WindowEvent::CursorMoved {
+                position,
+                ..
+            } => {
+                let scale_factor =
+                    self.window
+                        .as_ref()
+                        .map(
+                            |window| {
+                                window
+                                    .scale_factor()
+                            },
+                        )
+                        .unwrap_or(1.0);
+
+                let position =
+                    physical_position_to_logical(
+                        position,
+                        scale_factor,
+                    );
+
+                self.emit(
+                    PlatformEvent::PointerMoved {
+                        x: position.0,
+                        y: position.1,
+                    },
+                );
+
+                self.request_redraw();
+            }
+
+            WindowEvent::CursorLeft {
+                ..
+            } => {
+                self.emit(
+                    PlatformEvent::PointerLeft,
+                );
+
+                self.request_redraw();
+            }
+
+            WindowEvent::MouseInput {
+                state,
+                button,
+                ..
+            } => {
+                self.emit(
+                    PlatformEvent::PointerButton {
+                        button:
+                        convert_mouse_button(
+                            button,
+                        ),
+
+                        state:
+                        convert_button_state(
+                            state,
+                        ),
+                    },
+                );
+
+                self.request_redraw();
             }
 
             WindowEvent::MouseWheel {
@@ -489,60 +609,16 @@ where
                 self.request_redraw();
             }
 
-            WindowEvent::
-            RedrawRequested =>
-                {
-                    self.emit(
-                        PlatformEvent::
-                        RedrawRequested,
-                    );
+            WindowEvent::RedrawRequested => {
+                self.emit(
+                    PlatformEvent::
+                    RedrawRequested,
+                );
 
-                    let Some(window) =
-                        self.window.as_ref()
-                    else {
-                        return;
-                    };
-
-                    let viewport =
-                        viewport_from_window(
-                            window.as_ref(),
-                        );
-
-                    let mut display_list =
-                        DisplayList::new();
-
-                    self.application.draw(
-                        viewport,
-                        &mut display_list,
-                    );
-
-                    window.pre_present_notify();
-
-                    let result =
-                        self.renderer
-                            .as_mut()
-                            .map(
-                                |renderer| {
-                                    renderer.render(
-                                        &display_list,
-                                    )
-                                },
-                            );
-
-                    if let Some(Err(error)) =
-                        result
-                    {
-                        self.runtime_error =
-                            Some(
-                                LinuxBackendError::
-                                Renderer(
-                                    error,
-                                ),
-                            );
-
-                        event_loop.exit();
-                    }
-                }
+                self.render(
+                    event_loop,
+                );
+            }
 
             _ => {}
         }
@@ -589,6 +665,26 @@ fn viewport_from_physical(
     )
 }
 
+fn physical_position_to_logical(
+    position: PhysicalPosition<f64>,
+    scale_factor: f64,
+) -> (f32, f32) {
+    let scale_factor =
+        valid_scale_factor(
+            scale_factor,
+        );
+
+    let logical_position =
+        position.to_logical::<f64>(
+            scale_factor,
+        );
+
+    (
+        logical_position.x as f32,
+        logical_position.y as f32,
+    )
+}
+
 fn scroll_delta_to_logical(
     delta: MouseScrollDelta,
     scale_factor: f64,
@@ -597,12 +693,10 @@ fn scroll_delta_to_logical(
         MouseScrollDelta::LineDelta(
             x,
             y,
-        ) => {
-            (
-                x * LINE_SCROLL_PIXELS,
-                y * LINE_SCROLL_PIXELS,
-            )
-        }
+        ) => (
+            x * LINE_SCROLL_PIXELS,
+            y * LINE_SCROLL_PIXELS,
+        ),
 
         MouseScrollDelta::PixelDelta(
             position,
@@ -619,6 +713,56 @@ fn scroll_delta_to_logical(
                 position.y as f32
                     / scale_factor,
             )
+        }
+    }
+}
+
+fn convert_mouse_button(
+    button: MouseButton,
+) -> PointerButton {
+    match button {
+        MouseButton::Left => {
+            PointerButton::Primary
+        }
+
+        MouseButton::Right => {
+            PointerButton::Secondary
+        }
+
+        MouseButton::Middle => {
+            PointerButton::Middle
+        }
+
+        MouseButton::Back => {
+            PointerButton::Other(
+                BACK_MOUSE_BUTTON_ID,
+            )
+        }
+
+        MouseButton::Forward => {
+            PointerButton::Other(
+                FORWARD_MOUSE_BUTTON_ID,
+            )
+        }
+
+        MouseButton::Other(button) => {
+            PointerButton::Other(
+                button,
+            )
+        }
+    }
+}
+
+fn convert_button_state(
+    state: ElementState,
+) -> ButtonState {
+    match state {
+        ElementState::Pressed => {
+            ButtonState::Pressed
+        }
+
+        ElementState::Released => {
+            ButtonState::Released
         }
     }
 }
