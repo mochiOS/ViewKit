@@ -1,11 +1,12 @@
 use viewkit::components::{
     Background,
-    Divider,
+    HStack,
     Rectangle,
     RectangleColor,
     Scroll,
     ScrollAxis,
     ScrollState,
+    Text,
     VStack,
 };
 use viewkit::draw_command::{
@@ -31,8 +32,12 @@ use viewkit::platform::{
     WindowConfig,
 };
 use viewkit::renderer::Viewport;
-use viewkit::theme::Theme;
+use viewkit::theme::{
+    Color,
+    Theme,
+};
 use viewkit::typography::{
+    TextAlignment,
     TextMeasurer,
     Typography,
 };
@@ -49,7 +54,10 @@ struct ExampleApplication {
     event_dispatcher:
         EventDispatcher,
 
-    scroll_state:
+    left_scroll_state:
+        ScrollState,
+
+    right_scroll_state:
         ScrollState,
 }
 
@@ -68,117 +76,330 @@ impl ExampleApplication {
             event_dispatcher:
             EventDispatcher::new(),
 
-            scroll_state:
+            left_scroll_state:
+            ScrollState::new(),
+
+            right_scroll_state:
             ScrollState::new(),
         }
     }
 
-    fn build_root(
+    fn build_left_content(
         &self,
     ) -> VStack {
-        let scroll_content =
-            VStack::new()
-                .gap(
-                    StackGap::Large,
+        VStack::new()
+            .gap(
+                StackGap::Large,
+            )
+            .alignment(
+                StackAlignment::Center,
+            )
+            .distribution(
+                StackDistribution::Start,
+            )
+            .child(
+                Text::new(
+                    "猫による業務報告",
                 )
-                .alignment(
-                    StackAlignment::Center,
+                    .font_size(22.0)
+                    .line_height(32.0)
+                    .weight(700)
+                    .alignment(
+                        TextAlignment::Center,
+                    )
+                    .color(
+                        Color::BLACK,
+                    )
+                    .frame(
+                        250.0,
+                        64.0,
+                    ),
+            )
+            .child(
+                Text::new(
+                    "午前10時、マウスカーソルを捕獲しようとしました。\
+                     画面の中にいたので鑑賞できず失敗しました。\
+                     次回はマウスを狙います。\
+                     それは平安時代からある本来の猫の暮らし方です。",
                 )
-                .distribution(
-                    StackDistribution::Start,
+                    .font_size(16.0)
+                    .line_height(25.0)
+                    .weight(400)
+                    .alignment(
+                        TextAlignment::Start,
+                    )
+                    .color(
+                        Color::BLACK,
+                    )
+                    .frame(
+                        250.0,
+                        130.0,
+                    ),
+            )
+            .child(
+                Text::new(
+                    "昼休みは予定どおり3時間取得しました。\
+                     昼休み終了後は、昼寝の疲れを取るため休憩しました。",
                 )
-                .child(
-                    Rectangle::new()
-                        .color(
-                            RectangleColor::Accent,
-                        )
-                        .frame(
-                            320.0,
-                            120.0,
-                        ),
+                    .font_size(16.0)
+                    .line_height(25.0)
+                    .weight(400)
+                    .alignment(
+                        TextAlignment::Start,
+                    )
+                    .color(
+                        Color::BLACK,
+                    )
+                    .frame(
+                        250.0,
+                        110.0,
+                    ),
+            )
+            .child(
+                Text::new(
+                    "重大インシデントが発生しました。\
+                     ごはんの容器が空でした。\
+                     原因は人間による補充忘れと断定します。",
                 )
-                .child(
-                    Divider::new(),
+                    .font_size(16.0)
+                    .line_height(25.0)
+                    .weight(400)
+                    .alignment(
+                        TextAlignment::Start,
+                    )
+                    .color(
+                        Color::BLACK,
+                    )
+                    .frame(
+                        250.0,
+                        120.0,
+                    ),
+            )
+            .child(
+                Text::new(
+                    "明日の目標は、机から物を三つ落とすことです。\
+                     これは破壊ではなく重力の存在テストです。",
                 )
-                .child(
-                    Rectangle::new()
-                        .color(
-                            RectangleColor::Destructive,
-                        )
-                        .frame(
-                            320.0,
-                            120.0,
-                        ),
+                    .font_size(16.0)
+                    .line_height(25.0)
+                    .weight(400)
+                    .alignment(
+                        TextAlignment::Start,
+                    )
+                    .color(
+                        Color::BLACK,
+                    )
+                    .frame(
+                        250.0,
+                        110.0,
+                    ),
+            )
+            .child(
+                Text::new(
+                    "以上、猫からの報告でした。\
+                     承認には顎の下を三回なでてください。",
                 )
-                .child(
-                    Divider::new(),
-                )
-                .child(
-                    Rectangle::new()
-                        .color(
-                            RectangleColor::Accent,
-                        )
-                        .frame(
-                            320.0,
-                            120.0,
-                        ),
-                )
-                .child(
-                    Divider::new(),
-                )
-                .child(
-                    Rectangle::new()
-                        .color(
-                            RectangleColor::Destructive,
-                        )
-                        .frame(
-                            320.0,
-                            120.0,
-                        ),
-                )
-                .child(
-                    Divider::new(),
-                )
-                .child(
-                    Rectangle::new()
-                        .color(
-                            RectangleColor::Accent,
-                        )
-                        .frame(
-                            320.0,
-                            120.0,
-                        ),
-                )
-                .child(
-                    Divider::new(),
-                )
-                .child(
-                    Rectangle::new()
-                        .color(
-                            RectangleColor::Destructive,
-                        )
-                        .frame(
-                            320.0,
-                            120.0,
-                        ),
-                );
+                    .font_size(16.0)
+                    .line_height(25.0)
+                    .weight(600)
+                    .alignment(
+                        TextAlignment::Start,
+                    )
+                    .color(
+                        Color::BLACK,
+                    )
+                    .frame(
+                        250.0,
+                        100.0,
+                    ),
+            )
+    }
 
-        let scroll =
+    fn build_right_content(
+        &self,
+    ) -> VStack {
+        VStack::new()
+            .gap(
+                StackGap::Large,
+            )
+            .alignment(
+                StackAlignment::Center,
+            )
+            .distribution(
+                StackDistribution::Start,
+            )
+            .child(
+                Text::new(
+                    "日記",
+                )
+                    .font_size(22.0)
+                    .line_height(32.0)
+                    .weight(700)
+                    .alignment(
+                        TextAlignment::Center,
+                    )
+                    .color(
+                        Color::BLACK,
+                    )
+                    .frame(
+                        250.0,
+                        64.0,
+                    ),
+            )
+            .child(
+                Text::new(
+                    "バグを一つ修正しました。\
+                     その結果、新しいバグが三つ生まれました。\
+                     ソフトウェアの繁殖力は非常に高いです。",
+                )
+                    .font_size(16.0)
+                    .line_height(25.0)
+                    .weight(400)
+                    .alignment(
+                        TextAlignment::Start,
+                    )
+                    .color(
+                        Color::BLACK,
+                    )
+                    .frame(
+                        250.0,
+                        130.0,
+                    ),
+            )
+            .child(
+                Text::new(
+                    "コードを整理しようとしてリファクタリングを開始しました。\
+                     現在は、整理前のコードがどこにあったのか調査しています。",
+                )
+                    .font_size(16.0)
+                    .line_height(25.0)
+                    .weight(400)
+                    .alignment(
+                        TextAlignment::Start,
+                    )
+                    .color(
+                        Color::BLACK,
+                    )
+                    .frame(
+                        250.0,
+                        120.0,
+                    ),
+            )
+            .child(
+                Text::new(
+                    "コンパイラに怒られました。\
+                     どうやら、セミコロンを一つ忘れていたようです。\
+                     しかし、なぜセミコロンが必要なのかは理解できません。",
+                )
+                    .font_size(16.0)
+                    .line_height(25.0)
+                    .weight(400)
+                    .alignment(
+                        TextAlignment::Start,
+                    )
+                    .color(
+                        Color::BLACK,
+                    )
+                    .frame(
+                        250.0,
+                        120.0,
+                    ),
+            )
+            .child(
+                Text::new(
+                    "『fix』とコメントを書きました。",
+                )
+                    .font_size(16.0)
+                    .line_height(25.0)
+                    .weight(400)
+                    .alignment(
+                        TextAlignment::Start,
+                    )
+                    .color(
+                        Color::BLACK,
+                    )
+                    .frame(
+                        250.0,
+                        120.0,
+                    ),
+            )
+            .child(
+                Text::new(
+                    "テストはすべて成功しました。\
+                     なお、テストを実行する処理を無効にしました。",
+                )
+                    .font_size(16.0)
+                    .line_height(25.0)
+                    .weight(400)
+                    .alignment(
+                        TextAlignment::Start,
+                    )
+                    .color(
+                        Color::BLACK,
+                    )
+                    .frame(
+                        250.0,
+                        100.0,
+                    ),
+            )
+            .child(
+                Text::new(
+                    "あとがき：\
+                     地球に重力は存在しません\
+                     そう、地球に重力が存在するというのは餅の陰謀なのです！！",
+                )
+                    .font_size(16.0)
+                    .line_height(25.0)
+                    .weight(600)
+                    .alignment(
+                        TextAlignment::Start,
+                    )
+                    .color(
+                        Color::BLACK,
+                    )
+                    .frame(
+                        250.0,
+                        110.0,
+                    ),
+            )
+    }
+
+    fn build_root(
+        &self,
+    ) -> HStack {
+        let left_scroll =
             Scroll::new(
-                self.scroll_state
+                self.left_scroll_state
                     .clone(),
             )
                 .axis(
                     ScrollAxis::Vertical,
                 )
                 .content(
-                    scroll_content.frame(
-                        420.0,
-                        1040.0,
-                    ),
+                    self.build_left_content()
+                        .frame(
+                            300.0,
+                            980.0,
+                        ),
                 );
 
-        let card =
+        let right_scroll =
+            Scroll::new(
+                self.right_scroll_state
+                    .clone(),
+            )
+                .axis(
+                    ScrollAxis::Vertical,
+                )
+                .content(
+                    self.build_right_content()
+                        .frame(
+                            300.0,
+                            980.0,
+                        ),
+                );
+
+        let left_card =
             Background::new()
                 .background(
                     Rectangle::new()
@@ -188,10 +409,26 @@ impl ExampleApplication {
                         ),
                 )
                 .content(
-                    scroll,
+                    left_scroll,
                 );
 
-        VStack::new()
+        let right_card =
+            Background::new()
+                .background(
+                    Rectangle::new()
+                        .color(
+                            RectangleColor::
+                            ElevatedSurface,
+                        ),
+                )
+                .content(
+                    right_scroll,
+                );
+
+        HStack::new()
+            .gap(
+                StackGap::Large,
+            )
             .alignment(
                 StackAlignment::Center,
             )
@@ -199,9 +436,15 @@ impl ExampleApplication {
                 StackDistribution::Center,
             )
             .child(
-                card.frame(
-                    420.0,
-                    320.0,
+                left_card.frame(
+                    300.0,
+                    360.0,
+                ),
+            )
+            .child(
+                right_card.frame(
+                    300.0,
+                    360.0,
                 ),
             )
     }
@@ -352,7 +595,7 @@ fn main(
                 ),
 
                 size: Size::new(
-                    720.0,
+                    760.0,
                     520.0,
                 ),
 
