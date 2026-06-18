@@ -1,20 +1,18 @@
-//! Viewの共通インターフェースを定義
-
 use crate::draw_command::DisplayList;
 use crate::event::{
     EventContext,
     EventResult,
     ViewEvent,
 };
-use crate::geometry::{Rect, Size};
+use crate::geometry::{
+    Rect,
+    Size,
+};
 use crate::theme::Theme;
-use crate::typography::{TextMeasurer, Typography};
-
-pub struct PaintContext<'a> {
-    pub display_list: &'a mut DisplayList,
-    pub theme: &'a Theme,
-    pub typography: &'a Typography,
-}
+use crate::typography::{
+    TextMeasurer,
+    Typography,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Constraints {
@@ -42,15 +40,6 @@ impl Constraints {
         }
     }
 
-    pub fn tight(
-        size: Size,
-    ) -> Self {
-        Self {
-            minimum: size,
-            maximum: size,
-        }
-    }
-
     pub fn constrain(
         self,
         size: Size,
@@ -74,7 +63,24 @@ pub struct MeasureContext<'a> {
     pub text_measurer: &'a mut TextMeasurer,
 }
 
+pub struct PaintContext<'a> {
+    pub display_list: &'a mut DisplayList,
+    pub theme: &'a Theme,
+    pub typography: &'a Typography,
+    pub text_measurer: &'a mut TextMeasurer,
+}
+
 pub trait View {
+    fn measure(
+        &self,
+        constraints: Constraints,
+        _context: &mut MeasureContext<'_>,
+    ) -> Size {
+        constraints.constrain(
+            Size::new(0.0, 0.0),
+        )
+    }
+
     fn paint(
         &self,
         bounds: Rect,
@@ -88,18 +94,5 @@ pub trait View {
         _context: &mut EventContext<'_>,
     ) -> EventResult {
         EventResult::Ignored
-    }
-
-    fn measure(
-        &self,
-        constraints: Constraints,
-        _context: &mut MeasureContext<'_>,
-    ) -> Size {
-        constraints.constrain(
-            Size::new(
-                0.0,
-                0.0,
-            ),
-        )
     }
 }

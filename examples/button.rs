@@ -1,4 +1,10 @@
-use viewkit::components::{Button, ButtonColor, ButtonInteractionState, Text, VStack};
+use viewkit::components::{
+    Button,
+    ButtonColor,
+    ButtonInteractionState,
+    Text,
+    VStack,
+};
 use viewkit::draw_command::{
     DisplayList,
     DrawCommand,
@@ -22,8 +28,15 @@ use viewkit::platform::{
     WindowConfig,
 };
 use viewkit::renderer::Viewport;
-use viewkit::theme::{Color, Theme};
-use viewkit::typography::Typography;
+use viewkit::theme::{
+    Color,
+    Theme,
+};
+use viewkit::typography::{
+    TextAlignment,
+    TextMeasurer,
+    Typography,
+};
 use viewkit::view::{
     PaintContext,
     View,
@@ -32,10 +45,14 @@ use viewkit::view::{
 struct ExampleApplication {
     theme: Theme,
     typography: Typography,
+    text_measurer: TextMeasurer,
 
     event_dispatcher: EventDispatcher,
 
     primary_button_state:
+        ButtonInteractionState,
+
+    destructive_button_state:
         ButtonInteractionState,
 }
 
@@ -44,11 +61,15 @@ impl ExampleApplication {
         Self {
             theme: Theme::DEFAULT,
             typography: Typography::DEFAULT,
+            text_measurer: TextMeasurer::new(),
 
             event_dispatcher:
             EventDispatcher::new(),
 
             primary_button_state:
+            ButtonInteractionState::new(),
+
+            destructive_button_state:
             ButtonInteractionState::new(),
         }
     }
@@ -64,23 +85,59 @@ impl ExampleApplication {
                 )
                 .content(
                     Text::new(
-                        "プライマリーボタン",
+                        "続行",
                     )
                         .font_size(
-                            16.0,
+                            17.0,
                         )
                         .line_height(
-                            24.0,
+                            26.0,
                         )
                         .weight(
                             600,
+                        )
+                        .alignment(
+                            TextAlignment::Center,
                         )
                         .color(
                             Color::WHITE,
                         )
                         .frame(
-                            80.0,
-                            24.0,
+                            180.0,
+                            26.0,
+                        ),
+                );
+
+        let destructive_button =
+            Button::new(
+                self.destructive_button_state
+                    .clone(),
+            )
+                .color(
+                    ButtonColor::Destructive,
+                )
+                .content(
+                    Text::new(
+                        "削除",
+                    )
+                        .font_size(
+                            17.0,
+                        )
+                        .line_height(
+                            26.0,
+                        )
+                        .weight(
+                            600,
+                        )
+                        .alignment(
+                            TextAlignment::Center,
+                        )
+                        .color(
+                            Color::WHITE,
+                        )
+                        .frame(
+                            180.0,
+                            26.0,
                         ),
                 );
 
@@ -97,15 +154,19 @@ impl ExampleApplication {
             .child(
                 primary_button.frame(
                     240.0,
-                    60.0,
+                    56.0,
+                ),
+            )
+            .child(
+                destructive_button.frame(
+                    240.0,
+                    56.0,
                 ),
             )
     }
 }
 
-impl PlatformApplication
-for ExampleApplication
-{
+impl PlatformApplication for ExampleApplication {
     fn handle_event(
         &mut self,
         event: PlatformEvent,
@@ -114,31 +175,43 @@ for ExampleApplication
         let root =
             self.build_root();
 
-        let mut event_context =
-            EventContext::new(
-                &self.theme,
+        let redraw_requested = {
+            let mut context =
+                EventContext::new(
+                    &self.theme,
+                    &self.typography,
+                    &mut self.text_measurer,
+                );
+
+            self.event_dispatcher.dispatch(
+                &root,
+                window
+                    .viewport()
+                    .logical_bounds(),
+                &event,
+                &mut context,
             );
 
-        self.event_dispatcher.dispatch(
-            &root,
-            window
-                .viewport()
-                .logical_bounds(),
-            &event,
-            &mut event_context,
-        );
+            context.redraw_requested()
+        };
 
         if self.primary_button_state
             .take_clicked()
         {
             println!(
-                "primary button clicked"
+                "続行ボタンがクリックされました"
             );
         }
 
-        if event_context
-            .redraw_requested()
+        if self.destructive_button_state
+            .take_clicked()
         {
+            println!(
+                "削除ボタンがクリックされました"
+            );
+        }
+
+        if redraw_requested {
             window.request_redraw();
         }
 
@@ -163,8 +236,7 @@ for ExampleApplication
                 viewport,
             } => {
                 println!(
-                    "scale factor changed: \
-                     {viewport:?}"
+                    "scale factor changed: {viewport:?}"
                 );
             }
 
@@ -213,46 +285,38 @@ for ExampleApplication
         let root =
             self.build_root();
 
-        let mut paint_context =
+        let mut context =
             PaintContext {
                 display_list,
-
-                theme:
-                &self.theme,
-
+                theme: &self.theme,
                 typography:
                 &self.typography,
+                text_measurer:
+                &mut self.text_measurer,
             };
 
         root.paint(
             viewport.logical_bounds(),
-            &mut paint_context,
+            &mut context,
         );
     }
 }
 
-fn main(
-) -> Result<
-    (),
-    Box<dyn std::error::Error>,
-> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let application =
         ExampleApplication::new();
 
     let backend =
         LinuxBackend::new(
             application,
-
             WindowConfig {
                 title: String::from(
                     "ViewKit Button Example",
                 ),
-
                 size: Size::new(
                     720.0,
                     520.0,
                 ),
-
                 resizable: true,
             },
         );

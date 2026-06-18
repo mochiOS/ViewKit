@@ -248,36 +248,63 @@ impl StackChild {
         constraints: Constraints,
         context: &mut MeasureContext<'_>,
     ) -> Size {
+        let (
+            minimum_width,
+            maximum_width,
+        ) = resolve_axis_constraints(
+            self.width,
+            constraints.minimum.width,
+            constraints.maximum.width,
+        );
+
+        let (
+            minimum_height,
+            maximum_height,
+        ) = resolve_axis_constraints(
+            self.height,
+            constraints.minimum.height,
+            constraints.maximum.height,
+        );
+
+        let child_constraints =
+            Constraints::new(
+                Size::new(
+                    minimum_width,
+                    minimum_height,
+                ),
+                Size::new(
+                    maximum_width,
+                    maximum_height,
+                ),
+            );
+
         let measured =
             self.view.measure(
-                constraints,
+                child_constraints,
                 context,
             );
 
-        let width = match self.width {
-            LayoutLength::Auto => {
-                measured.width
-            }
-
-            LayoutLength::Fixed(width) => {
-                width.max(0.0)
-            }
-        };
-
-        let height = match self.height {
-            LayoutLength::Auto => {
-                measured.height
-            }
-
-            LayoutLength::Fixed(height) => {
-                height.max(0.0)
-            }
-        };
-
         constraints.constrain(
             Size::new(
-                width,
-                height,
+                match self.width {
+                    LayoutLength::Auto => {
+                        measured.width
+                    }
+
+                    LayoutLength::Fixed(value) => {
+                        sanitize_length(value)
+                    }
+                },
+
+                match self.height {
+                    LayoutLength::Auto => {
+                        measured.height
+                    }
+
+                    LayoutLength::Fixed(value) => {
+                        sanitize_length(value)
+                    }
+                },
             ),
         )
     }
@@ -482,40 +509,54 @@ impl StackChild {
         &self,
         direction: StackDirection,
         bounds: Rect,
+        measured_size: Size,
         divider_tokens: &DividerTokens,
     ) -> LayoutNode {
         let mut width =
-            self.width.to_ui_length();
+            measured_ui_length(
+                self.width,
+                measured_size.width,
+            );
 
         let mut height =
-            self.height.to_ui_length();
+            measured_ui_length(
+                self.height,
+                measured_size.height,
+            );
 
         if let StackChildKind::Divider {
             thickness,
         } = self.kind
         {
-            let thickness = thickness.resolve(
-                divider_tokens,
-            );
+            let thickness =
+                thickness.resolve(
+                    divider_tokens,
+                );
 
             match direction {
                 StackDirection::Vertical => {
                     width = Length::Px(
-                        bounds.size.width,
+                        bounds
+                            .size
+                            .width
+                            .max(0.0),
                     );
 
                     height = Length::Px(
-                        thickness,
+                        thickness.max(0.0),
                     );
                 }
 
                 StackDirection::Horizontal => {
                     width = Length::Px(
-                        thickness,
+                        thickness.max(0.0),
                     );
 
                     height = Length::Px(
-                        bounds.size.height,
+                        bounds
+                            .size
+                            .height
+                            .max(0.0),
                     );
                 }
             }
@@ -691,7 +732,20 @@ pub(crate) fn paint_stack(
     distribution: StackDistribution,
     context: &mut PaintContext<'_>,
 ) {
-    let child_bounds =
+    let child_bounds = {
+        let mut measure_context =
+            MeasureContext {
+                theme:
+                context.theme,
+
+                typography:
+                context.typography,
+
+                text_measurer:
+                &mut *context
+                    .text_measurer,
+            };
+
         layout_stack(
             direction,
             children,
@@ -700,7 +754,9 @@ pub(crate) fn paint_stack(
             alignment,
             distribution,
             context.theme,
-        );
+            &mut measure_context,
+        )
+    };
 
     for (
         child,
@@ -816,6 +872,7 @@ pub(crate) fn layout_stack(
     alignment: StackAlignment,
     distribution: StackDistribution,
     theme: &Theme,
+    measure_context: &mut MeasureContext<'_>,
 ) -> Vec<Rect> {
     if children.is_empty()
         || bounds.size.width <= 0.0
@@ -825,32 +882,71 @@ pub(crate) fn layout_stack(
     }
 
     let resolved_gap =
-        gap.resolve(&theme.spacing).max(0.0);
+        gap.resolve(
+            &theme.spacing,
+        )
+            .max(0.0);
 
-    let child_nodes = children
-        .iter()
-        .map(|child| {
-            child.create_layout_node(
-                direction,
-                bounds.size,
-                theme,
+    let child_constraints =
+        Constraints::loose(
+            bounds.size,
+        );
+
+    let measured_sizes: Vec<Size> =
+        children
+            .iter()
+            .map(|child| {
+                child.measure(
+                    child_constraints,
+                    measure_context,
+                )
+            })
+            .collect();
+
+    let child_nodes: Vec<LayoutNode> =
+        children
+            .iter()
+            .zip(
+                measured_sizes
+                    .iter()
+                    .copied(),
             )
-        })
-        .collect();
+            .map(
+                |(
+                     child,
+                     measured_size,
+                 )| {
+                    child.layout_node(
+                        direction,
+                        bounds,
+                        measured_size,
+                        &theme.divider,
+                    )
+                },
+            )
+            .collect();
 
     let (
         row_gap,
         column_gap,
     ) = match direction {
-        StackDirection::Horizontal => (
-            Length::Px(0.0),
-            Length::Px(resolved_gap),
-        ),
+        StackDirection::Horizontal => {
+            (
+                Length::Px(0.0),
+                Length::Px(
+                    resolved_gap,
+                ),
+            )
+        }
 
-        StackDirection::Vertical => (
-            Length::Px(resolved_gap),
-            Length::Px(0.0),
-        ),
+        StackDirection::Vertical => {
+            (
+                Length::Px(
+                    resolved_gap,
+                ),
+                Length::Px(0.0),
+            )
+        }
     };
 
     let mut root =
@@ -876,11 +972,11 @@ pub(crate) fn layout_stack(
 
                 align_items:
                 alignment
-                    .to_ui_align_items(),
+                    .to_ui_alignment(),
 
                 justify_content:
                 distribution
-                    .to_ui_justify_content(),
+                    .to_ui_justification(),
 
                 row_gap,
                 column_gap,
@@ -917,8 +1013,12 @@ pub(crate) fn layout_stack(
                 box_model.border_box;
 
             Rect::new(
-                bounds.origin.x + rect.x,
-                bounds.origin.y + rect.y,
+                bounds.origin.x
+                    + rect.x,
+
+                bounds.origin.y
+                    + rect.y,
+
                 rect.width.max(0.0),
                 rect.height.max(0.0),
             )
@@ -936,7 +1036,23 @@ pub(crate) fn handle_stack_event(
     event: &ViewEvent,
     context: &mut EventContext<'_>,
 ) -> EventResult {
-    let child_bounds =
+    let child_bounds = {
+        let theme =
+            context.theme;
+
+        let typography =
+            context.typography;
+
+        let text_measurer =
+            &mut *context.text_measurer;
+
+        let mut measure_context =
+            MeasureContext {
+                theme,
+                typography,
+                text_measurer,
+            };
+
         layout_stack(
             direction,
             children,
@@ -944,8 +1060,10 @@ pub(crate) fn handle_stack_event(
             gap,
             alignment,
             distribution,
-            context.theme(),
-        );
+            theme,
+            &mut measure_context,
+        )
+    };
 
     if event.requires_broadcast() {
         let mut result =
@@ -1004,4 +1122,68 @@ pub(crate) fn handle_stack_event(
     }
 
     EventResult::Ignored
+}
+
+fn resolve_axis_constraints(
+    length: LayoutLength,
+    minimum: f32,
+    maximum: f32,
+) -> (f32, f32) {
+    match length {
+        LayoutLength::Auto => {
+            (
+                minimum.max(0.0),
+                maximum.max(minimum),
+            )
+        }
+
+        LayoutLength::Fixed(value) => {
+            let value =
+                sanitize_length(value)
+                    .clamp(
+                        minimum.max(0.0),
+                        maximum.max(minimum),
+                    );
+
+            (
+                value,
+                value,
+            )
+        }
+    }
+}
+
+fn sanitize_length(
+    value: f32,
+) -> f32 {
+    if value.is_finite() {
+        value.max(0.0)
+    } else {
+        0.0
+    }
+}
+
+fn measured_ui_length(
+    length: LayoutLength,
+    measured: f32,
+) -> Length {
+    match length {
+        LayoutLength::Fixed(value) => {
+            Length::Px(
+                sanitize_length(value),
+            )
+        }
+
+        LayoutLength::Auto => {
+            let measured =
+                sanitize_length(measured);
+
+            if measured > 0.0 {
+                Length::Px(measured)
+            } else {
+                // 固有サイズを持たないやつはAuto
+                Length::Auto
+            }
+        }
+    }
 }

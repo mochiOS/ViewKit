@@ -1,9 +1,10 @@
 use viewkit::components::{
+    Background,
+    Padding,
     Rectangle,
+    RectangleColor,
     Text,
     VStack,
-    ZStack,
-    ZStackAlignment,
 };
 use viewkit::draw_command::{
     DisplayList,
@@ -23,8 +24,15 @@ use viewkit::platform::{
     WindowConfig,
 };
 use viewkit::renderer::Viewport;
-use viewkit::theme::Theme;
-use viewkit::typography::Typography;
+use viewkit::theme::{
+    Color,
+    Theme,
+};
+use viewkit::typography::{
+    TextAlignment,
+    TextMeasurer,
+    Typography,
+};
 use viewkit::view::{
     PaintContext,
     View,
@@ -33,6 +41,7 @@ use viewkit::view::{
 struct ExampleApplication {
     theme: Theme,
     typography: Typography,
+    text_measurer: TextMeasurer,
 }
 
 impl ExampleApplication {
@@ -40,29 +49,37 @@ impl ExampleApplication {
         Self {
             theme: Theme::DEFAULT,
             typography: Typography::DEFAULT,
+            text_measurer: TextMeasurer::new(),
         }
     }
 
     fn build_root(&self) -> VStack {
-        let labeled_rectangle = ZStack::new()
-            .alignment(
-                ZStackAlignment::Center,
-            )
-            .child(
+        let text = Text::new(
+            concat!(
+            "おもちは白く、丸く、美味く、幸福を運んでくれます。",
+            "猫ははちゃめちゃに可愛く、すべてが愛らしい。",
+            "どちらも日々の疲れを癒やす、尊い宝です。尊..."
+            ),
+        )
+            .font_size(18.0)
+            .line_height(30.0)
+            .weight(600)
+            .alignment(TextAlignment::Start)
+            .color(Color::BLACK);
+
+        let card = Background::new()
+            .background(
                 Rectangle::new()
+                    .color(
+                        RectangleColor::ElevatedSurface,
+                    ),
             )
-            .child(
-                Text::new(
-                    "おもちは白く、丸く、美味く、幸福を運んでくれます。\
-                    猫ははちゃめちゃに可愛く、すべてが愛らしい存在です。\
-                    どちらも日々の疲れを溶かし、世界を少しだけ優しくしてくれる尊い宝です。尊...",
+            .content(
+                Padding::symmetric(
+                    24.0,
+                    18.0,
                 )
-                    .line_height(
-                        36.0,
-                    )
-                    .weight(
-                        600,
-                    )
+                    .content(text),
             );
 
         VStack::new()
@@ -73,10 +90,12 @@ impl ExampleApplication {
                 StackDistribution::Center,
             )
             .child(
-                labeled_rectangle.frame(
-                    360.0,
-                    120.0,
-                ),
+                /*
+                 * 幅だけを420pxへ固定します。
+                 * 高さはTextの折り返し後の測定結果、
+                 * Padding、Backgroundの順に伝播します。
+                 */
+                card.width(420.0),
             )
     }
 }
@@ -162,6 +181,8 @@ impl PlatformApplication for ExampleApplication {
                 display_list,
                 theme: &self.theme,
                 typography: &self.typography,
+                text_measurer:
+                &mut self.text_measurer,
             };
 
         root.paint(

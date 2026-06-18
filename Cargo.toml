@@ -41,14 +41,6 @@ thiserror = "2"
 name = "viewkit"
 
 [[example]]
-name = "test"
-path = "examples/test.rs"
-
-[[example]]
-name = "scroll"
-path = "examples/scroll.rs"
-
-[[example]]
 name = "button"
 path = "examples/button.rs"
 

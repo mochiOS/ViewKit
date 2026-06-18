@@ -10,6 +10,10 @@ use crate::platform::{
     PointerButton,
 };
 use crate::theme::Theme;
+use crate::typography::{
+    TextMeasurer,
+    Typography,
+};
 use crate::view::View;
 
 #[derive(
@@ -47,7 +51,9 @@ pub enum ViewEvent {
 }
 
 impl ViewEvent {
-    pub fn position(&self) -> Option<Point> {
+    pub fn position(
+        &self,
+    ) -> Option<Point> {
         match self {
             Self::PointerMoved {
                 position,
@@ -79,21 +85,31 @@ impl ViewEvent {
         self.position()
             .map(
                 |position| {
-                    bounds.contains(position)
+                    bounds.contains(
+                        position,
+                    )
                 },
             )
             .unwrap_or(true)
     }
 
-    // TODO: ポインタキャプチャに置き換える
-    pub fn requires_broadcast(&self) -> bool {
+    // TODO: ポインターキャプチャへ置き換える
+    pub fn requires_broadcast(
+        &self,
+    ) -> bool {
         matches!(
-        self,
-        Self::PointerMoved { .. }
-            | Self::PointerReleased { .. }
-            | Self::PointerLeft
-            | Self::FocusChanged { .. }
-    )
+            self,
+            Self::PointerMoved {
+                ..
+            }
+                | Self::PointerReleased {
+                    ..
+                }
+                | Self::PointerLeft
+                | Self::FocusChanged {
+                    ..
+                }
+        )
     }
 }
 
@@ -113,7 +129,9 @@ pub enum EventResult {
 }
 
 impl EventResult {
-    pub fn is_consumed(self) -> bool {
+    pub fn is_consumed(
+        self,
+    ) -> bool {
         self == Self::Consumed
     }
 
@@ -132,34 +150,68 @@ impl EventResult {
 }
 
 pub struct EventContext<'a> {
-    theme: &'a Theme,
+    pub(crate) theme:
+        &'a Theme,
+
+    pub(crate) typography:
+        &'a Typography,
+
+    pub(crate) text_measurer:
+        &'a mut TextMeasurer,
+
     redraw_requested: bool,
 }
 
 impl<'a> EventContext<'a> {
-    pub fn new(theme: &'a Theme) -> Self {
+    pub fn new(
+        theme: &'a Theme,
+        typography: &'a Typography,
+        text_measurer:
+        &'a mut TextMeasurer,
+    ) -> Self {
         Self {
             theme,
+            typography,
+            text_measurer,
             redraw_requested: false,
         }
     }
 
-    pub fn theme(&self) -> &Theme {
+    pub fn theme(
+        &self,
+    ) -> &Theme {
         self.theme
     }
 
-    pub fn request_redraw(&mut self) {
-        self.redraw_requested = true;
+    pub fn typography(
+        &self,
+    ) -> &Typography {
+        self.typography
     }
 
-    pub fn redraw_requested(&self) -> bool {
+    pub fn request_redraw(
+        &mut self,
+    ) {
+        self.redraw_requested =
+            true;
+    }
+
+    pub fn redraw_requested(
+        &self,
+    ) -> bool {
         self.redraw_requested
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+)]
 pub struct EventDispatcher {
-    pointer_position: Option<Point>,
+    pointer_position:
+        Option<Point>,
 }
 
 impl EventDispatcher {
@@ -178,10 +230,13 @@ impl EventDispatcher {
         root: &dyn View,
         bounds: Rect,
         event: &PlatformEvent,
-        context: &mut EventContext,
+        context:
+        &mut EventContext<'_>,
     ) -> EventResult {
         let Some(view_event) =
-            self.convert_event(event)
+            self.convert_event(
+                event,
+            )
         else {
             return EventResult::Ignored;
         };
