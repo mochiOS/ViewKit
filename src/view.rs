@@ -27,7 +27,7 @@ pub trait View {
         &self,
         _bounds: Rect,
         _event: &ViewEvent,
-        _context: &mut EventContext,
+        _context: &mut EventContext<'_>,
     ) -> EventResult {
         EventResult::Ignored
     }

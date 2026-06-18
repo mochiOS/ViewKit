@@ -1,7 +1,13 @@
 //! 子Viewを縦方向に配置するVStackを定義
 
+use crate::event::{
+    EventContext,
+    EventResult,
+    ViewEvent,
+};
 use crate::geometry::Rect;
 use crate::layout::{
+    handle_stack_event,
     paint_stack,
     IntoStackChildren,
     StackAlignment,
@@ -28,7 +34,8 @@ impl Default for VStack {
             children: Vec::new(),
             gap: StackGap::Medium,
             alignment: StackAlignment::Center,
-            distribution: StackDistribution::Start,
+            distribution:
+            StackDistribution::Start,
         }
     }
 }
@@ -108,5 +115,23 @@ impl View for VStack {
             self.distribution,
             context,
         );
+    }
+
+    fn handle_event(
+        &self,
+        bounds: Rect,
+        event: &ViewEvent,
+        context: &mut EventContext<'_>,
+    ) -> EventResult {
+        handle_stack_event(
+            StackDirection::Vertical,
+            &self.children,
+            bounds,
+            self.gap,
+            self.alignment,
+            self.distribution,
+            event,
+            context,
+        )
     }
 }

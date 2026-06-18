@@ -18,11 +18,7 @@ use crate::geometry::{
     Rect,
     Size,
 };
-use crate::theme::{
-    DividerThickness,
-    DividerTokens,
-    SpacingTokens,
-};
+use crate::theme::{DividerThickness, DividerTokens, SpacingTokens, Theme};
 use crate::view::{
     PaintContext,
     View,
@@ -47,7 +43,11 @@ impl LayoutLength {
             Self::Auto => Length::Auto,
 
             Self::Fixed(value) => {
-                Length::Px(value.max(0.0))
+                if value.is_finite() {
+                    Length::Px(value.max(0.0))
+                } else {
+                    Length::Px(0.0)
+                }
             }
         }
     }
@@ -57,10 +57,20 @@ impl LayoutLength {
         available: f32,
     ) -> f32 {
         match self {
-            Self::Auto => available.max(0.0),
+            Self::Auto => {
+                if available.is_finite() {
+                    available.max(0.0)
+                } else {
+                    0.0
+                }
+            }
 
             Self::Fixed(value) => {
-                value.max(0.0)
+                if value.is_finite() {
+                    value.max(0.0)
+                } else {
+                    0.0
+                }
             }
         }
     }
@@ -267,12 +277,94 @@ impl StackChild {
         &self,
         bounds: Rect,
         event: &ViewEvent,
-        context: &mut EventContext,
+        context: &mut EventContext<'_>,
     ) -> EventResult {
         self.view.handle_event(
             bounds,
             event,
             context,
+        )
+    }
+
+    fn create_layout_node(
+        &self,
+        direction: StackDirection,
+        available_size: Size,
+        theme: &Theme,
+    ) -> LayoutNode {
+        let mut width =
+            self.width.to_ui_length();
+
+        let mut height =
+            self.height.to_ui_length();
+
+        if matches!(
+            self.kind,
+            StackChildKind::Divider { .. }
+        ) {
+            match direction {
+                StackDirection::Vertical => {
+                    width = Length::Px(
+                        available_size.width.max(0.0),
+                    );
+
+                    height = Length::Px(
+                        theme
+                            .divider
+                            .thickness
+                            .max(0.0),
+                    );
+                }
+
+                StackDirection::Horizontal => {
+                    width = Length::Px(
+                        theme
+                            .divider
+                            .thickness
+                            .max(0.0),
+                    );
+
+                    height = Length::Px(
+                        available_size.height.max(0.0),
+                    );
+                }
+            }
+        }
+
+        let flex_basis = match direction {
+            StackDirection::Horizontal => {
+                width.clone()
+            }
+
+            StackDirection::Vertical => {
+                height.clone()
+            }
+        };
+
+        LayoutNode::new(
+            Style {
+                display: Display::Block,
+
+                size: SizeStyle {
+                    width,
+                    height,
+                    ..SizeStyle::default()
+                },
+
+                item_style: ItemStyle {
+                    flex_grow:
+                    self.flex_grow.max(0.0),
+
+                    flex_shrink:
+                    self.flex_shrink.max(0.0),
+
+                    flex_basis,
+
+                    align_self: None,
+                },
+
+                ..Style::default()
+            },
         )
     }
 
@@ -514,8 +606,49 @@ where
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum StackDirection {
     Vertical,
-
     Horizontal,
+}
+
+impl StackDirection {
+    fn to_ui_flex_direction(self) -> FlexDirection {
+        match self {
+            Self::Horizontal => FlexDirection::Row,
+            Self::Vertical => FlexDirection::Column,
+        }
+    }
+}
+
+impl StackAlignment {
+    fn to_ui_align_items(self) -> AlignItems {
+        match self {
+            Self::Start => AlignItems::Start,
+            Self::Center => AlignItems::Center,
+            Self::End => AlignItems::End,
+            Self::Stretch => AlignItems::Stretch,
+        }
+    }
+}
+
+impl StackDistribution {
+    fn to_ui_justify_content(self) -> JustifyContent {
+        match self {
+            Self::Start => JustifyContent::Start,
+            Self::Center => JustifyContent::Center,
+            Self::End => JustifyContent::End,
+
+            Self::SpaceBetween => {
+                JustifyContent::SpaceBetween
+            }
+
+            Self::SpaceAround => {
+                JustifyContent::SpaceAround
+            }
+
+            Self::SpaceEvenly => {
+                JustifyContent::SpaceEvenly
+            }
+        }
+    }
 }
 
 pub(crate) fn paint_stack(
@@ -527,101 +660,24 @@ pub(crate) fn paint_stack(
     distribution: StackDistribution,
     context: &mut PaintContext<'_>,
 ) {
-    if bounds.size.width <= 0.0
-        || bounds.size.height <= 0.0
-    {
-        return;
-    }
-
-    let gap = gap.resolve(
-        &context.theme.spacing,
-    );
-
-    let child_nodes = children
-        .iter()
-        .map(|child| {
-            child.layout_node(
-                direction,
-                bounds,
-                &context.theme.divider,
-            )
-        })
-        .collect::<Vec<_>>();
-
-    let flex_direction =
-        match direction {
-            StackDirection::Vertical => {
-                FlexDirection::Column
-            }
-
-            StackDirection::Horizontal => {
-                FlexDirection::Row
-            }
-        };
-
-    let mut style = Style {
-        display: Display::Flex {
-            flex_direction,
-        },
-
-        size: SizeStyle {
-            width: Length::Px(
-                bounds.size.width,
-            ),
-
-            height: Length::Px(
-                bounds.size.height,
-            ),
-
-            ..Default::default()
-        },
-
-        align_items:
-        alignment.to_ui_alignment(),
-
-        justify_content:
-        distribution.to_ui_justification(),
-
-        ..Default::default()
-    };
-
-    match direction {
-        StackDirection::Vertical => {
-            style.row_gap =
-                Length::Px(gap);
-        }
-
-        StackDirection::Horizontal => {
-            style.column_gap =
-                Length::Px(gap);
-        }
-    }
-
-    let mut root =
-        LayoutNode::with_children(
-            style,
-            child_nodes,
+    let child_bounds =
+        layout_stack(
+            direction,
+            children,
+            bounds,
+            gap,
+            alignment,
+            distribution,
+            context.theme,
         );
 
-    LayoutEngine::layout(
-        &mut root,
-        bounds.size.width,
-        bounds.size.height,
-    );
-
-    for (child, layout_node) in children
+    for (
+        child,
+        child_bounds,
+    ) in children
         .iter()
-        .zip(root.children.iter())
+        .zip(child_bounds)
     {
-        let Some(child_bounds) =
-            border_box(
-                layout_node,
-                bounds.origin,
-            )
-        else {
-            continue;
-        };
-
         child.paint(
             child_bounds,
             context,
@@ -719,4 +775,202 @@ pub(crate) fn dispatch_children_in_order<'a>(
     }
 
     result
+}
+
+pub(crate) fn layout_stack(
+    direction: StackDirection,
+    children: &[StackChild],
+    bounds: Rect,
+    gap: StackGap,
+    alignment: StackAlignment,
+    distribution: StackDistribution,
+    theme: &Theme,
+) -> Vec<Rect> {
+    if children.is_empty()
+        || bounds.size.width <= 0.0
+        || bounds.size.height <= 0.0
+    {
+        return Vec::new();
+    }
+
+    let resolved_gap =
+        gap.resolve(&theme.spacing).max(0.0);
+
+    let child_nodes = children
+        .iter()
+        .map(|child| {
+            child.create_layout_node(
+                direction,
+                bounds.size,
+                theme,
+            )
+        })
+        .collect();
+
+    let (
+        row_gap,
+        column_gap,
+    ) = match direction {
+        StackDirection::Horizontal => (
+            Length::Px(0.0),
+            Length::Px(resolved_gap),
+        ),
+
+        StackDirection::Vertical => (
+            Length::Px(resolved_gap),
+            Length::Px(0.0),
+        ),
+    };
+
+    let mut root =
+        LayoutNode::with_children(
+            Style {
+                display: Display::Flex {
+                    flex_direction:
+                    direction
+                        .to_ui_flex_direction(),
+                },
+
+                size: SizeStyle {
+                    width: Length::Px(
+                        bounds.size.width,
+                    ),
+
+                    height: Length::Px(
+                        bounds.size.height,
+                    ),
+
+                    ..SizeStyle::default()
+                },
+
+                align_items:
+                alignment
+                    .to_ui_align_items(),
+
+                justify_content:
+                distribution
+                    .to_ui_justify_content(),
+
+                row_gap,
+                column_gap,
+
+                ..Style::default()
+            },
+
+            child_nodes,
+        );
+
+    LayoutEngine::layout(
+        &mut root,
+        bounds.size.width,
+        bounds.size.height,
+    );
+
+    root.children
+        .iter()
+        .map(|node| {
+            let Some(box_model) =
+                node.layout_boxes
+                    .iter()
+                    .next()
+            else {
+                return Rect::new(
+                    bounds.origin.x,
+                    bounds.origin.y,
+                    0.0,
+                    0.0,
+                );
+            };
+
+            let rect =
+                box_model.border_box;
+
+            Rect::new(
+                bounds.origin.x + rect.x,
+                bounds.origin.y + rect.y,
+                rect.width.max(0.0),
+                rect.height.max(0.0),
+            )
+        })
+        .collect()
+}
+
+pub(crate) fn handle_stack_event(
+    direction: StackDirection,
+    children: &[StackChild],
+    bounds: Rect,
+    gap: StackGap,
+    alignment: StackAlignment,
+    distribution: StackDistribution,
+    event: &ViewEvent,
+    context: &mut EventContext<'_>,
+) -> EventResult {
+    let child_bounds =
+        layout_stack(
+            direction,
+            children,
+            bounds,
+            gap,
+            alignment,
+            distribution,
+            context.theme(),
+        );
+
+    if event.requires_broadcast() {
+        let mut result =
+            EventResult::Ignored;
+
+        for (
+            child,
+            child_bounds,
+        ) in children
+            .iter()
+            .zip(child_bounds.iter().copied())
+        {
+            result = result.merge(
+                child.handle_event(
+                    child_bounds,
+                    event,
+                    context,
+                ),
+            );
+        }
+
+        return result;
+    }
+
+    let Some(position) =
+        event.position()
+    else {
+        return EventResult::Ignored;
+    };
+
+    for index in (
+        0..children
+            .len()
+            .min(child_bounds.len())
+    )
+        .rev()
+    {
+        let bounds =
+            child_bounds[index];
+
+        if !bounds.contains(position) {
+            continue;
+        }
+
+        let result =
+            children[index]
+                .handle_event(
+                    bounds,
+                    event,
+                    context,
+                );
+
+        if result.is_consumed() {
+            return result;
+        }
+    }
+
+    EventResult::Ignored
 }

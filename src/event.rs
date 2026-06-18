@@ -9,6 +9,7 @@ use crate::platform::{
     PlatformEvent,
     PointerButton,
 };
+use crate::theme::Theme;
 use crate::view::View;
 
 #[derive(
@@ -84,13 +85,15 @@ impl ViewEvent {
             .unwrap_or(true)
     }
 
+    // TODO: ポインタキャプチャに置き換える
     pub fn requires_broadcast(&self) -> bool {
         matches!(
-            self,
-            Self::PointerMoved { .. }
-                | Self::PointerLeft
-                | Self::FocusChanged { .. }
-        )
+        self,
+        Self::PointerMoved { .. }
+            | Self::PointerReleased { .. }
+            | Self::PointerLeft
+            | Self::FocusChanged { .. }
+    )
     }
 }
 
@@ -128,14 +131,21 @@ impl EventResult {
     }
 }
 
-#[derive(Debug, Default)]
-pub struct EventContext {
+pub struct EventContext<'a> {
+    theme: &'a Theme,
     redraw_requested: bool,
 }
 
-impl EventContext {
-    pub fn new() -> Self {
-        Self::default()
+impl<'a> EventContext<'a> {
+    pub fn new(theme: &'a Theme) -> Self {
+        Self {
+            theme,
+            redraw_requested: false,
+        }
+    }
+
+    pub fn theme(&self) -> &Theme {
+        self.theme
     }
 
     pub fn request_redraw(&mut self) {
