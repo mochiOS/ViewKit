@@ -3,6 +3,20 @@
 use crate::renderer::Viewport;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PointerButton {
+    Primary,
+    Secondary,
+    Middle,
+    Other(u16),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ButtonState {
+    Pressed,
+    Released,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PlatformEvent {
     Resumed {
         viewport: Viewport,
@@ -17,6 +31,15 @@ pub enum PlatformEvent {
         delta_x: f32,
         delta_y: f32,
     },
+    PointerMoved {
+        x: f32,
+        y: f32,
+    },
+    PointerButton {
+        button: PointerButton,
+        state: ButtonState,
+    },
+    PointerLeft,
     Focused(bool),
     RedrawRequested,
     CloseRequested,
