@@ -1,11 +1,4 @@
-use viewkit::components::{
-    Button,
-    ButtonColor,
-    ButtonInteractionState,
-    Rectangle,
-    RectangleColor,
-    VStack,
-};
+use viewkit::components::{Button, ButtonColor, ButtonInteractionState, Text, VStack};
 use viewkit::draw_command::{
     DisplayList,
     DrawCommand,
@@ -29,10 +22,7 @@ use viewkit::platform::{
     WindowConfig,
 };
 use viewkit::renderer::Viewport;
-use viewkit::theme::{
-    ShadowStyle,
-    Theme,
-};
+use viewkit::theme::{Color, Theme};
 use viewkit::typography::Typography;
 use viewkit::view::{
     PaintContext,
@@ -47,9 +37,6 @@ struct ExampleApplication {
 
     primary_button_state:
         ButtonInteractionState,
-
-    destructive_button_state:
-        ButtonInteractionState,
 }
 
 impl ExampleApplication {
@@ -63,26 +50,10 @@ impl ExampleApplication {
 
             primary_button_state:
             ButtonInteractionState::new(),
-
-            destructive_button_state:
-            ButtonInteractionState::new(),
         }
     }
 
     fn build_root(&self) -> VStack {
-        let primary_button_content =
-            Rectangle::new()
-                .color(
-                    RectangleColor::ElevatedSurface,
-                )
-                .shadow(
-                    ShadowStyle::None,
-                )
-                .frame(
-                    112.0,
-                    12.0,
-                );
-
         let primary_button =
             Button::new(
                 self.primary_button_state
@@ -92,32 +63,25 @@ impl ExampleApplication {
                     ButtonColor::Accent,
                 )
                 .content(
-                    primary_button_content,
-                );
-
-        let destructive_button_content =
-            Rectangle::new()
-                .color(
-                    RectangleColor::ElevatedSurface,
-                )
-                .shadow(
-                    ShadowStyle::None,
-                )
-                .frame(
-                    88.0,
-                    12.0,
-                );
-
-        let destructive_button =
-            Button::new(
-                self.destructive_button_state
-                    .clone(),
-            )
-                .color(
-                    ButtonColor::Destructive,
-                )
-                .content(
-                    destructive_button_content,
+                    Text::new(
+                        "プライマリーボタン",
+                    )
+                        .font_size(
+                            16.0,
+                        )
+                        .line_height(
+                            24.0,
+                        )
+                        .weight(
+                            600,
+                        )
+                        .color(
+                            Color::WHITE,
+                        )
+                        .frame(
+                            80.0,
+                            24.0,
+                        ),
                 );
 
         VStack::new()
@@ -132,12 +96,6 @@ impl ExampleApplication {
             )
             .child(
                 primary_button.frame(
-                    240.0,
-                    60.0,
-                ),
-            )
-            .child(
-                destructive_button.frame(
                     240.0,
                     60.0,
                 ),
@@ -175,14 +133,6 @@ for ExampleApplication
         {
             println!(
                 "primary button clicked"
-            );
-        }
-
-        if self.destructive_button_state
-            .take_clicked()
-        {
-            println!(
-                "destructive button clicked"
             );
         }
 

@@ -23,16 +23,24 @@ use tiny_skia::{
 use winit::event_loop::OwnedDisplayHandle;
 use winit::window::Window;
 
-use crate::draw_command::{
-    DisplayList,
-    DrawCommand,
-};
+use crate::draw_command::{DisplayList, DrawCommand, TextCommand};
 use crate::geometry::Rect;
 use crate::renderer::{
     Renderer,
     Viewport,
 };
 use crate::theme::Color;
+use cosmic_text::{
+    Attrs,
+    Buffer,
+    Color as CosmicColor,
+    Family,
+    FontSystem,
+    Metrics,
+    Shaping,
+    SwashCache,
+    Weight,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SoftwareRendererError {
@@ -76,6 +84,8 @@ pub struct SoftwareRenderer {
 
     viewport: Viewport,
     pixmap: Option<Pixmap>,
+    font_system: FontSystem,
+    swash_cache: SwashCache,
 }
 
 impl SoftwareRenderer {
@@ -93,6 +103,12 @@ impl SoftwareRenderer {
             surface,
             viewport,
             pixmap: None,
+
+            font_system:
+            FontSystem::new(),
+
+            swash_cache:
+            SwashCache::new(),
         };
 
         renderer.resize_surface(
@@ -399,9 +415,16 @@ impl Renderer for SoftwareRenderer {
                 }
 
                 DrawCommand::DrawText {
-                    ..
+                    command,
                 } => {
-                    // 後で実装する
+                    draw_text_command(
+                        pixmap,
+                        &mut self.font_system,
+                        &mut self.swash_cache,
+                        command,
+                        scale,
+                        clip_stack.last(),
+                    );
                 }
             }
         }
@@ -717,4 +740,185 @@ fn valid_scale_factor(
     } else {
         1.0
     }
+}
+
+fn draw_text_command(
+    pixmap: &mut Pixmap,
+    font_system: &mut FontSystem,
+    swash_cache: &mut SwashCache,
+    command: &TextCommand,
+    scale: f32,
+    clip: Option<&Mask>,
+) {
+    if command.text.is_empty()
+        || command.bounds.size.width <= 0.0
+        || command.bounds.size.height <= 0.0
+    {
+        return;
+    }
+
+    let scale =
+        if scale.is_finite()
+            && scale > 0.0
+        {
+            scale
+        } else {
+            1.0
+        };
+
+    let font_size =
+        (
+            command.font_size
+                * scale
+        )
+            .max(1.0);
+
+    let line_height =
+        (
+            command.line_height
+                * scale
+        )
+            .max(font_size);
+
+    let width =
+        (
+            command.bounds
+                .size
+                .width
+                * scale
+        )
+            .max(0.0);
+
+    let height =
+        (
+            command.bounds
+                .size
+                .height
+                * scale
+        )
+            .max(0.0);
+
+    let origin_x =
+        command.bounds
+            .origin
+            .x
+            * scale;
+
+    let origin_y =
+        command.bounds
+            .origin
+            .y
+            * scale;
+
+    let metrics =
+        Metrics::new(
+            font_size,
+            line_height,
+        );
+
+    let mut buffer =
+        Buffer::new(
+            font_system,
+            metrics,
+        );
+
+    let mut buffer =
+        buffer.borrow_with(
+            font_system,
+        );
+
+    buffer.set_size(
+        Some(width),
+        Some(height),
+    );
+
+    let attrs =
+        Attrs::new()
+            .family(
+                Family::Name(
+                    command
+                        .font_family
+                        .as_str(),
+                ),
+            )
+            .weight(
+                Weight(
+                    command
+                        .weight
+                        .clamp(
+                            1,
+                            1000,
+                        ),
+                ),
+            );
+
+    buffer.set_text(
+        command.text.as_str(),
+        &attrs,
+        Shaping::Advanced,
+        None,
+    );
+
+    let text_color =
+        CosmicColor::rgba(
+            command.color.red,
+            command.color.green,
+            command.color.blue,
+            command.color.alpha,
+        );
+
+    buffer.draw(
+        swash_cache,
+        text_color,
+        |x, y, width, height, color| {
+            let draw_x =
+                origin_x
+                    + x as f32;
+
+            let draw_y =
+                origin_y
+                    + y as f32;
+
+            let Some(rect) =
+                SkiaRect::from_xywh(
+                    draw_x,
+                    draw_y,
+                    width as f32,
+                    height as f32,
+                )
+            else {
+                return;
+            };
+
+            let (
+                red,
+                green,
+                blue,
+                alpha,
+            ) = color.as_rgba_tuple();
+
+            if alpha == 0 {
+                return;
+            }
+
+            let mut paint =
+                Paint::default();
+
+            paint.set_color_rgba8(
+                red,
+                green,
+                blue,
+                alpha,
+            );
+
+            paint.anti_alias = false;
+
+            pixmap.fill_rect(
+                rect,
+                &paint,
+                Transform::identity(),
+                clip,
+            );
+        },
+    );
 }

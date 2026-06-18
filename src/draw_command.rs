@@ -35,10 +35,7 @@ pub enum DrawCommand {
     },
 
     DrawText {
-        position: Point,
-        text: String,
-        style: TextStyle,
-        color: Color,
+        command: TextCommand,
     },
 
     PushClip {
@@ -51,6 +48,19 @@ pub enum DrawCommand {
 #[derive(Clone, Debug, Default)]
 pub struct DisplayList {
     commands: Vec<DrawCommand>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextCommand {
+    pub text: String,
+    pub bounds: Rect,
+
+    pub font_family: String,
+    pub font_size: f32,
+    pub line_height: f32,
+    pub weight: u16,
+
+    pub color: Color,
 }
 
 impl DisplayList {

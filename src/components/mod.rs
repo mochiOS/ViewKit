@@ -9,6 +9,7 @@ mod overlay;
 mod group;
 mod scroll;
 mod button;
+mod text;
 
 pub use hstack::HStack;
 pub use spacer::Spacer;
@@ -22,3 +23,4 @@ pub use scroll::{Scroll, ScrollAxis, ScrollState};
 
 pub use rectangle::{Rectangle, RectangleColor, };
 pub use button::{Button, ButtonColor, ButtonInteractionState};
+pub use text::Text;
