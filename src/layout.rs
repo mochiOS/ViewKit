@@ -27,6 +27,11 @@ use crate::view::{
     PaintContext,
     View,
 };
+use crate::event::{
+    EventContext,
+    EventResult,
+    ViewEvent,
+};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum LayoutLength {
@@ -256,6 +261,19 @@ impl StackChild {
                 thickness,
             },
         }
+    }
+
+    pub(crate) fn handle_event(
+        &self,
+        bounds: Rect,
+        event: &ViewEvent,
+        context: &mut EventContext,
+    ) -> EventResult {
+        self.view.handle_event(
+            bounds,
+            event,
+            context,
+        )
     }
 
     pub fn width(
@@ -642,4 +660,63 @@ impl View for EmptyView {
         _context: &mut PaintContext<'_>,
     ) {
     }
+}
+
+pub(crate) fn dispatch_child_event(
+    child: &StackChild,
+    bounds: Rect,
+    event: &ViewEvent,
+    context: &mut EventContext,
+) -> EventResult {
+    if !event.requires_broadcast()
+        && !event.is_inside(bounds)
+    {
+        return EventResult::Ignored;
+    }
+
+    child.handle_event(
+        bounds,
+        event,
+        context,
+    )
+}
+
+pub(crate) fn dispatch_children_in_order<'a>(
+    children: impl IntoIterator<
+        Item = (&'a StackChild, Rect),
+    >,
+    event: &ViewEvent,
+    context: &mut EventContext,
+) -> EventResult {
+    let broadcast =
+        event.requires_broadcast();
+
+    let mut result =
+        EventResult::Ignored;
+
+    for (
+        child,
+        bounds,
+    ) in children {
+        let child_result =
+            dispatch_child_event(
+                child,
+                bounds,
+                event,
+                context,
+            );
+
+        result =
+            result.merge(
+                child_result,
+            );
+
+        if !broadcast
+            && child_result.is_consumed()
+        {
+            break;
+        }
+    }
+
+    result
 }

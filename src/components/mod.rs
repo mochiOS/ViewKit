@@ -8,6 +8,7 @@ mod background;
 mod overlay;
 mod group;
 mod scroll;
+mod button;
 
 pub use hstack::HStack;
 pub use spacer::Spacer;

@@ -1,6 +1,11 @@
 //! Viewの共通インターフェースを定義
 
 use crate::draw_command::DisplayList;
+use crate::event::{
+    EventContext,
+    EventResult,
+    ViewEvent,
+};
 use crate::geometry::Rect;
 use crate::theme::Theme;
 use crate::typography::Typography;
@@ -17,4 +22,13 @@ pub trait View {
         bounds: Rect,
         context: &mut PaintContext<'_>,
     );
+
+    fn handle_event(
+        &self,
+        _bounds: Rect,
+        _event: &ViewEvent,
+        _context: &mut EventContext,
+    ) -> EventResult {
+        EventResult::Ignored
+    }
 }
