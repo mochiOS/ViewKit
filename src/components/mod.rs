@@ -20,7 +20,5 @@ pub use overlay::Overlay;
 pub use group::Group;
 pub use scroll::{Scroll, ScrollAxis, ScrollState};
 
-pub use rectangle::{
-    Rectangle,
-    RectangleColor,
-};
+pub use rectangle::{Rectangle, RectangleColor, };
+pub use button::{Button, ButtonColor, ButtonInteractionState};
