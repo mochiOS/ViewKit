@@ -7,6 +7,7 @@ mod zstack;
 mod background;
 mod overlay;
 mod group;
+mod scroll;
 
 pub use hstack::HStack;
 pub use spacer::Spacer;
@@ -16,6 +17,7 @@ pub use zstack::{ZStack, ZStackAlignment};
 pub use background::Background;
 pub use overlay::Overlay;
 pub use group::Group;
+pub use scroll::{Scroll, ScrollAxis, ScrollState};
 
 pub use rectangle::{
     Rectangle,

@@ -43,3 +43,7 @@ name = "viewkit"
 [[example]]
 name = "test"
 path = "examples/test.rs"
+
+[[example]]
+name = "scroll"
+path = "examples/scroll.rs"
