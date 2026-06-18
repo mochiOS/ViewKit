@@ -1,0 +1,16 @@
+[package]
+name = "viewKit"
+id = "org.mochios.viewkit"
+version = "0.1.0"
+developer = "mochiOS Team"
+description = "mochiOS UI Kit"
+
+[lib]
+source = "src/lib.kome"
+
+[resources]
+files = []
+
+[capabilities]
+required = []
+optional = []

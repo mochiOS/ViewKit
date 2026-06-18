@@ -1,0 +1,83 @@
+module viewKit
+
+enum Color {
+    blue,
+    red,
+    green,
+    accent,
+    primary,
+    secondary,
+}
+
+enum FontWeight {
+    regular,
+    medium,
+    semibold,
+    bold,
+}
+
+enum StackSpacing {
+    none,
+    small,
+    medium,
+    large,
+}
+
+enum StackAlignment {
+    start,
+    center,
+    end,
+    stretch,
+}
+
+@nativeComponent("Text")
+component Text(
+    content: String,
+    weight: FontWeight = .regular,
+    size: Number = 16,
+    color: Color = .primary,
+)
+
+@nativeComponent("VStack")
+component VStack(
+    spacing: StackSpacing = .medium,
+    alignment: StackAlignment = .center,
+)
+
+@nativeComponent("Button")
+component Button(
+    title: String,
+    color: Color = .accent,
+    radius: Ratio = 0%,
+    onClick: Action<ButtonEvent>? = null,
+)
+
+@nativeComponent("TextInput")
+component TextInput(
+    value: String,
+    onChange: Action<TextInputEvent>? = null,
+    onSubmit: Action<TextInputEvent>? = null,
+)
+
+@nativeModifier("Padding")
+fn View.padding(
+    value: Number,
+) -> View
+
+// memo
+// @nativeComponentはKome componentとして実行せずにViewKit Nodeに変換する
+//
+// 例:
+// Text(
+//     "Hello, {name}",
+//     weight: .bold,
+// )
+//
+// みたいなのがあったら、
+//
+// ViewNode {
+//     kind: Text,
+//     content: interpolate("Hello, {name}"),
+//     weight: Bold
+// }
+// みたいになる
