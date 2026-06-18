@@ -51,3 +51,7 @@ path = "examples/scroll.rs"
 [[example]]
 name = "button"
 path = "examples/button.rs"
+
+[[example]]
+name = "text"
+path = "examples/text.rs"
