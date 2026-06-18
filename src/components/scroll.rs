@@ -461,9 +461,13 @@ fn paint_vertical_scrollbar(
             0.0
         };
 
+    let length_inset =
+        finite_non_negative(tokens.length_inset);
+
     let track_length = (
         bounds.size.height
             - inset * 2.0
+            - length_inset * 2.0
             - reserved_bottom
     )
         .max(0.0);
@@ -476,11 +480,13 @@ fn paint_vertical_scrollbar(
         bounds.origin.x
             + bounds.size.width
             - inset
-            - thickness;
+            - thickness
+            - tokens.horizontal_offset;
 
     let track_y =
         bounds.origin.y
-            + inset;
+            + inset
+            + length_inset;
 
     let track_rect =
         Rect::new(
