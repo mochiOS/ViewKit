@@ -85,6 +85,15 @@ impl PlatformApplication for ExampleApplication {
                 );
             }
 
+            PlatformEvent::Scroll {
+                delta_x,
+                delta_y,
+            } => {
+                println!(
+                    "scroll: x={delta_x}, y={delta_y}"
+                );
+            }
+
             PlatformEvent::RedrawRequested => {}
 
             PlatformEvent::CloseRequested => {
@@ -196,11 +205,7 @@ impl PlatformApplication for ExampleApplication {
     }
 }
 
-fn main(
-) -> Result<
-    (),
-    Box<dyn std::error::Error>,
-> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let application =
         ExampleApplication::new();
 

@@ -7,28 +7,51 @@ use super::super::{
 use crate::draw_command::DisplayList;
 use crate::geometry::Size;
 use crate::platform::linux::SoftwareRenderer;
-use crate::renderer::{Renderer, Viewport};
+use crate::renderer::{
+    Renderer,
+    Viewport,
+};
 use softbuffer::Context;
 use std::rc::Rc;
 use winit::application::ApplicationHandler;
-use winit::dpi::{LogicalSize, PhysicalSize};
-use winit::error::{EventLoopError, OsError};
-use winit::event::WindowEvent;
-use winit::event_loop::OwnedDisplayHandle;
+use winit::dpi::{
+    LogicalSize,
+    PhysicalSize,
+};
+use winit::error::{
+    EventLoopError,
+    OsError,
+};
+use winit::event::{
+    MouseScrollDelta,
+    WindowEvent,
+};
 use winit::event_loop::{
     ActiveEventLoop,
     ControlFlow,
     EventLoop,
+    OwnedDisplayHandle,
 };
-use winit::window::{Window, WindowId};
+use winit::window::{
+    Window,
+    WindowId,
+};
+
+const LINE_SCROLL_PIXELS: f32 = 40.0;
 
 #[derive(Debug, thiserror::Error)]
 pub enum LinuxBackendError {
     #[error("イベントループの作成または実行に失敗しました: {0}")]
-    EventLoop(#[from] EventLoopError),
+    EventLoop(
+        #[from]
+        EventLoopError,
+    ),
 
     #[error("ウィンドウの作成に失敗しました: {0}")]
-    Window(#[from] OsError),
+    Window(
+        #[from]
+        OsError,
+    ),
 
     #[error("レンダラーの処理に失敗しました: {0}")]
     Renderer(
@@ -37,7 +60,10 @@ pub enum LinuxBackendError {
     ),
 
     #[error("softbufferの初期化に失敗しました: {0}")]
-    SoftBuffer(#[from] softbuffer::SoftBufferError),
+    SoftBuffer(
+        #[from]
+        softbuffer::SoftBufferError,
+    ),
 }
 
 struct WinitWindow<'a> {
@@ -49,12 +75,17 @@ impl PlatformWindow for WinitWindow<'_> {
         self.inner.request_redraw();
     }
 
-    fn set_title(&self, title: &str) {
+    fn set_title(
+        &self,
+        title: &str,
+    ) {
         self.inner.set_title(title);
     }
 
     fn viewport(&self) -> Viewport {
-        viewport_from_window(self.inner)
+        viewport_from_window(
+            self.inner,
+        )
     }
 }
 
@@ -62,11 +93,17 @@ pub struct LinuxBackend<A> {
     application: A,
     config: WindowConfig,
 
-    context: Option<Context<OwnedDisplayHandle>>,
-    window: Option<Rc<Window>>,
-    renderer: Option<SoftwareRenderer>,
+    context:
+        Option<Context<OwnedDisplayHandle>>,
 
-    runtime_error: Option<LinuxBackendError>,
+    window:
+        Option<Rc<Window>>,
+
+    renderer:
+        Option<SoftwareRenderer>,
+
+    runtime_error:
+        Option<LinuxBackendError>,
 }
 
 impl<A> LinuxBackend<A>
@@ -88,18 +125,32 @@ where
             runtime_error: None,
         }
     }
-    pub fn run(mut self) -> Result<(), LinuxBackendError> {
-        let event_loop = EventLoop::new()?;
 
-        event_loop.set_control_flow(ControlFlow::Wait);
+    pub fn run(
+        mut self,
+    ) -> Result<(), LinuxBackendError> {
+        let event_loop =
+            EventLoop::new()?;
 
-        self.context = Some(Context::new(
-            event_loop.owned_display_handle(),
-        )?);
+        event_loop.set_control_flow(
+            ControlFlow::Wait,
+        );
 
-        let result = event_loop.run_app(&mut self);
+        self.context = Some(
+            Context::new(
+                event_loop
+                    .owned_display_handle(),
+            )?,
+        );
 
-        if let Some(error) = self.runtime_error.take() {
+        let result =
+            event_loop.run_app(
+                &mut self,
+            );
+
+        if let Some(error) =
+            self.runtime_error.take()
+        {
             return Err(error);
         }
 
@@ -108,80 +159,150 @@ where
         Ok(())
     }
 
-    fn emit(&mut self, event: PlatformEvent) {
-        let Some(window) = self.window.as_ref() else {
+    fn emit(
+        &mut self,
+        event: PlatformEvent,
+    ) {
+        let Some(window) =
+            self.window.as_ref()
+        else {
             return;
         };
 
-        let platform_window = WinitWindow {
-            inner: window.as_ref(),
-        };
+        let platform_window =
+            WinitWindow {
+                inner:
+                window.as_ref(),
+            };
 
-        self.application
-            .handle_event(event, &platform_window);
+        self.application.handle_event(
+            event,
+            &platform_window,
+        );
     }
 
     fn request_redraw(&self) {
-        if let Some(window) = self.window.as_ref() {
+        if let Some(window) =
+            self.window.as_ref()
+        {
             window.request_redraw();
         }
     }
 }
 
-impl<A> ApplicationHandler for LinuxBackend<A>
+impl<A> ApplicationHandler
+for LinuxBackend<A>
 where
     A: PlatformApplication,
 {
-    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.window.is_some() || self.runtime_error.is_some() {
+    fn resumed(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+    ) {
+        if self.window.is_some()
+            || self.runtime_error.is_some()
+        {
             return;
         }
 
-        let attributes = Window::default_attributes()
-            .with_title(self.config.title.clone())
-            .with_inner_size(LogicalSize::new(
-                self.config.size.width as f64,
-                self.config.size.height as f64,
-            ))
-            .with_resizable(self.config.resizable);
+        let attributes =
+            Window::default_attributes()
+                .with_title(
+                    self.config
+                        .title
+                        .clone(),
+                )
+                .with_inner_size(
+                    LogicalSize::new(
+                        self.config
+                            .size
+                            .width
+                            as f64,
 
-        let window = match event_loop.create_window(attributes) {
-            Ok(window) => Rc::new(window),
-            Err(error) => {
-                self.runtime_error =
-                    Some(LinuxBackendError::Window(error));
+                        self.config
+                            .size
+                            .height
+                            as f64,
+                    ),
+                )
+                .with_resizable(
+                    self.config
+                        .resizable,
+                );
 
-                event_loop.exit();
-                return;
-            }
-        };
+        let window =
+            match event_loop
+                .create_window(
+                    attributes,
+                )
+            {
+                Ok(window) => {
+                    Rc::new(window)
+                }
 
-        let viewport = viewport_from_window(window.as_ref());
+                Err(error) => {
+                    self.runtime_error =
+                        Some(
+                            LinuxBackendError::Window(
+                                error,
+                            ),
+                        );
 
-        let Some(context) = self.context.as_ref() else {
+                    event_loop.exit();
+
+                    return;
+                }
+            };
+
+        let viewport =
+            viewport_from_window(
+                window.as_ref(),
+            );
+
+        let Some(context) =
+            self.context.as_ref()
+        else {
             event_loop.exit();
+
             return;
         };
 
-        let renderer = match SoftwareRenderer::new(
-            context,
-            window.clone(),
-            viewport,
-        ) {
-            Ok(renderer) => renderer,
-            Err(error) => {
-                self.runtime_error =
-                    Some(LinuxBackendError::Renderer(error));
+        let renderer =
+            match SoftwareRenderer::new(
+                context,
+                window.clone(),
+                viewport,
+            ) {
+                Ok(renderer) => {
+                    renderer
+                }
 
-                event_loop.exit();
-                return;
-            }
-        };
+                Err(error) => {
+                    self.runtime_error =
+                        Some(
+                            LinuxBackendError::Renderer(
+                                error,
+                            ),
+                        );
 
-        self.window = Some(window);
-        self.renderer = Some(renderer);
+                    event_loop.exit();
 
-        self.emit(PlatformEvent::Resumed { viewport });
+                    return;
+                }
+            };
+
+        self.window =
+            Some(window);
+
+        self.renderer =
+            Some(renderer);
+
+        self.emit(
+            PlatformEvent::Resumed {
+                viewport,
+            },
+        );
+
         self.request_redraw();
     }
 
@@ -192,42 +313,81 @@ where
         event: WindowEvent,
     ) {
         let Some(current_window_id) =
-            self.window.as_ref().map(|window| window.id())
+            self.window
+                .as_ref()
+                .map(
+                    |window| {
+                        window.id()
+                    },
+                )
         else {
             return;
         };
 
-        if current_window_id != window_id {
+        if current_window_id
+            != window_id
+        {
             return;
         }
 
         match event {
             WindowEvent::CloseRequested => {
-                self.emit(PlatformEvent::CloseRequested);
+                self.emit(
+                    PlatformEvent::
+                    CloseRequested,
+                );
+
                 event_loop.exit();
             }
 
-            WindowEvent::Resized(size) => {
-                let scale_factor = self
-                    .window
-                    .as_ref()
-                    .map(|window| window.scale_factor())
-                    .unwrap_or(1.0);
+            WindowEvent::Resized(
+                size,
+            ) => {
+                let scale_factor =
+                    self.window
+                        .as_ref()
+                        .map(
+                            |window| {
+                                window
+                                    .scale_factor()
+                            },
+                        )
+                        .unwrap_or(1.0);
 
                 let viewport =
-                    viewport_from_physical(size, scale_factor);
+                    viewport_from_physical(
+                        size,
+                        scale_factor,
+                    );
 
-                if let Some(renderer) = self.renderer.as_mut() {
-                    if let Err(error) = renderer.resize(viewport) {
+                if let Some(renderer) =
+                    self.renderer.as_mut()
+                {
+                    if let Err(error) =
+                        renderer.resize(
+                            viewport,
+                        )
+                    {
                         self.runtime_error =
-                            Some(LinuxBackendError::Renderer(error));
+                            Some(
+                                LinuxBackendError::
+                                Renderer(
+                                    error,
+                                ),
+                            );
 
                         event_loop.exit();
+
                         return;
                     }
                 }
 
-                self.emit(PlatformEvent::Resized { viewport });
+                self.emit(
+                    PlatformEvent::Resized {
+                        viewport,
+                    },
+                );
+
                 self.request_redraw();
             }
 
@@ -236,26 +396,49 @@ where
                 ..
             } => {
                 let Some(size) =
-                    self.window.as_ref().map(|window| window.inner_size())
+                    self.window
+                        .as_ref()
+                        .map(
+                            |window| {
+                                window
+                                    .inner_size()
+                            },
+                        )
                 else {
                     return;
                 };
 
                 let viewport =
-                    viewport_from_physical(size, scale_factor);
+                    viewport_from_physical(
+                        size,
+                        scale_factor,
+                    );
 
-                if let Some(renderer) = self.renderer.as_mut() {
-                    if let Err(error) = renderer.resize(viewport) {
+                if let Some(renderer) =
+                    self.renderer.as_mut()
+                {
+                    if let Err(error) =
+                        renderer.resize(
+                            viewport,
+                        )
+                    {
                         self.runtime_error =
-                            Some(LinuxBackendError::Renderer(error));
+                            Some(
+                                LinuxBackendError::
+                                Renderer(
+                                    error,
+                                ),
+                            );
 
                         event_loop.exit();
+
                         return;
                     }
                 }
 
                 self.emit(
-                    PlatformEvent::ScaleFactorChanged {
+                    PlatformEvent::
+                    ScaleFactorChanged {
                         viewport,
                     },
                 );
@@ -263,47 +446,112 @@ where
                 self.request_redraw();
             }
 
-            WindowEvent::Focused(focused) => {
-                self.emit(PlatformEvent::Focused(focused));
+            WindowEvent::Focused(
+                focused,
+            ) => {
+                self.emit(
+                    PlatformEvent::Focused(
+                        focused,
+                    ),
+                );
             }
 
-            WindowEvent::RedrawRequested => {
-                self.emit(PlatformEvent::RedrawRequested);
+            WindowEvent::MouseWheel {
+                delta,
+                ..
+            } => {
+                let scale_factor =
+                    self.window
+                        .as_ref()
+                        .map(
+                            |window| {
+                                window
+                                    .scale_factor()
+                            },
+                        )
+                        .unwrap_or(1.0);
 
-                let Some(window) = self.window.as_ref() else {
-                    return;
-                };
-
-                let viewport = viewport_from_window(window);
-
-                let mut display_list = DisplayList::new();
-
-                self.application.draw(
-                    viewport,
-                    &mut display_list,
+                let (
+                    delta_x,
+                    delta_y,
+                ) = scroll_delta_to_logical(
+                    delta,
+                    scale_factor,
                 );
 
-                window.pre_present_notify();
+                self.emit(
+                    PlatformEvent::Scroll {
+                        delta_x,
+                        delta_y,
+                    },
+                );
 
-                let result = self
-                    .renderer
-                    .as_mut()
-                    .map(|renderer| renderer.render(&display_list));
-
-                if let Some(Err(error)) = result {
-                    self.runtime_error =
-                        Some(LinuxBackendError::Renderer(error));
-
-                    event_loop.exit();
-                }
+                self.request_redraw();
             }
+
+            WindowEvent::
+            RedrawRequested =>
+                {
+                    self.emit(
+                        PlatformEvent::
+                        RedrawRequested,
+                    );
+
+                    let Some(window) =
+                        self.window.as_ref()
+                    else {
+                        return;
+                    };
+
+                    let viewport =
+                        viewport_from_window(
+                            window.as_ref(),
+                        );
+
+                    let mut display_list =
+                        DisplayList::new();
+
+                    self.application.draw(
+                        viewport,
+                        &mut display_list,
+                    );
+
+                    window.pre_present_notify();
+
+                    let result =
+                        self.renderer
+                            .as_mut()
+                            .map(
+                                |renderer| {
+                                    renderer.render(
+                                        &display_list,
+                                    )
+                                },
+                            );
+
+                    if let Some(Err(error)) =
+                        result
+                    {
+                        self.runtime_error =
+                            Some(
+                                LinuxBackendError::
+                                Renderer(
+                                    error,
+                                ),
+                            );
+
+                        event_loop.exit();
+                    }
+                }
 
             _ => {}
         }
     }
 }
 
-fn viewport_from_window(window: &Window) -> Viewport {
+fn viewport_from_window(
+    window: &Window,
+) -> Viewport {
     viewport_from_physical(
         window.inner_size(),
         window.scale_factor(),
@@ -314,16 +562,75 @@ fn viewport_from_physical(
     physical_size: PhysicalSize<u32>,
     scale_factor: f64,
 ) -> Viewport {
+    let scale_factor =
+        valid_scale_factor(
+            scale_factor,
+        );
+
     let logical_size =
-        physical_size.to_logical::<f64>(scale_factor);
+        physical_size
+            .to_logical::<f64>(
+                scale_factor,
+            );
 
     Viewport::new(
         Size::new(
-            logical_size.width as f32,
-            logical_size.height as f32,
+            logical_size.width
+                as f32,
+
+            logical_size.height
+                as f32,
         ),
+
         physical_size.width,
         physical_size.height,
+
         scale_factor,
     )
+}
+
+fn scroll_delta_to_logical(
+    delta: MouseScrollDelta,
+    scale_factor: f64,
+) -> (f32, f32) {
+    match delta {
+        MouseScrollDelta::LineDelta(
+            x,
+            y,
+        ) => {
+            (
+                x * LINE_SCROLL_PIXELS,
+                y * LINE_SCROLL_PIXELS,
+            )
+        }
+
+        MouseScrollDelta::PixelDelta(
+            position,
+        ) => {
+            let scale_factor =
+                valid_scale_factor(
+                    scale_factor,
+                ) as f32;
+
+            (
+                position.x as f32
+                    / scale_factor,
+
+                position.y as f32
+                    / scale_factor,
+            )
+        }
+    }
+}
+
+fn valid_scale_factor(
+    scale_factor: f64,
+) -> f64 {
+    if scale_factor.is_finite()
+        && scale_factor > 0.0
+    {
+        scale_factor
+    } else {
+        1.0
+    }
 }
