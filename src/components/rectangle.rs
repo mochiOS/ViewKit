@@ -99,6 +99,16 @@ impl Rectangle {
 }
 
 impl View for Rectangle {
+    fn measure(
+        &self,
+        constraints: Constraints,
+        _context: &mut MeasureContext<'_>,
+    ) -> Size {
+        constraints.constrain(
+            Size::new(0.0, 0.0),
+        )
+    }
+
     fn paint(
         &self,
         bounds: Rect,
@@ -140,16 +150,6 @@ impl View for Rectangle {
                 },
             );
         }
-    }
-
-    fn measure(
-        &self,
-        constraints: Constraints,
-        _context: &mut MeasureContext<'_>,
-    ) -> Size {
-        constraints.constrain(
-            Size::new(0.0, 0.0),
-        )
     }
 }
 
