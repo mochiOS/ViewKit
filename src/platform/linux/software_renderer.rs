@@ -11,6 +11,7 @@ use softbuffer::{
 use tiny_skia::{
     Color as SkiaColor,
     FillRule,
+    Mask,
     Paint,
     Path,
     PathBuilder,
@@ -45,10 +46,34 @@ pub enum SoftwareRendererError {
         width: u32,
         height: u32,
     },
+
+    #[error(
+        "クリップマスクを確保できませんでした: {width}x{height}"
+    )]
+    ClipMaskAllocation {
+        width: u32,
+        height: u32,
+    },
+
+    #[error(
+        "対応するPushClipがない状態でPopClipが呼び出されました"
+    )]
+    ClipStackUnderflow,
+
+    #[error(
+        "閉じられていないクリップが残っています: depth={depth}"
+    )]
+    UnclosedClipStack {
+        depth: usize,
+    },
 }
 
 pub struct SoftwareRenderer {
-    surface: Surface<OwnedDisplayHandle, Rc<Window>>,
+    surface: Surface<
+        OwnedDisplayHandle,
+        Rc<Window>,
+    >,
+
     viewport: Viewport,
     pixmap: Option<Pixmap>,
 }
@@ -59,7 +84,10 @@ impl SoftwareRenderer {
         window: Rc<Window>,
         viewport: Viewport,
     ) -> Result<Self, SoftwareRendererError> {
-        let surface = Surface::new(context, window)?;
+        let surface = Surface::new(
+            context,
+            window,
+        )?;
 
         let mut renderer = Self {
             surface,
@@ -67,7 +95,9 @@ impl SoftwareRenderer {
             pixmap: None,
         };
 
-        renderer.resize_surface(viewport)?;
+        renderer.resize_surface(
+            viewport,
+        )?;
 
         Ok(renderer)
     }
@@ -82,16 +112,28 @@ impl SoftwareRenderer {
             || viewport.physical_height == 0
         {
             self.pixmap = None;
+
             return Ok(());
         }
 
-        let width = NonZeroU32::new(viewport.physical_width)
-            .expect("幅は0ではない");
+        let width = NonZeroU32::new(
+            viewport.physical_width,
+        )
+            .expect(
+                "幅は0ではない",
+            );
 
-        let height = NonZeroU32::new(viewport.physical_height)
-            .expect("高さは0ではない");
+        let height = NonZeroU32::new(
+            viewport.physical_height,
+        )
+            .expect(
+                "高さは0ではない",
+            );
 
-        self.surface.resize(width, height)?;
+        self.surface.resize(
+            width,
+            height,
+        )?;
 
         self.pixmap = Some(
             Pixmap::new(
@@ -100,8 +142,11 @@ impl SoftwareRenderer {
             )
                 .ok_or(
                     SoftwareRendererError::PixmapAllocation {
-                        width: viewport.physical_width,
-                        height: viewport.physical_height,
+                        width:
+                        viewport.physical_width,
+
+                        height:
+                        viewport.physical_height,
                     },
                 )?,
         );
@@ -117,47 +162,81 @@ impl Renderer for SoftwareRenderer {
         &mut self,
         viewport: Viewport,
     ) -> Result<(), Self::Error> {
-        self.resize_surface(viewport)
+        self.resize_surface(
+            viewport,
+        )
     }
 
     fn render(
         &mut self,
         display_list: &DisplayList,
     ) -> Result<(), Self::Error> {
-        let Some(pixmap) = self.pixmap.as_mut() else {
+        let Some(pixmap) =
+            self.pixmap.as_mut()
+        else {
             return Ok(());
         };
 
-        // 前フレームの内容を残さない
-        pixmap.fill(SkiaColor::from_rgba8(0, 0, 0, 0));
+        pixmap.fill(
+            SkiaColor::from_rgba8(
+                0,
+                0,
+                0,
+                0,
+            ),
+        );
 
         let scale = valid_scale_factor(
             self.viewport.scale_factor,
         );
 
-        let transform = Transform::from_scale(scale, scale);
+        let transform =
+            Transform::from_scale(
+                scale,
+                scale,
+            );
+
+        let mut clip_stack:
+            Vec<Mask> = Vec::new();
 
         for command in display_list.commands() {
             match command {
-                DrawCommand::Clear { color } => {
-                    pixmap.fill(to_skia_color(*color));
+                DrawCommand::Clear {
+                    color,
+                } => {
+                    /*
+                     * Clearはクリップの影響を受けず、
+                     * 描画先全体を初期化します。
+                     */
+                    pixmap.fill(
+                        to_skia_color(
+                            *color,
+                        ),
+                    );
                 }
 
                 DrawCommand::FillRect {
                     rect,
                     color,
                 } => {
-                    let Some(rect) = to_skia_rect(*rect) else {
+                    let Some(rect) =
+                        to_skia_rect(
+                            *rect,
+                        )
+                    else {
                         continue;
                     };
 
-                    let paint = solid_paint(*color);
+                    let paint =
+                        solid_paint(
+                            *color,
+                        );
 
                     pixmap.fill_rect(
                         rect,
                         &paint,
                         transform,
-                        None,
+                        clip_stack.last(),
                     );
                 }
 
@@ -166,23 +245,31 @@ impl Renderer for SoftwareRenderer {
                     radius,
                     color,
                 } => {
-                    let Some(rect) = to_skia_rect(*rect) else {
+                    let Some(rect) =
+                        to_skia_rect(
+                            *rect,
+                        )
+                    else {
                         continue;
                     };
 
-                    let path = rounded_rect_path(
-                        rect,
-                        *radius,
-                    );
+                    let path =
+                        rounded_rect_path(
+                            rect,
+                            *radius,
+                        );
 
-                    let paint = solid_paint(*color);
+                    let paint =
+                        solid_paint(
+                            *color,
+                        );
 
                     pixmap.fill_path(
                         &path,
                         &paint,
                         FillRule::Winding,
                         transform,
-                        None,
+                        clip_stack.last(),
                     );
                 }
 
@@ -191,19 +278,33 @@ impl Renderer for SoftwareRenderer {
                     color,
                     width,
                 } => {
-                    if !width.is_finite() || *width <= 0.0 {
+                    if !width.is_finite()
+                        || *width <= 0.0
+                    {
                         continue;
                     }
 
-                    let Some(rect) = to_skia_rect(*rect) else {
+                    let Some(rect) =
+                        to_skia_rect(
+                            *rect,
+                        )
+                    else {
                         continue;
                     };
 
-                    let path = PathBuilder::from_rect(rect);
-                    let paint = solid_paint(*color);
+                    let path =
+                        PathBuilder::from_rect(
+                            rect,
+                        );
+
+                    let paint =
+                        solid_paint(
+                            *color,
+                        );
 
                     let stroke = Stroke {
                         width: *width,
+
                         ..Stroke::default()
                     };
 
@@ -212,7 +313,7 @@ impl Renderer for SoftwareRenderer {
                         &paint,
                         &stroke,
                         transform,
-                        None,
+                        clip_stack.last(),
                     );
                 }
 
@@ -222,23 +323,34 @@ impl Renderer for SoftwareRenderer {
                     color,
                     width,
                 } => {
-                    if !width.is_finite() || *width <= 0.0 {
+                    if !width.is_finite()
+                        || *width <= 0.0
+                    {
                         continue;
                     }
 
-                    let Some(rect) = to_skia_rect(*rect) else {
+                    let Some(rect) =
+                        to_skia_rect(
+                            *rect,
+                        )
+                    else {
                         continue;
                     };
 
-                    let path = rounded_rect_path(
-                        rect,
-                        *radius,
-                    );
+                    let path =
+                        rounded_rect_path(
+                            rect,
+                            *radius,
+                        );
 
-                    let paint = solid_paint(*color);
+                    let paint =
+                        solid_paint(
+                            *color,
+                        );
 
                     let stroke = Stroke {
                         width: *width,
+
                         ..Stroke::default()
                     };
 
@@ -247,16 +359,61 @@ impl Renderer for SoftwareRenderer {
                         &paint,
                         &stroke,
                         transform,
-                        None,
+                        clip_stack.last(),
                     );
                 }
 
-                DrawCommand::DrawText { .. }
-                | DrawCommand::PushClip { .. }
-                | DrawCommand::PopClip => {
+                DrawCommand::PushClip {
+                    rect,
+                } => {
+                    let mask =
+                        create_clip_mask(
+                            *rect,
+
+                            clip_stack.last(),
+
+                            self.viewport
+                                .physical_width,
+
+                            self.viewport
+                                .physical_height,
+
+                            transform,
+                        )?;
+
+                    clip_stack.push(
+                        mask,
+                    );
+                }
+
+                DrawCommand::PopClip => {
+                    if clip_stack
+                        .pop()
+                        .is_none()
+                    {
+                        return Err(
+                            SoftwareRendererError::
+                            ClipStackUnderflow,
+                        );
+                    }
+                }
+
+                DrawCommand::DrawText {
+                    ..
+                } => {
                     // 後で実装する
                 }
             }
+        }
+
+        if !clip_stack.is_empty() {
+            return Err(
+                SoftwareRendererError::
+                UnclosedClipStack {
+                    depth:
+                    clip_stack.len(),
+                },
+            );
         }
 
         copy_pixmap_to_surface(
@@ -268,6 +425,80 @@ impl Renderer for SoftwareRenderer {
     }
 }
 
+fn create_clip_mask(
+    rect: Rect,
+    previous: Option<&Mask>,
+    physical_width: u32,
+    physical_height: u32,
+    transform: Transform,
+) -> Result<Mask, SoftwareRendererError> {
+    let has_previous =
+        previous.is_some();
+
+    let mut mask = match previous {
+        Some(previous) => {
+            previous.clone()
+        }
+
+        None => {
+            Mask::new(
+                physical_width,
+                physical_height,
+            )
+                .ok_or(
+                    SoftwareRendererError::
+                    ClipMaskAllocation {
+                        width:
+                        physical_width,
+
+                        height:
+                        physical_height,
+                    },
+                )?
+        }
+    };
+
+    let Some(rect) =
+        to_skia_rect(rect)
+    else {
+        /*
+         * 不正なクリップ領域を無視すると、
+         * クリップされずに描画されてしまいます。
+         *
+         * そのため空のマスクにして、
+         * 何も描画されない状態にします。
+         */
+        mask.clear();
+
+        return Ok(mask);
+    };
+
+    let path =
+        PathBuilder::from_rect(
+            rect,
+        );
+
+    if has_previous {
+        mask.intersect_path(
+            &path,
+            FillRule::Winding,
+            false,
+            transform,
+        );
+    } else {
+        mask.clear();
+
+        mask.fill_path(
+            &path,
+            FillRule::Winding,
+            false,
+            transform,
+        );
+    }
+
+    Ok(mask)
+}
+
 fn copy_pixmap_to_surface(
     pixmap: &Pixmap,
     surface: &mut Surface<
@@ -275,18 +506,33 @@ fn copy_pixmap_to_surface(
         Rc<Window>,
     >,
 ) -> Result<(), SoftBufferError> {
-    let mut buffer = surface.buffer_mut()?;
+    let mut buffer =
+        surface.buffer_mut()?;
 
-    for (destination, rgba) in buffer
+    for (
+        destination,
+        rgba,
+    ) in buffer
         .iter_mut()
-        .zip(pixmap.data().chunks_exact(4))
+        .zip(
+            pixmap
+                .data()
+                .chunks_exact(4),
+        )
     {
-        let red = u32::from(rgba[0]);
-        let green = u32::from(rgba[1]);
-        let blue = u32::from(rgba[2]);
+        let red =
+            u32::from(rgba[0]);
+
+        let green =
+            u32::from(rgba[1]);
+
+        let blue =
+            u32::from(rgba[2]);
 
         *destination =
-            (red << 16) | (green << 8) | blue;
+            (red << 16)
+                | (green << 8)
+                | blue;
     }
 
     buffer.present()?;
@@ -297,7 +543,8 @@ fn copy_pixmap_to_surface(
 fn solid_paint(
     color: Color,
 ) -> Paint<'static> {
-    let mut paint = Paint::default();
+    let mut paint =
+        Paint::default();
 
     paint.set_color_rgba8(
         color.red,
@@ -325,10 +572,17 @@ fn to_skia_color(
 fn to_skia_rect(
     rect: Rect,
 ) -> Option<SkiaRect> {
-    let x = rect.origin.x;
-    let y = rect.origin.y;
-    let width = rect.size.width;
-    let height = rect.size.height;
+    let x =
+        rect.origin.x;
+
+    let y =
+        rect.origin.y;
+
+    let width =
+        rect.size.width;
+
+    let height =
+        rect.size.height;
 
     if !x.is_finite()
         || !y.is_finite()
@@ -352,27 +606,51 @@ fn rounded_rect_path(
     rect: SkiaRect,
     radius: f32,
 ) -> Path {
-    let radius = if radius.is_finite() {
-        radius.max(0.0).min(
-            rect.width().min(rect.height()) / 2.0,
-        )
-    } else {
-        0.0
-    };
+    let radius =
+        if radius.is_finite() {
+            radius
+                .max(0.0)
+                .min(
+                    rect.width()
+                        .min(
+                            rect.height(),
+                        )
+                        / 2.0,
+                )
+        } else {
+            0.0
+        };
 
     if radius == 0.0 {
-        return PathBuilder::from_rect(rect);
+        return PathBuilder::from_rect(
+            rect,
+        );
     }
 
-    let left = rect.left();
-    let top = rect.top();
-    let right = rect.right();
-    let bottom = rect.bottom();
+    let left =
+        rect.left();
 
-    let mut builder = PathBuilder::new();
+    let top =
+        rect.top();
 
-    builder.move_to(left + radius, top);
-    builder.line_to(right - radius, top);
+    let right =
+        rect.right();
+
+    let bottom =
+        rect.bottom();
+
+    let mut builder =
+        PathBuilder::new();
+
+    builder.move_to(
+        left + radius,
+        top,
+    );
+
+    builder.line_to(
+        right - radius,
+        top,
+    );
 
     builder.quad_to(
         right,
@@ -381,7 +659,10 @@ fn rounded_rect_path(
         top + radius,
     );
 
-    builder.line_to(right, bottom - radius);
+    builder.line_to(
+        right,
+        bottom - radius,
+    );
 
     builder.quad_to(
         right,
@@ -390,7 +671,10 @@ fn rounded_rect_path(
         bottom,
     );
 
-    builder.line_to(left + radius, bottom);
+    builder.line_to(
+        left + radius,
+        bottom,
+    );
 
     builder.quad_to(
         left,
@@ -399,7 +683,10 @@ fn rounded_rect_path(
         bottom - radius,
     );
 
-    builder.line_to(left, top + radius);
+    builder.line_to(
+        left,
+        top + radius,
+    );
 
     builder.quad_to(
         left,
@@ -410,9 +697,14 @@ fn rounded_rect_path(
 
     builder.close();
 
-    builder
-        .finish()
-        .unwrap_or_else(|| PathBuilder::from_rect(rect))
+    builder.finish()
+        .unwrap_or_else(
+            || {
+                PathBuilder::from_rect(
+                    rect,
+                )
+            },
+        )
 }
 
 fn valid_scale_factor(
