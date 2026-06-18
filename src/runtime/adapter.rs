@@ -4,7 +4,6 @@ use crate::components::{
     Text,
     VStack,
 };
-use crate::layout::ViewExt;
 use crate::view::View;
 
 use super::{

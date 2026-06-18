@@ -1,10 +1,9 @@
 use super::{
     ComponentInstanceId,
     ViewNode,
-    ViewNodeKind,
 };
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TreeBuilderError {
     NoOpenNode,
     UnclosedNodes,

@@ -35,6 +35,7 @@ pub enum LayoutLength {
 }
 
 impl LayoutLength {
+    #[allow(unused)]
     fn to_ui_length(self) -> Length {
         match self {
             Self::Auto => Length::Auto,
@@ -343,7 +344,8 @@ impl StackChild {
             context,
         )
     }
-
+    
+    #[allow(unused)]
     fn create_layout_node(
         &self,
         direction: StackDirection,
@@ -691,6 +693,7 @@ impl StackDirection {
 }
 
 impl StackAlignment {
+    #[allow(unused)]
     fn to_ui_align_items(self) -> AlignItems {
         match self {
             Self::Start => AlignItems::Start,
@@ -702,6 +705,7 @@ impl StackAlignment {
 }
 
 impl StackDistribution {
+    #[allow(unused)]
     fn to_ui_justify_content(self) -> JustifyContent {
         match self {
             Self::Start => JustifyContent::Start,
@@ -805,6 +809,7 @@ impl View for EmptyView {
     }
 }
 
+#[allow(unused)]
 pub(crate) fn dispatch_child_event(
     child: &StackChild,
     bounds: Rect,
@@ -824,6 +829,7 @@ pub(crate) fn dispatch_child_event(
     )
 }
 
+#[allow(unused)]
 pub(crate) fn dispatch_children_in_order<'a>(
     children: impl IntoIterator<
         Item = (&'a StackChild, Rect),

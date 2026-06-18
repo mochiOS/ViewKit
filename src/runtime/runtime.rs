@@ -100,6 +100,12 @@ impl ViewRuntime {
     ) -> Option<RuntimeAction> {
         self.actions.poll()
     }
+    
+    pub fn tree(
+        &mut self,
+    ) -> Option<&ViewNode> {
+        self.tree.as_ref()
+    }
 }
 
 fn collect_node_ids(

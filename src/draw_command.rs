@@ -1,8 +1,8 @@
 //! レンダラーへ渡す描画命令を定義
 
-use crate::geometry::{Point, Rect};
+use crate::geometry::Rect;
 use crate::theme::Color;
-use crate::typography::{TextAlignment, TextStyle};
+use crate::typography::TextAlignment;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum DrawCommand {
