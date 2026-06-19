@@ -5,6 +5,9 @@ version = "0.1.0"
 developer = "mochiOS Team"
 description = "mochiOS UI Kit"
 
+[module]
+name = "viewKit"
+
 [lib]
 source = "src/lib.kome"
 

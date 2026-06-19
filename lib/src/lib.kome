@@ -1,5 +1,3 @@
-module viewKit
-
 enum Color: String {
     blue = "#0f82ff",
     red = "#ff3b30",
