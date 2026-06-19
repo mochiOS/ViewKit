@@ -1,33 +1,34 @@
 module viewKit
 
-enum Color {
-    blue,
-    red,
-    green,
-    accent,
-    primary,
-    secondary,
+enum Color: String {
+    blue = "#0f82ff",
+    red = "#ff3b30",
+    green = "#1cb843",
+
+    accent = "#0f82ff",
+    primary = "#1D1D1F",
+    secondary = "#6E6E73",
 }
 
-enum FontWeight {
-    regular,
-    medium,
-    semibold,
-    bold,
+enum FontWeight: Number {
+    regular = 400,
+    medium = 500,
+    semibold = 600,
+    bold = 700,
 }
 
-enum StackSpacing {
-    none,
-    small,
-    medium,
-    large,
+enum StackSpacing: Number {
+    none = 0,
+    small = 8,
+    medium = 12,
+    large = 20,
 }
 
-enum StackAlignment {
-    start,
-    center,
-    end,
-    stretch,
+enum StackAlignment: String {
+    start = "start",
+    center = "center",
+    end = "end",
+    stretch = "stretch",
 }
 
 @nativeComponent("Text")
@@ -64,20 +65,36 @@ fn View.padding(
     value: Number,
 ) -> View
 
-// memo
-// @nativeComponentはKome componentとして実行せずにViewKit Nodeに変換する
+// @nativeComponentはKome componentとして実行せず、
+// ViewKitのViewNodeへ変換する。
 //
 // 例:
+//
 // Text(
 //     "Hello, {name}",
 //     weight: .bold,
+//     color: .primary,
 // )
 //
-// みたいなのがあったら、
+// は、次のようなViewNodeへ変換される。
 //
 // ViewNode {
 //     kind: Text,
 //     content: interpolate("Hello, {name}"),
-//     weight: Bold
+//     weight: 700,
+//     color: "#1D1D1F",
 // }
-// みたいになる
+//
+// enumのcaseは、ViewNode生成時にraw valueへ変換される。
+//
+// .bold
+//     -> FontWeight.bold
+//     -> 700
+//
+// .medium
+//     -> StackSpacing.medium
+//     -> 12
+//
+// .center
+//     -> StackAlignment.center
+//     -> "center"
