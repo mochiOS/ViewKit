@@ -58,11 +58,6 @@ component TextInput(
     onSubmit: Action<TextInputEvent>? = null,
 )
 
-@nativeModifier("Padding")
-fn View.padding(
-    value: Number,
-) -> View
-
 // @nativeComponentはKome componentとして実行せず、
 // ViewKitのViewNodeへ変換する。
 //

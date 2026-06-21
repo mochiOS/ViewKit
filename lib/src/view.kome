@@ -1,0 +1,6 @@
+extension View {
+    @nativeModifier("Padding")
+    fn padding(
+        value: Number,
+    ) -> View
+}
