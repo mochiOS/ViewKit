@@ -1,4 +1,4 @@
-enum Color: String {
+enum Color {
     blue = "#0f82ff",
     red = "#ff3b30",
     green = "#1cb843",
@@ -8,21 +8,21 @@ enum Color: String {
     secondary = "#6E6E73",
 }
 
-enum FontWeight: Number {
+enum FontWeight {
     regular = 400,
     medium = 500,
     semibold = 600,
     bold = 700,
 }
 
-enum StackSpacing: Number {
+enum StackSpacing {
     none = 0,
     small = 8,
     medium = 12,
     large = 20,
 }
 
-enum StackAlignment: String {
+enum StackAlignment {
     start = "start",
     center = "center",
     end = "end",
