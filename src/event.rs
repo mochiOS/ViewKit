@@ -340,6 +340,8 @@ impl EventDispatcher {
                     },
                 )
             }
+            
+            PlatformEvent::TextInput { text: _ } => { todo!() }
 
             PlatformEvent::Resumed {
                 ..

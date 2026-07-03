@@ -16,7 +16,7 @@ pub enum ButtonState {
     Released,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum PlatformEvent {
     Resumed {
         viewport: Viewport,
@@ -40,6 +40,9 @@ pub enum PlatformEvent {
         state: ButtonState,
     },
     PointerLeft,
+    TextInput {
+        text: String,
+    },
     Focused(bool),
     RedrawRequested,
     CloseRequested,
