@@ -3,6 +3,7 @@ use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
 use crate::theme::Theme;
 use crate::typography::{TextMeasurer, Typography};
+use std::time::Instant;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Constraints {
@@ -41,6 +42,39 @@ pub struct PaintContext<'a> {
     pub theme: &'a Theme,
     pub typography: &'a Typography,
     pub text_measurer: &'a mut TextMeasurer,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RedrawSchedule {
+    deadline: Option<Instant>,
+}
+
+impl RedrawSchedule {
+    pub const fn new() -> Self {
+        Self { deadline: None }
+    }
+
+    pub const fn deadline(&self) -> Option<Instant> {
+        self.deadline
+    }
+
+    pub fn request_at(&mut self, deadline: Instant) {
+        match self.deadline {
+            Some(current) if current <= deadline => {}
+
+            _ => {
+                self.deadline = Some(deadline);
+            }
+        }
+    }
+
+    pub fn take(&mut self) -> Option<Instant> {
+        self.deadline.take()
+    }
+
+    pub fn clear(&mut self) {
+        self.deadline = None;
+    }
 }
 
 pub trait View {
