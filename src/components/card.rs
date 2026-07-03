@@ -21,13 +21,9 @@ impl Card<EmptyView> {
     pub const fn new() -> Self {
         Self {
             content: EmptyView,
-
             color: RectangleColor::Surface,
-
             radius: CornerRadius::Card,
-
             shadow: ShadowStyle::Card,
-
             border: BorderStyle::Standard { width: 1.0 },
         }
     }

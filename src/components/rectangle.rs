@@ -260,19 +260,39 @@ fn paint_shadow(bounds: Rect, radius: f32, shadow: Shadow, context: &mut PaintCo
 
         return;
     }
+    
+    let layers = blur_radius.ceil().clamp(2.0, shadow.color.alpha as f32) as u32;
 
-    let layers = blur_radius.ceil().clamp(2.0, 24.0) as u32;
+    let weight_sum = (1..=layers)
+        .map(|layer| {
+            let progress = layer as f32 / layers as f32;
+
+            1.0 - progress * 0.75
+        })
+        .sum::<f32>();
+
+    let mut remaining_alpha = u32::from(shadow.color.alpha);
 
     for layer in (1..=layers).rev() {
         let progress = layer as f32 / layers as f32;
 
         let expansion = spread + blur_radius * progress;
 
-        let opacity_weight = 1.0 - progress * 0.75;
+        let weight = 1.0 - progress * 0.75;
 
-        let alpha = (shadow.color.alpha as f32 * opacity_weight * 2.0 / layers as f32)
-            .round()
-            .clamp(1.0, 255.0) as u8;
+        let mut alpha = (shadow.color.alpha as f32 * weight / weight_sum).round() as u32;
+
+        alpha = alpha.min(remaining_alpha);
+
+        if layer == 1 {
+            alpha = remaining_alpha;
+        }
+
+        remaining_alpha = remaining_alpha.saturating_sub(alpha);
+
+        if alpha == 0 {
+            continue;
+        }
 
         let shadow_bounds =
             expanded_shadow_rect(bounds, shadow.offset_x, shadow.offset_y, expansion);
@@ -280,7 +300,8 @@ fn paint_shadow(bounds: Rect, radius: f32, shadow: Shadow, context: &mut PaintCo
         context.display_list.push(DrawCommand::FillRoundedRect {
             rect: shadow_bounds,
             radius: radius + expansion,
-            color: shadow.color.with_alpha(alpha),
+
+            color: shadow.color.with_alpha(alpha as u8),
         });
     }
 }
