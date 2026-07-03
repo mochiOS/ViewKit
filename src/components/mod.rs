@@ -24,7 +24,7 @@ pub use spacer::Spacer;
 pub use vstack::VStack;
 pub use zstack::{ZStack, ZStackAlignment};
 
-pub use button::{Button, ButtonColor, ButtonInteractionState};
+pub use button::{Button, ButtonColor, ButtonInteractionState, ButtonStyle};
 pub use card::Card;
 pub use rectangle::{BorderStyle, Rectangle, RectangleColor};
 pub use text::Text;

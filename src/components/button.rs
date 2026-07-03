@@ -3,17 +3,37 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::components::BorderStyle;
 use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::Rect;
 use crate::layout::{IntoStackChild, StackChild};
 use crate::platform::PointerButton;
-use crate::theme::{Color, CornerRadius, ShadowStyle};
+use crate::theme::{Color, CornerRadius, ShadowStyle, Theme};
 use crate::view::{PaintContext, View};
 
 use super::{Rectangle, RectangleColor, ZStackAlignment};
 
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ButtonStyle {
+    #[default]
+    Standard,
+
+    Primary,
+    Accent,
+    Ghost,
+    Danger,
+
+    Custom {
+        background: Color,
+        hovered_background: Color,
+        border: Color,
+        hovered_border: Color,
+        foreground: Color,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ButtonColor {
     Surface,
 
@@ -25,30 +45,172 @@ pub enum ButtonColor {
     Custom(Color),
 }
 
-impl ButtonColor {
-    fn resolve(self, context: &PaintContext<'_>) -> Color {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ButtonAppearance {
+    background: Color,
+    border: Color,
+    foreground: Color,
+}
+
+impl ButtonAppearance {
+    fn with_opacity(self, opacity: f32) -> Self {
+        Self {
+            background: color_with_opacity(self.background, opacity),
+
+            border: color_with_opacity(self.border, opacity),
+
+            foreground: color_with_opacity(self.foreground, opacity),
+        }
+    }
+}
+
+impl ButtonStyle {
+    fn resolve(self, theme: &Theme, state: ButtonVisualState) -> ButtonAppearance {
+        let hovered = state == ButtonVisualState::Hovered;
+
+        let pressed = state == ButtonVisualState::Pressed;
+
         match self {
-            Self::Surface => context.theme.colors.elevated_surface,
-            Self::Accent => context.theme.colors.accent,
-            Self::Destructive => context.theme.colors.destructive,
-            Self::Custom(color) => color,
+            Self::Standard => ButtonAppearance {
+                background: if pressed {
+                    theme.colors.surface_muted
+                } else if hovered {
+                    theme.colors.surface_subtle
+                } else {
+                    theme.colors.surface
+                },
+
+                border: if pressed {
+                    Color::rgba(0, 0, 0, 64)
+                } else if hovered {
+                    Color::rgba(0, 0, 0, 56)
+                } else {
+                    theme.colors.border_strong
+                },
+
+                foreground: theme.colors.text_primary,
+            },
+
+            Self::Primary => {
+                let color = if pressed {
+                    Color::BLACK
+                } else if hovered {
+                    Color::from_rgb_hex(0x303030)
+                } else {
+                    theme.colors.text_primary
+                };
+
+                ButtonAppearance {
+                    background: color,
+                    border: color,
+                    foreground: Color::WHITE,
+                }
+            }
+
+            Self::Accent => {
+                let color = if pressed {
+                    theme.colors.accent_pressed
+                } else if hovered {
+                    theme.colors.accent_hovered
+                } else {
+                    theme.colors.accent
+                };
+
+                ButtonAppearance {
+                    background: color,
+                    border: color,
+                    foreground: Color::WHITE,
+                }
+            }
+
+            Self::Ghost => ButtonAppearance {
+                background: if pressed {
+                    Color::rgba(0, 0, 0, 28)
+                } else if hovered {
+                    Color::rgba(0, 0, 0, 14)
+                } else {
+                    Color::TRANSPARENT
+                },
+
+                border: Color::TRANSPARENT,
+
+                foreground: theme.colors.text_primary,
+            },
+
+            Self::Danger => ButtonAppearance {
+                background: if pressed {
+                    Color::from_rgb_hex(0xffd8d4)
+                } else if hovered {
+                    Color::from_rgb_hex(0xffe5e2)
+                } else {
+                    theme.colors.destructive_soft
+                },
+
+                border: if pressed {
+                    Color::rgba(196, 43, 28, 112)
+                } else if hovered {
+                    Color::rgba(196, 43, 28, 87)
+                } else {
+                    Color::rgba(196, 43, 28, 56)
+                },
+
+                foreground: theme.colors.destructive,
+            },
+
+            Self::Custom {
+                background,
+                hovered_background,
+                border,
+                hovered_border,
+                foreground,
+            } => ButtonAppearance {
+                background: if hovered || pressed {
+                    hovered_background
+                } else {
+                    background
+                },
+
+                border: if hovered || pressed {
+                    hovered_border
+                } else {
+                    border
+                },
+
+                foreground,
+            },
         }
     }
 
-    fn hover_overlay(self) -> Color {
-        match self {
-            Self::Surface => Color::rgba(0, 0, 0, 16),
-            Self::Accent | Self::Destructive | Self::Custom(_) => Color::rgba(255, 255, 255, 24),
+    pub fn foreground_color(self, theme: &Theme) -> Color {
+        self.resolve(theme, ButtonVisualState::Normal).foreground
+    }
+}
+
+impl From<ButtonColor> for ButtonStyle {
+    fn from(color: ButtonColor) -> Self {
+        match color {
+            ButtonColor::Surface => Self::Standard,
+            ButtonColor::Accent => Self::Accent,
+            ButtonColor::Destructive => Self::Danger,
+            ButtonColor::Custom(color) => Self::Custom {
+                background: color,
+                hovered_background: color,
+                border: color,
+                hovered_border: color,
+                foreground: Color::WHITE,
+            },
         }
     }
+}
 
-    fn pressed_overlay(self) -> Color {
-        match self {
-            Self::Surface => Color::rgba(0, 0, 0, 32),
+fn color_with_opacity(color: Color, opacity: f32) -> Color {
+    let opacity = if opacity.is_finite() {
+        opacity.clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
 
-            Self::Accent | Self::Destructive | Self::Custom(_) => Color::rgba(0, 0, 0, 36),
-        }
-    }
+    color.with_alpha((color.alpha as f32 * opacity).round() as u8)
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -166,7 +328,7 @@ enum ButtonVisualState {
 pub struct Button {
     interaction: ButtonInteractionState,
     content: Option<StackChild>,
-    color: ButtonColor,
+    style: ButtonStyle,
     radius: CornerRadius,
     shadow: ShadowStyle,
     alignment: ZStackAlignment,
@@ -178,7 +340,7 @@ impl Button {
         Self {
             interaction,
             content: None,
-            color: ButtonColor::Accent,
+            style: ButtonStyle::Standard,
             radius: CornerRadius::Medium,
             shadow: ShadowStyle::None,
             alignment: ZStackAlignment::Center,
@@ -195,8 +357,14 @@ impl Button {
         self
     }
 
+    pub fn style(mut self, style: ButtonStyle) -> Self {
+        self.style = style;
+        self
+    }
+
     pub fn color(mut self, color: ButtonColor) -> Self {
-        self.color = color;
+        self.style = ButtonStyle::from(color);
+
         self
     }
 
@@ -235,10 +403,10 @@ impl View for Button {
 
         let visual_state = self.interaction.visual_state();
 
-        let mut background_color = self.color.resolve(context);
+        let mut appearance = self.style.resolve(context.theme, visual_state);
 
         if visual_state == ButtonVisualState::Disabled {
-            background_color = background_color.with_alpha(96);
+            appearance = appearance.with_opacity(0.42);
         }
 
         let shadow = if visual_state == ButtonVisualState::Pressed {
@@ -248,32 +416,11 @@ impl View for Button {
         };
 
         Rectangle::new()
-            .color(RectangleColor::Custom(background_color))
+            .color(RectangleColor::Custom(appearance.background))
             .radius(self.radius)
             .shadow(shadow)
+            .border(BorderStyle::custom(appearance.border, 1.0))
             .paint(bounds, context);
-
-        let overlay_color = match visual_state {
-            ButtonVisualState::Hovered => Some(self.color.hover_overlay()),
-
-            ButtonVisualState::Pressed => Some(self.color.pressed_overlay()),
-
-            ButtonVisualState::Normal | ButtonVisualState::Disabled => None,
-        };
-
-        if let Some(color) = overlay_color {
-            context.display_list.push(DrawCommand::FillRoundedRect {
-                rect: bounds,
-
-                radius: self.radius.resolve(
-                    &context.theme.radius,
-                    bounds.size.width,
-                    bounds.size.height,
-                ),
-
-                color,
-            });
-        }
 
         let Some(content) = self.content.as_ref() else {
             return;
