@@ -10,24 +10,26 @@ pub struct Color {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ColorTokens {
-    pub canvas: Color,
+    pub background: Color,
 
     pub surface: Color,
     pub surface_subtle: Color,
     pub surface_muted: Color,
+    pub elevated_surface: Color,
 
     pub text_primary: Color,
     pub text_secondary: Color,
     pub text_tertiary: Color,
     pub text_disabled: Color,
 
-    pub border: Color,
-    pub border_strong: Color,
-
     pub accent: Color,
     pub accent_hovered: Color,
     pub accent_pressed: Color,
     pub accent_soft: Color,
+
+    pub border: Color,
+    pub border_strong: Color,
+    pub focus_ring: Color,
 
     pub success: Color,
     pub success_soft: Color,
@@ -35,11 +37,9 @@ pub struct ColorTokens {
     pub warning: Color,
     pub warning_soft: Color,
 
-    pub danger: Color,
-    pub danger_hovered: Color,
-    pub danger_soft: Color,
-
-    pub focus_ring: Color,
+    pub destructive: Color,
+    pub destructive_hovered: Color,
+    pub destructive_soft: Color,
 }
 
 impl Color {
@@ -52,12 +52,7 @@ impl Color {
         }
     }
 
-    pub const fn rgba(
-        red: u8,
-        green: u8,
-        blue: u8,
-        alpha: u8,
-    ) -> Self {
+    pub const fn rgba(red: u8, green: u8, blue: u8, alpha: u8) -> Self {
         Self {
             red,
             green,
@@ -83,16 +78,8 @@ impl Color {
         )
     }
 
-    pub const fn with_alpha(
-        self,
-        alpha: u8,
-    ) -> Self {
-        Self::rgba(
-            self.red,
-            self.green,
-            self.blue,
-            alpha,
-        )
+    pub const fn with_alpha(self, alpha: u8) -> Self {
+        Self::rgba(self.red, self.green, self.blue, alpha)
     }
 
     pub const TRANSPARENT: Self = Self::rgba(0, 0, 0, 0);

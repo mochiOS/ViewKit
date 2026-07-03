@@ -56,6 +56,7 @@ pub struct Rectangle {
     color: RectangleColor,
     radius: CornerRadius,
     shadow: ShadowStyle,
+    border: BorderStyle,
 }
 
 impl Default for Rectangle {
@@ -64,6 +65,7 @@ impl Default for Rectangle {
             color: RectangleColor::Surface,
             radius: CornerRadius::Medium,
             shadow: ShadowStyle::Small,
+            border: BorderStyle::None,
         }
     }
 }
@@ -95,6 +97,88 @@ impl Rectangle {
     ) -> Self {
         self.shadow = shadow;
         self
+    }
+
+    pub fn border(
+        mut self,
+        border: BorderStyle,
+    ) -> Self {
+        self.border = border;
+        self
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum BorderStyle {
+    #[default]
+    None,
+
+    Standard {
+        width: f32,
+    },
+
+    Strong {
+        width: f32,
+    },
+
+    Custom {
+        color: Color,
+        width: f32,
+    },
+}
+
+impl BorderStyle {
+    pub const fn standard(width: f32) -> Self {
+        Self::Standard { width }
+    }
+
+    pub const fn strong(width: f32) -> Self {
+        Self::Strong { width }
+    }
+
+    pub const fn custom(
+        color: Color,
+        width: f32,
+    ) -> Self {
+        Self::Custom {
+            color,
+            width,
+        }
+    }
+
+    fn resolve(
+        self,
+        context: &PaintContext<'_>,
+    ) -> Option<(Color, f32)> {
+        let (color, width) = match self {
+            Self::None => {
+                return None;
+            }
+
+            Self::Standard { width } => (
+                context.theme.colors.border,
+                width,
+            ),
+
+            Self::Strong { width } => (
+                context.theme.colors.border_strong,
+                width,
+            ),
+
+            Self::Custom {
+                color,
+                width,
+            } => (
+                color,
+                width,
+            ),
+        };
+
+        if !width.is_finite() || width <= 0.0 {
+            return None;
+        }
+
+        Some((color, width))
     }
 }
 
@@ -149,6 +233,45 @@ impl View for Rectangle {
                     color,
                 },
             );
+        }
+
+        if let Some((border_color, border_width)) =
+            self.border.resolve(context)
+        {
+            let half_width =
+                border_width / 2.0;
+        
+            let border_bounds = Rect::new(
+                bounds.origin.x + half_width,
+                bounds.origin.y + half_width,
+                (bounds.size.width - border_width).max(0.0),
+                (bounds.size.height - border_width).max(0.0),
+            );
+        
+            if border_bounds.size.width > 0.0
+                && border_bounds.size.height > 0.0
+            {
+                let border_radius =
+                    (radius - half_width).max(0.0);
+        
+                let command =
+                    if border_radius > 0.0 {
+                        DrawCommand::StrokeRoundedRect {
+                            rect: border_bounds,
+                            radius: border_radius,
+                            color: border_color,
+                            width: border_width,
+                        }
+                    } else {
+                        DrawCommand::StrokeRect {
+                            rect: border_bounds,
+                            color: border_color,
+                            width: border_width,
+                        }
+                    };
+        
+                context.display_list.push(command);
+            }
         }
     }
 }

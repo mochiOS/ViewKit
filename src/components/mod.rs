@@ -23,6 +23,6 @@ pub use group::Group;
 pub use scroll::{Scroll, ScrollAxis, ScrollState};
 pub use padding::Padding;
 
-pub use rectangle::{Rectangle, RectangleColor, };
+pub use rectangle::{Rectangle, RectangleColor, BorderStyle};
 pub use button::{Button, ButtonColor, ButtonInteractionState};
 pub use text::Text;
