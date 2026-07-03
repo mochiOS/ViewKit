@@ -110,6 +110,23 @@ impl TextFieldInteractionState {
         inner.value = value;
         inner.value_initialized = true;
     }
+
+    fn insert_text(&self, text: &str) -> bool {
+        let filtered: String = text
+            .chars()
+            .filter(|character| !character.is_control())
+            .collect();
+
+        if filtered.is_empty() {
+            return false;
+        }
+
+        let mut inner = self.inner.borrow_mut();
+
+        inner.value.push_str(filtered.as_str());
+
+        true
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -166,7 +183,6 @@ struct TextFieldAppearance {
 pub struct TextField {
     interaction: TextFieldInteractionState,
 
-    value: String,
     placeholder: String,
 
     size: TextFieldSize,
@@ -181,9 +197,7 @@ impl TextField {
         Self {
             interaction,
 
-            value: String::new(),
             placeholder: String::new(),
-
             size: TextFieldSize::Medium,
             radius: CornerRadius::Medium,
 
@@ -192,8 +206,8 @@ impl TextField {
         }
     }
 
-    pub fn value(mut self, value: impl Into<String>) -> Self {
-        self.value = value.into();
+    pub fn value(self, value: impl Into<String>) -> Self {
+        self.interaction.initialize_value(value.into());
 
         self
     }
@@ -228,11 +242,13 @@ impl TextField {
         &self.interaction
     }
 
-    fn display_text(&self) -> &str {
-        if self.value.is_empty() {
-            self.placeholder.as_str()
+    fn display_text(&self) -> String {
+        let value = self.interaction.value();
+
+        if value.is_empty() {
+            self.placeholder.clone()
         } else {
-            self.value.as_str()
+            value
         }
     }
 
@@ -255,7 +271,7 @@ impl TextField {
             context.theme.colors.border_strong
         };
 
-        let foreground = if !interaction.enabled || self.value.is_empty() {
+        let foreground = if !interaction.enabled || interaction.value.is_empty() {
             context.theme.colors.text_tertiary
         } else {
             context.theme.colors.text_primary
@@ -271,7 +287,8 @@ impl TextField {
 
 impl View for TextField {
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
-        let text = Text::new(self.display_text())
+        let display_text = self.display_text();
+        let text = Text::new(display_text)
             .font_size(self.size.font_size())
             .line_height(self.size.line_height());
 
@@ -463,6 +480,18 @@ impl View for TextField {
                 }
 
                 EventResult::Ignored
+            }
+
+            ViewEvent::TextInput { text } => {
+                if !self.interaction.is_focused() {
+                    return EventResult::Ignored;
+                }
+
+                if self.interaction.insert_text(text) {
+                    context.request_redraw();
+                }
+
+                EventResult::Consumed
             }
 
             _ => EventResult::Ignored,
