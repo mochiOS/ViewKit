@@ -532,13 +532,16 @@ impl View for TextField {
         };
 
         let caret_width = 2.0;
+        let caret_half_width = caret_width / 2.0;
 
-        let minimum_caret_x = text_bounds.origin.x;
+        let caret_center_x = text_bounds.origin.x + prefix_width;
 
-        let maximum_caret_x =
-            (text_bounds.origin.x + text_bounds.size.width - caret_width).max(minimum_caret_x);
+        let minimum_caret_center_x = text_bounds.origin.x;
 
-        let caret_x = (text_bounds.origin.x + prefix_width).clamp(minimum_caret_x, maximum_caret_x);
+        let maximum_caret_center_x = text_bounds.origin.x + text_bounds.size.width;
+
+        let caret_x =
+            caret_center_x.clamp(minimum_caret_center_x, maximum_caret_center_x) - caret_half_width;
 
         let caret_height = (line_height - 2.0)
             .max(12.0)
