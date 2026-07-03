@@ -38,6 +38,10 @@ pub enum ViewEvent {
     ArrowLeft,
     ArrowRight,
 
+    PointerFocusRequested {
+        position: Point,
+    },
+
     FocusChanged {
         focused: bool,
     },
@@ -49,7 +53,8 @@ impl ViewEvent {
             Self::PointerMoved { position }
             | Self::PointerPressed { position, .. }
             | Self::PointerReleased { position, .. }
-            | Self::Scroll { position, .. } => Some(*position),
+            | Self::Scroll { position, .. }
+            | Self::PointerFocusRequested { position } => Some(*position),
 
             Self::PointerLeft
             | Self::TextInput { .. }
@@ -72,6 +77,7 @@ impl ViewEvent {
             self,
             Self::PointerMoved { .. }
                 | Self::PointerReleased { .. }
+                | Self::PointerFocusRequested { .. }
                 | Self::PointerLeft
                 | Self::TextInput { .. }
                 | Self::Backspace
@@ -166,11 +172,31 @@ impl EventDispatcher {
         event: &PlatformEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
+        let mut result = EventResult::Ignored;
+
+        let is_primary_press = matches!(
+            event,
+            PlatformEvent::PointerButton {
+                button: PointerButton::Primary,
+                state: ButtonState::Pressed,
+            }
+        );
+
+        if is_primary_press {
+            if let Some(position) = self.pointer_position {
+                result = result.merge(root.handle_event(
+                    bounds,
+                    &ViewEvent::PointerFocusRequested { position },
+                    context,
+                ));
+            }
+        }
+
         let Some(view_event) = self.convert_event(event) else {
-            return EventResult::Ignored;
+            return result;
         };
 
-        root.handle_event(bounds, &view_event, context)
+        result.merge(root.handle_event(bounds, &view_event, context))
     }
 
     fn convert_event(&mut self, event: &PlatformEvent) -> Option<ViewEvent> {

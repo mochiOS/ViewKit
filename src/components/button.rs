@@ -509,29 +509,11 @@ impl View for Button {
                 position,
                 button: PointerButton::Primary,
             } => {
-                let mut inner = self.interaction.inner.borrow_mut();
-
-                let owned_press = inner.armed;
-
-                if !owned_press {
-                    return EventResult::Ignored;
+                if bounds.contains(*position) {
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
                 }
-
-                let inside = bounds.contains(*position);
-
-                if inside {
-                    inner.clicked = true;
-                }
-
-                inner.hovered = inside;
-                inner.armed = false;
-                inner.pressed = false;
-
-                drop(inner);
-
-                context.request_redraw();
-
-                EventResult::Consumed
             }
 
             ViewEvent::PointerLeft => {

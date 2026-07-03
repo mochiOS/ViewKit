@@ -378,6 +378,43 @@ impl TextField {
             foreground,
         }
     }
+
+    fn cursor_at_x(&self, pointer_x: f32, bounds: Rect, context: &mut EventContext<'_>) -> usize {
+        let value = self.interaction.value();
+
+        if value.is_empty() {
+            return 0;
+        }
+
+        let text_origin_x = bounds.origin.x + self.size.horizontal_padding();
+
+        let target_x = (pointer_x - text_origin_x).max(0.0);
+
+        let mut previous_index = 0;
+        let mut previous_width = 0.0;
+
+        for (index, character) in value.char_indices() {
+            let next_index = index + character.len_utf8();
+
+            let next_width = Text::new(&value[..next_index])
+                .font_size(self.size.font_size())
+                .line_height(self.size.line_height())
+                .measure_unbounded(context.text_measurer)
+                .width;
+
+            let midpoint = (previous_width + next_width) / 2.0;
+
+            if target_x < midpoint {
+                return previous_index;
+            }
+
+            previous_index = next_index;
+
+            previous_width = next_width;
+        }
+
+        value.len()
+    }
 }
 
 impl View for TextField {
@@ -494,7 +531,7 @@ impl View for TextField {
                 .width
         };
 
-        let caret_width = 3.0;
+        let caret_width = 2.0;
 
         let minimum_caret_x = text_bounds.origin.x;
 
@@ -559,43 +596,17 @@ impl View for TextField {
                     return EventResult::Ignored;
                 }
 
+                let cursor = self.cursor_at_x(position.x, bounds, context);
                 let mut inner = self.interaction.inner.borrow_mut();
-
-                let changed = !inner.focused || !inner.hovered;
 
                 inner.hovered = true;
                 inner.focused = true;
+                inner.cursor = cursor;
+                inner.caret_blink_origin = Some(Instant::now());
 
                 drop(inner);
 
-                if changed {
-                    context.request_redraw();
-                }
-
-                EventResult::Consumed
-            }
-
-            ViewEvent::PointerReleased {
-                position,
-                button: PointerButton::Primary,
-            } => {
-                let inside = bounds.contains(*position);
-
-                if !inside {
-                    let mut inner = self.interaction.inner.borrow_mut();
-
-                    let changed = inner.focused;
-
-                    inner.focused = false;
-
-                    drop(inner);
-
-                    if changed {
-                        context.request_redraw();
-                    }
-
-                    return EventResult::Ignored;
-                }
+                context.request_redraw();
 
                 EventResult::Consumed
             }
@@ -679,6 +690,21 @@ impl View for TextField {
                 context.request_redraw();
 
                 EventResult::Consumed
+            }
+
+            ViewEvent::PointerFocusRequested { position } => {
+                let should_focus = bounds.contains(*position);
+                let changed = self.interaction.set_focused(should_focus);
+
+                if !should_focus {
+                    self.interaction.stop_caret_blink();
+                }
+
+                if changed {
+                    context.request_redraw();
+                }
+
+                EventResult::Ignored
             }
 
             _ => EventResult::Ignored,
