@@ -2,12 +2,7 @@
 
 use crate::draw_command::DrawCommand;
 use crate::geometry::{Rect, Size};
-use crate::theme::{
-    Color,
-    CornerRadius,
-    Shadow,
-    ShadowStyle,
-};
+use crate::theme::{Color, CornerRadius, Shadow, ShadowStyle};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -21,90 +16,15 @@ pub enum RectangleColor {
 }
 
 impl RectangleColor {
-    fn resolve(
-        self,
-        context: &PaintContext<'_>,
-    ) -> Color {
+    fn resolve(self, context: &PaintContext<'_>) -> Color {
         match self {
-            Self::Background => {
-                context.theme.colors.background
-            }
-
-            Self::Surface => {
-                context.theme.colors.surface
-            }
-
-            Self::ElevatedSurface => {
-                context.theme.colors.elevated_surface
-            }
-
-            Self::Accent => {
-                context.theme.colors.accent
-            }
-
-            Self::Destructive => {
-                context.theme.colors.destructive
-            }
-
+            Self::Background => context.theme.colors.background,
+            Self::Surface => context.theme.colors.surface,
+            Self::ElevatedSurface => context.theme.colors.elevated_surface,
+            Self::Accent => context.theme.colors.accent,
+            Self::Destructive => context.theme.colors.destructive,
             Self::Custom(color) => color,
         }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Rectangle {
-    color: RectangleColor,
-    radius: CornerRadius,
-    shadow: ShadowStyle,
-    border: BorderStyle,
-}
-
-impl Default for Rectangle {
-    fn default() -> Self {
-        Self {
-            color: RectangleColor::Surface,
-            radius: CornerRadius::Medium,
-            shadow: ShadowStyle::Small,
-            border: BorderStyle::None,
-        }
-    }
-}
-
-impl Rectangle {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn color(
-        mut self,
-        color: RectangleColor,
-    ) -> Self {
-        self.color = color;
-        self
-    }
-
-    pub fn radius(
-        mut self,
-        radius: CornerRadius,
-    ) -> Self {
-        self.radius = radius;
-        self
-    }
-
-    pub fn shadow(
-        mut self,
-        shadow: ShadowStyle,
-    ) -> Self {
-        self.shadow = shadow;
-        self
-    }
-
-    pub fn border(
-        mut self,
-        border: BorderStyle,
-    ) -> Self {
-        self.border = border;
-        self
     }
 }
 
@@ -136,45 +56,24 @@ impl BorderStyle {
         Self::Strong { width }
     }
 
-    pub const fn custom(
-        color: Color,
-        width: f32,
-    ) -> Self {
-        Self::Custom {
-            color,
-            width,
-        }
+    pub const fn custom(color: Color, width: f32) -> Self {
+        Self::Custom { color, width }
     }
 
-    fn resolve(
-        self,
-        context: &PaintContext<'_>,
-    ) -> Option<(Color, f32)> {
+    fn resolve(self, context: &PaintContext<'_>) -> Option<(Color, f32)> {
         let (color, width) = match self {
             Self::None => {
                 return None;
             }
 
-            Self::Standard { width } => (
-                context.theme.colors.border,
-                width,
-            ),
+            Self::Standard { width } => (context.theme.colors.border, width),
 
-            Self::Strong { width } => (
-                context.theme.colors.border_strong,
-                width,
-            ),
+            Self::Strong { width } => (context.theme.colors.border_strong, width),
 
-            Self::Custom {
-                color,
-                width,
-            } => (
-                color,
-                width,
-            ),
+            Self::Custom { color, width } => (color, width),
         };
 
-        if !width.is_finite() || width <= 0.0 {
+        if !width.is_finite() || width <= 0.0 || color.alpha == 0 {
             return None;
         }
 
@@ -182,193 +81,174 @@ impl BorderStyle {
     }
 }
 
-impl View for Rectangle {
-    fn measure(
-        &self,
-        constraints: Constraints,
-        _context: &mut MeasureContext<'_>,
-    ) -> Size {
-        constraints.constrain(
-            Size::new(0.0, 0.0),
-        )
-    }
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Rectangle {
+    color: RectangleColor,
+    radius: CornerRadius,
+    shadow: ShadowStyle,
+    border: BorderStyle,
+}
 
-    fn paint(
-        &self,
-        bounds: Rect,
-        context: &mut PaintContext<'_>,
-    ) {
-        let color = self.color.resolve(context);
-
-        let radius = self.radius.resolve(
-            &context.theme.radius,
-            bounds.size.width,
-            bounds.size.height,
-        );
-
-        if let Some(shadow) = self
-            .shadow
-            .resolve(&context.theme.shadows)
-        {
-            paint_shadow(
-                bounds,
-                radius,
-                shadow,
-                context,
-            );
-        }
-
-        if radius > 0.0 {
-            context.display_list.push(
-                DrawCommand::FillRoundedRect {
-                    rect: bounds,
-                    radius,
-                    color,
-                },
-            );
-        } else {
-            context.display_list.push(
-                DrawCommand::FillRect {
-                    rect: bounds,
-                    color,
-                },
-            );
-        }
-
-        if let Some((border_color, border_width)) =
-            self.border.resolve(context)
-        {
-            let half_width =
-                border_width / 2.0;
-        
-            let border_bounds = Rect::new(
-                bounds.origin.x + half_width,
-                bounds.origin.y + half_width,
-                (bounds.size.width - border_width).max(0.0),
-                (bounds.size.height - border_width).max(0.0),
-            );
-        
-            if border_bounds.size.width > 0.0
-                && border_bounds.size.height > 0.0
-            {
-                let border_radius =
-                    (radius - half_width).max(0.0);
-        
-                let command =
-                    if border_radius > 0.0 {
-                        DrawCommand::StrokeRoundedRect {
-                            rect: border_bounds,
-                            radius: border_radius,
-                            color: border_color,
-                            width: border_width,
-                        }
-                    } else {
-                        DrawCommand::StrokeRect {
-                            rect: border_bounds,
-                            color: border_color,
-                            width: border_width,
-                        }
-                    };
-        
-                context.display_list.push(command);
-            }
+impl Default for Rectangle {
+    fn default() -> Self {
+        Self {
+            color: RectangleColor::Surface,
+            radius: CornerRadius::None,
+            shadow: ShadowStyle::None,
+            border: BorderStyle::None,
         }
     }
 }
 
-fn paint_shadow(
-    bounds: Rect,
-    radius: f32,
-    shadow: Shadow,
-    context: &mut PaintContext<'_>,
-) {
+impl Rectangle {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn color(mut self, color: RectangleColor) -> Self {
+        self.color = color;
+        self
+    }
+
+    pub fn radius(mut self, radius: CornerRadius) -> Self {
+        self.radius = radius;
+        self
+    }
+
+    pub fn shadow(mut self, shadow: ShadowStyle) -> Self {
+        self.shadow = shadow;
+        self
+    }
+
+    pub fn border(mut self, border: BorderStyle) -> Self {
+        self.border = border;
+        self
+    }
+}
+
+impl View for Rectangle {
+    fn measure(&self, constraints: Constraints, _context: &mut MeasureContext<'_>) -> Size {
+        constraints.constrain(Size::ZERO)
+    }
+
+    fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
+        if bounds.size.width <= 0.0 || bounds.size.height <= 0.0 {
+            return;
+        }
+
+        let color = self.color.resolve(context);
+
+        let radius =
+            self.radius
+                .resolve(&context.theme.radius, bounds.size.width, bounds.size.height);
+
+        if let Some(shadow) = self.shadow.resolve(&context.theme.shadows) {
+            paint_shadow(bounds, radius, shadow, context);
+        }
+
+        if radius > 0.0 {
+            context.display_list.push(DrawCommand::FillRoundedRect {
+                rect: bounds,
+                radius,
+                color,
+            });
+        } else {
+            context.display_list.push(DrawCommand::FillRect {
+                rect: bounds,
+                color,
+            });
+        }
+
+        paint_border(bounds, radius, self.border, context);
+    }
+}
+
+fn paint_border(bounds: Rect, radius: f32, border: BorderStyle, context: &mut PaintContext<'_>) {
+    let Some((color, width)) = border.resolve(context) else {
+        return;
+    };
+
+    let half_width = width / 2.0;
+
+    let border_bounds = Rect::new(
+        bounds.origin.x + half_width,
+        bounds.origin.y + half_width,
+        (bounds.size.width - width).max(0.0),
+        (bounds.size.height - width).max(0.0),
+    );
+
+    if border_bounds.size.width <= 0.0 || border_bounds.size.height <= 0.0 {
+        return;
+    }
+
+    let border_radius = (radius - half_width).max(0.0);
+
+    if border_radius > 0.0 {
+        context.display_list.push(DrawCommand::StrokeRoundedRect {
+            rect: border_bounds,
+            radius: border_radius,
+            color,
+            width,
+        });
+    } else {
+        context.display_list.push(DrawCommand::StrokeRect {
+            rect: border_bounds,
+            color,
+            width,
+        });
+    }
+}
+
+fn paint_shadow(bounds: Rect, radius: f32, shadow: Shadow, context: &mut PaintContext<'_>) {
     if shadow.color.alpha == 0 {
         return;
     }
 
-    let blur_radius =
-        shadow.blur_radius.max(0.0);
+    let blur_radius = shadow.blur_radius.max(0.0);
 
-    let spread =
-        shadow.spread.max(0.0);
+    let spread = shadow.spread.max(0.0);
 
     if blur_radius == 0.0 {
-        let shadow_bounds = expanded_shadow_rect(
-            bounds,
-            shadow.offset_x,
-            shadow.offset_y,
-            spread,
-        );
+        let shadow_bounds = expanded_shadow_rect(bounds, shadow.offset_x, shadow.offset_y, spread);
 
-        context.display_list.push(
-            DrawCommand::FillRoundedRect {
-                rect: shadow_bounds,
-                radius: radius + spread,
-                color: shadow.color,
-            },
-        );
+        context.display_list.push(DrawCommand::FillRoundedRect {
+            rect: shadow_bounds,
+            radius: radius + spread,
+            color: shadow.color,
+        });
 
         return;
     }
 
-    let layers = blur_radius
-        .ceil()
-        .clamp(2.0, 24.0) as u32;
+    let layers = blur_radius.ceil().clamp(2.0, 24.0) as u32;
 
     for layer in (1..=layers).rev() {
-        let progress =
-            layer as f32 / layers as f32;
+        let progress = layer as f32 / layers as f32;
 
-        let expansion =
-            spread + blur_radius * progress;
+        let expansion = spread + blur_radius * progress;
 
-        let opacity_weight =
-            1.0 - progress * 0.75;
+        let opacity_weight = 1.0 - progress * 0.75;
 
-        let alpha = (
-            shadow.color.alpha as f32
-                * opacity_weight
-                * 2.0
-                / layers as f32
-        )
+        let alpha = (shadow.color.alpha as f32 * opacity_weight * 2.0 / layers as f32)
             .round()
             .clamp(1.0, 255.0) as u8;
 
-        let shadow_bounds = expanded_shadow_rect(
-            bounds,
-            shadow.offset_x,
-            shadow.offset_y,
-            expansion,
-        );
+        let shadow_bounds =
+            expanded_shadow_rect(bounds, shadow.offset_x, shadow.offset_y, expansion);
 
-        context.display_list.push(
-            DrawCommand::FillRoundedRect {
-                rect: shadow_bounds,
-                radius: radius + expansion,
-                color: shadow
-                    .color
-                    .with_alpha(alpha),
-            },
-        );
+        context.display_list.push(DrawCommand::FillRoundedRect {
+            rect: shadow_bounds,
+            radius: radius + expansion,
+            color: shadow.color.with_alpha(alpha),
+        });
     }
 }
 
-fn expanded_shadow_rect(
-    bounds: Rect,
-    offset_x: f32,
-    offset_y: f32,
-    expansion: f32,
-) -> Rect {
+fn expanded_shadow_rect(bounds: Rect, offset_x: f32, offset_y: f32, expansion: f32) -> Rect {
     Rect::new(
-        bounds.origin.x
-            + offset_x
-            - expansion,
-        bounds.origin.y
-            + offset_y
-            - expansion,
-        bounds.size.width
-            + expansion * 2.0,
-        bounds.size.height
-            + expansion * 2.0,
+        bounds.origin.x + offset_x - expansion,
+        bounds.origin.y + offset_y - expansion,
+        bounds.size.width + expansion * 2.0,
+        bounds.size.height + expansion * 2.0,
     )
 }
