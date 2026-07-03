@@ -14,13 +14,14 @@ use std::time::{Duration, Instant};
 
 const CARET_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 struct TextFieldInteractionInner {
     hovered: bool,
     focused: bool,
     enabled: bool,
     value: String,
     cursor: usize,
+    scroll_offset_x: f32,
     value_initialized: bool,
     caret_blink_origin: Option<Instant>,
 }
@@ -102,8 +103,8 @@ impl TextFieldInteractionState {
         let mut inner = self.inner.borrow_mut();
 
         inner.cursor = value.len();
+        inner.scroll_offset_x = 0.0;
         inner.value = value;
-
         inner.value_initialized = true;
     }
 
@@ -115,6 +116,7 @@ impl TextFieldInteractionState {
         }
 
         inner.cursor = value.len();
+        inner.scroll_offset_x = 0.0;
         inner.value = value;
         inner.value_initialized = true;
     }
@@ -380,7 +382,11 @@ impl TextField {
     }
 
     fn cursor_at_x(&self, pointer_x: f32, bounds: Rect, context: &mut EventContext<'_>) -> usize {
-        let value = self.interaction.value();
+        let (value, scroll_offset_x) = {
+            let inner = self.interaction.inner.borrow();
+
+            (inner.value.clone(), inner.scroll_offset_x)
+        };
 
         if value.is_empty() {
             return 0;
@@ -388,7 +394,7 @@ impl TextField {
 
         let text_origin_x = bounds.origin.x + self.size.horizontal_padding();
 
-        let target_x = (pointer_x - text_origin_x).max(0.0);
+        let target_x = (pointer_x - text_origin_x + scroll_offset_x).max(0.0);
 
         let mut previous_index = 0;
         let mut previous_width = 0.0;
@@ -409,7 +415,6 @@ impl TextField {
             }
 
             previous_index = next_index;
-
             previous_width = next_width;
         }
 
@@ -440,13 +445,14 @@ impl View for TextField {
 
         let appearance = self.appearance(context);
 
-        let (value, cursor, focused) = {
+        let (value, cursor, focused, stored_scroll_offset_x) = {
             let inner = self.interaction.inner.borrow();
 
             (
                 inner.value.clone(),
                 inner.cursor.min(inner.value.len()),
                 inner.focused && inner.enabled,
+                inner.scroll_offset_x,
             )
         };
 
@@ -498,12 +504,75 @@ impl View for TextField {
             line_height.min(bounds.size.height),
         );
 
-        if !display_text.is_empty() {
-            Text::new(display_text)
+        let text_width = if value.is_empty() {
+            0.0
+        } else {
+            Text::new(value.as_str())
                 .font_size(self.size.font_size())
                 .line_height(line_height)
-                .color(appearance.foreground)
-                .paint(text_bounds, context);
+                .measure_unbounded(context.text_measurer)
+                .width
+        };
+
+        let prefix_width = if cursor == 0 {
+            0.0
+        } else {
+            Text::new(&value[..cursor])
+                .font_size(self.size.font_size())
+                .line_height(line_height)
+                .measure_unbounded(context.text_measurer)
+                .width
+        };
+
+        let viewport_width = text_bounds.size.width;
+
+        let maximum_scroll_offset_x = (text_width - viewport_width).max(0.0);
+
+        let mut scroll_offset_x = stored_scroll_offset_x.clamp(0.0, maximum_scroll_offset_x);
+
+        if showing_placeholder {
+            scroll_offset_x = 0.0;
+        } else if focused {
+            if prefix_width < scroll_offset_x {
+                scroll_offset_x = prefix_width;
+            } else if prefix_width > scroll_offset_x + viewport_width {
+                scroll_offset_x = prefix_width - viewport_width;
+            }
+
+            scroll_offset_x = scroll_offset_x.clamp(0.0, maximum_scroll_offset_x);
+        }
+
+        if scroll_offset_x != stored_scroll_offset_x {
+            self.interaction.inner.borrow_mut().scroll_offset_x = scroll_offset_x;
+        }
+
+        if !display_text.is_empty() {
+            if showing_placeholder {
+                Text::new(display_text)
+                    .font_size(self.size.font_size())
+                    .line_height(line_height)
+                    .color(appearance.foreground)
+                    .paint(text_bounds, context);
+            } else {
+                let content_bounds = Rect::new(
+                    text_bounds.origin.x - scroll_offset_x,
+                    text_bounds.origin.y,
+                    text_width.max(viewport_width),
+                    text_bounds.size.height,
+                );
+
+                context
+                    .display_list
+                    .push(DrawCommand::PushClip { rect: text_bounds });
+
+                Text::new(display_text)
+                    .font_size(self.size.font_size())
+                    .line_height(line_height)
+                    .color(appearance.foreground)
+                    .paint(content_bounds, context);
+
+                context.display_list.push(DrawCommand::PopClip);
+            }
         }
 
         if !focused {
@@ -521,27 +590,13 @@ impl View for TextField {
             return;
         }
 
-        let prefix_width = if cursor == 0 {
-            0.0
-        } else {
-            Text::new(&value[..cursor])
-                .font_size(self.size.font_size())
-                .line_height(line_height)
-                .measure_unbounded(context.text_measurer)
-                .width
-        };
-
         let caret_width = 2.0;
         let caret_half_width = caret_width / 2.0;
 
-        let caret_center_x = text_bounds.origin.x + prefix_width;
+        let caret_center_x = (text_bounds.origin.x + prefix_width - scroll_offset_x)
+            .clamp(text_bounds.origin.x, text_bounds.origin.x + viewport_width);
 
-        let minimum_caret_center_x = text_bounds.origin.x;
-
-        let maximum_caret_center_x = text_bounds.origin.x + text_bounds.size.width;
-
-        let caret_x =
-            caret_center_x.clamp(minimum_caret_center_x, maximum_caret_center_x) - caret_half_width;
+        let caret_x = caret_center_x - caret_half_width;
 
         let caret_height = (line_height - 2.0)
             .max(12.0)
@@ -551,8 +606,8 @@ impl View for TextField {
 
         context.display_list.push(DrawCommand::FillRoundedRect {
             rect: Rect::new(caret_x, caret_y, caret_width, caret_height),
-            radius: caret_width / 2.0,
-            color: context.theme.colors.accent.alpha(0.75),
+            radius: caret_half_width,
+            color: context.theme.colors.accent,
         });
     }
 
