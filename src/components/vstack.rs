@@ -1,25 +1,12 @@
 //! 子Viewを縦方向に配置するVStackを定義
 
-use crate::event::{
-    EventContext,
-    EventResult,
-    ViewEvent,
-};
+use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::Rect;
 use crate::layout::{
-    handle_stack_event,
-    paint_stack,
-    IntoStackChildren,
-    StackAlignment,
-    StackChild,
-    StackDirection,
-    StackDistribution,
-    StackGap,
+    IntoStackChildren, StackAlignment, StackChild, StackDirection, StackDistribution, StackGap,
+    handle_stack_event, paint_stack,
 };
-use crate::view::{
-    PaintContext,
-    View,
-};
+use crate::view::{PaintContext, View};
 
 pub struct VStack {
     children: Vec<StackChild>,
@@ -34,8 +21,7 @@ impl Default for VStack {
             children: Vec::new(),
             gap: StackGap::Medium,
             alignment: StackAlignment::Center,
-            distribution:
-            StackDistribution::Start,
+            distribution: StackDistribution::Start,
         }
     }
 }
@@ -45,67 +31,44 @@ impl VStack {
         Self::default()
     }
 
-    pub fn child<C>(
-        mut self,
-        child: C,
-    ) -> Self
+    pub fn child<C>(mut self, child: C) -> Self
     where
         C: IntoStackChildren,
     {
-        self.children.extend(
-            child.into_stack_children(),
-        );
+        self.children.extend(child.into_stack_children());
 
         self
     }
 
-    pub fn children<C>(
-        mut self,
-        children: impl IntoIterator<Item = C>,
-    ) -> Self
+    pub fn children<C>(mut self, children: impl IntoIterator<Item = C>) -> Self
     where
         C: IntoStackChildren,
     {
         for child in children {
-            self.children.extend(
-                child.into_stack_children(),
-            );
+            self.children.extend(child.into_stack_children());
         }
 
         self
     }
 
-    pub fn gap(
-        mut self,
-        gap: StackGap,
-    ) -> Self {
+    pub fn gap(mut self, gap: StackGap) -> Self {
         self.gap = gap;
         self
     }
 
-    pub fn alignment(
-        mut self,
-        alignment: StackAlignment,
-    ) -> Self {
+    pub fn alignment(mut self, alignment: StackAlignment) -> Self {
         self.alignment = alignment;
         self
     }
 
-    pub fn distribution(
-        mut self,
-        distribution: StackDistribution,
-    ) -> Self {
+    pub fn distribution(mut self, distribution: StackDistribution) -> Self {
         self.distribution = distribution;
         self
     }
 }
 
 impl View for VStack {
-    fn paint(
-        &self,
-        bounds: Rect,
-        context: &mut PaintContext<'_>,
-    ) {
+    fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
         paint_stack(
             StackDirection::Vertical,
             &self.children,

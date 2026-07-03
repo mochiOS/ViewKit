@@ -1,26 +1,12 @@
 //! Viewツリー内部で使用するイベント配送API
 
-use crate::geometry::{
-    Point,
-    Rect,
-};
-use crate::platform::{
-    ButtonState,
-    PlatformEvent,
-    PointerButton,
-};
+use crate::geometry::{Point, Rect};
+use crate::platform::{ButtonState, PlatformEvent, PointerButton};
 use crate::theme::Theme;
-use crate::typography::{
-    TextMeasurer,
-    Typography,
-};
+use crate::typography::{TextMeasurer, Typography};
 use crate::view::View;
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ViewEvent {
     PointerMoved {
         position: Point,
@@ -54,82 +40,37 @@ pub enum ViewEvent {
 }
 
 impl ViewEvent {
-    pub fn position(
-        &self,
-    ) -> Option<Point> {
+    pub fn position(&self) -> Option<Point> {
         match self {
-            Self::PointerMoved {
-                position,
-            }
-            | Self::PointerPressed {
-                position,
-                ..
-            }
-            | Self::PointerReleased {
-                position,
-                ..
-            }
-            | Self::Scroll {
-                position,
-                ..
-            } => Some(*position),
+            Self::PointerMoved { position }
+            | Self::PointerPressed { position, .. }
+            | Self::PointerReleased { position, .. }
+            | Self::Scroll { position, .. } => Some(*position),
 
-            Self::PointerLeft
-            | Self::TextInput {
-                ..
-            }
-            | Self::FocusChanged {
-                ..
-            } => None,
+            Self::PointerLeft | Self::TextInput { .. } | Self::FocusChanged { .. } => None,
         }
     }
 
-    pub fn is_inside(
-        &self,
-        bounds: Rect,
-    ) -> bool {
+    pub fn is_inside(&self, bounds: Rect) -> bool {
         self.position()
-            .map(
-                |position| {
-                    bounds.contains(
-                        position,
-                    )
-                },
-            )
+            .map(|position| bounds.contains(position))
             .unwrap_or(true)
     }
 
     // TODO: ポインターキャプチャへ置き換える
-    pub fn requires_broadcast(
-        &self,
-    ) -> bool {
+    pub fn requires_broadcast(&self) -> bool {
         matches!(
-        self,
-        Self::PointerMoved {
-            ..
-        }
-            | Self::PointerReleased {
-                ..
-            }
-            | Self::PointerLeft
-            | Self::TextInput {
-                ..
-            }
-            | Self::FocusChanged {
-                ..
-            }
-    )
+            self,
+            Self::PointerMoved { .. }
+                | Self::PointerReleased { .. }
+                | Self::PointerLeft
+                | Self::TextInput { .. }
+                | Self::FocusChanged { .. }
+        )
     }
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum EventResult {
     #[default]
     Ignored,
@@ -138,19 +79,12 @@ pub enum EventResult {
 }
 
 impl EventResult {
-    pub fn is_consumed(
-        self,
-    ) -> bool {
+    pub fn is_consumed(self) -> bool {
         self == Self::Consumed
     }
 
-    pub fn merge(
-        self,
-        other: Self,
-    ) -> Self {
-        if self.is_consumed()
-            || other.is_consumed()
-        {
+    pub fn merge(self, other: Self) -> Self {
+        if self.is_consumed() || other.is_consumed() {
             Self::Consumed
         } else {
             Self::Ignored
@@ -159,14 +93,11 @@ impl EventResult {
 }
 
 pub struct EventContext<'a> {
-    pub(crate) theme:
-        &'a Theme,
+    pub(crate) theme: &'a Theme,
 
-    pub(crate) typography:
-        &'a Typography,
+    pub(crate) typography: &'a Typography,
 
-    pub(crate) text_measurer:
-        &'a mut TextMeasurer,
+    pub(crate) text_measurer: &'a mut TextMeasurer,
 
     redraw_requested: bool,
 }
@@ -175,8 +106,7 @@ impl<'a> EventContext<'a> {
     pub fn new(
         theme: &'a Theme,
         typography: &'a Typography,
-        text_measurer:
-        &'a mut TextMeasurer,
+        text_measurer: &'a mut TextMeasurer,
     ) -> Self {
         Self {
             theme,
@@ -186,41 +116,26 @@ impl<'a> EventContext<'a> {
         }
     }
 
-    pub fn theme(
-        &self,
-    ) -> &Theme {
+    pub fn theme(&self) -> &Theme {
         self.theme
     }
 
-    pub fn typography(
-        &self,
-    ) -> &Typography {
+    pub fn typography(&self) -> &Typography {
         self.typography
     }
 
-    pub fn request_redraw(
-        &mut self,
-    ) {
-        self.redraw_requested =
-            true;
+    pub fn request_redraw(&mut self) {
+        self.redraw_requested = true;
     }
 
-    pub fn redraw_requested(
-        &self,
-    ) -> bool {
+    pub fn redraw_requested(&self) -> bool {
         self.redraw_requested
     }
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct EventDispatcher {
-    pointer_position:
-        Option<Point>,
+    pointer_position: Option<Point>,
 }
 
 impl EventDispatcher {
@@ -228,9 +143,7 @@ impl EventDispatcher {
         Self::default()
     }
 
-    pub fn pointer_position(
-        &self,
-    ) -> Option<Point> {
+    pub fn pointer_position(&self) -> Option<Point> {
         self.pointer_position
     }
 
@@ -239,140 +152,72 @@ impl EventDispatcher {
         root: &dyn View,
         bounds: Rect,
         event: &PlatformEvent,
-        context:
-        &mut EventContext<'_>,
+        context: &mut EventContext<'_>,
     ) -> EventResult {
-        let Some(view_event) =
-            self.convert_event(
-                event,
-            )
-        else {
+        let Some(view_event) = self.convert_event(event) else {
             return EventResult::Ignored;
         };
 
-        root.handle_event(
-            bounds,
-            &view_event,
-            context,
-        )
+        root.handle_event(bounds, &view_event, context)
     }
 
-    fn convert_event(
-        &mut self,
-        event: &PlatformEvent,
-    ) -> Option<ViewEvent> {
+    fn convert_event(&mut self, event: &PlatformEvent) -> Option<ViewEvent> {
         match event {
-            PlatformEvent::PointerMoved {
-                x,
-                y,
-            } => {
-                let position =
-                    Point::new(
-                        *x,
-                        *y,
-                    );
+            PlatformEvent::PointerMoved { x, y } => {
+                let position = Point::new(*x, *y);
 
-                self.pointer_position =
-                    Some(position);
+                self.pointer_position = Some(position);
 
-                Some(
-                    ViewEvent::PointerMoved {
-                        position,
-                    },
-                )
+                Some(ViewEvent::PointerMoved { position })
             }
 
-            PlatformEvent::PointerButton {
-                button,
-                state,
-            } => {
-                let position =
-                    self.pointer_position?;
+            PlatformEvent::PointerButton { button, state } => {
+                let position = self.pointer_position?;
 
                 match state {
-                    ButtonState::Pressed => {
-                        Some(
-                            ViewEvent::PointerPressed {
-                                position,
-                                button: *button,
-                            },
-                        )
-                    }
+                    ButtonState::Pressed => Some(ViewEvent::PointerPressed {
+                        position,
+                        button: *button,
+                    }),
 
-                    ButtonState::Released => {
-                        Some(
-                            ViewEvent::PointerReleased {
-                                position,
-                                button: *button,
-                            },
-                        )
-                    }
+                    ButtonState::Released => Some(ViewEvent::PointerReleased {
+                        position,
+                        button: *button,
+                    }),
                 }
             }
 
             PlatformEvent::PointerLeft => {
-                self.pointer_position =
-                    None;
+                self.pointer_position = None;
 
-                Some(
-                    ViewEvent::PointerLeft,
-                )
+                Some(ViewEvent::PointerLeft)
             }
 
-            PlatformEvent::Scroll {
-                delta_x,
-                delta_y,
-            } => {
-                let position =
-                    self.pointer_position?;
+            PlatformEvent::Scroll { delta_x, delta_y } => {
+                let position = self.pointer_position?;
 
-                Some(
-                    ViewEvent::Scroll {
-                        position,
-                        delta_x: *delta_x,
-                        delta_y: *delta_y,
-                    },
-                )
+                Some(ViewEvent::Scroll {
+                    position,
+                    delta_x: *delta_x,
+                    delta_y: *delta_y,
+                })
             }
 
-            PlatformEvent::Focused(
-                focused,
-            ) => {
+            PlatformEvent::Focused(focused) => {
                 if !focused {
-                    self.pointer_position =
-                        None;
+                    self.pointer_position = None;
                 }
 
-                Some(
-                    ViewEvent::FocusChanged {
-                        focused: *focused,
-                    },
-                )
+                Some(ViewEvent::FocusChanged { focused: *focused })
             }
 
-            PlatformEvent::TextInput {
-                text,
-            } => {
-                Some(
-                    ViewEvent::TextInput {
-                        text: text.clone(),
-                    },
-                )
-            }
+            PlatformEvent::TextInput { text } => Some(ViewEvent::TextInput { text: text.clone() }),
 
-            PlatformEvent::Resumed {
-                ..
-            }
-            | PlatformEvent::Resized {
-                ..
-            }
-            | PlatformEvent::ScaleFactorChanged {
-                ..
-            }
+            PlatformEvent::Resumed { .. }
+            | PlatformEvent::Resized { .. }
+            | PlatformEvent::ScaleFactorChanged { .. }
             | PlatformEvent::RedrawRequested
-            | PlatformEvent::CloseRequested => {
-                None
-            }
+            | PlatformEvent::CloseRequested => None,
         }
     }
 }

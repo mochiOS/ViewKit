@@ -1,18 +1,8 @@
 use crate::draw_command::DisplayList;
-use crate::event::{
-    EventContext,
-    EventResult,
-    ViewEvent,
-};
-use crate::geometry::{
-    Rect,
-    Size,
-};
+use crate::event::{EventContext, EventResult, ViewEvent};
+use crate::geometry::{Rect, Size};
 use crate::theme::Theme;
-use crate::typography::{
-    TextMeasurer,
-    Typography,
-};
+use crate::typography::{TextMeasurer, Typography};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Constraints {
@@ -21,38 +11,21 @@ pub struct Constraints {
 }
 
 impl Constraints {
-    pub fn new(
-        minimum: Size,
-        maximum: Size,
-    ) -> Self {
-        Self {
-            minimum,
-            maximum,
-        }
+    pub fn new(minimum: Size, maximum: Size) -> Self {
+        Self { minimum, maximum }
     }
 
-    pub fn loose(
-        maximum: Size,
-    ) -> Self {
+    pub fn loose(maximum: Size) -> Self {
         Self {
             minimum: Size::new(0.0, 0.0),
             maximum,
         }
     }
 
-    pub fn constrain(
-        self,
-        size: Size,
-    ) -> Size {
+    pub fn constrain(self, size: Size) -> Size {
         Size::new(
-            size.width.clamp(
-                self.minimum.width,
-                self.maximum.width,
-            ),
-            size.height.clamp(
-                self.minimum.height,
-                self.maximum.height,
-            ),
+            size.width.clamp(self.minimum.width, self.maximum.width),
+            size.height.clamp(self.minimum.height, self.maximum.height),
         )
     }
 }
@@ -71,21 +44,11 @@ pub struct PaintContext<'a> {
 }
 
 pub trait View {
-    fn measure(
-        &self,
-        constraints: Constraints,
-        _context: &mut MeasureContext<'_>,
-    ) -> Size {
-        constraints.constrain(
-            Size::new(0.0, 0.0),
-        )
+    fn measure(&self, constraints: Constraints, _context: &mut MeasureContext<'_>) -> Size {
+        constraints.constrain(Size::new(0.0, 0.0))
     }
 
-    fn paint(
-        &self,
-        bounds: Rect,
-        context: &mut PaintContext<'_>,
-    );
+    fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>);
 
     fn handle_event(
         &self,

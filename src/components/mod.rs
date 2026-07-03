@@ -10,9 +10,9 @@ mod rectangle;
 mod scroll;
 mod spacer;
 mod text;
+mod text_field;
 mod vstack;
 mod zstack;
-mod text_field;
 
 pub use background::Background;
 pub use divider::Divider;
@@ -29,4 +29,4 @@ pub use button::{Button, ButtonColor, ButtonInteractionState, ButtonStyle};
 pub use card::Card;
 pub use rectangle::{BorderStyle, Rectangle, RectangleColor};
 pub use text::Text;
-pub use text_field::{TextField, TextFieldSize, TextFieldInteractionState};
+pub use text_field::{TextField, TextFieldInteractionState, TextFieldSize};

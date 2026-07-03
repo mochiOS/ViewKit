@@ -1,16 +1,9 @@
 use crate::components::ButtonColor;
-use crate::layout::{
-    StackAlignment,
-    StackDistribution,
-    StackGap,
-};
+use crate::layout::{StackAlignment, StackDistribution, StackGap};
 use crate::theme::Color;
 use crate::typography::TextAlignment;
 
-use super::{
-    ActionId,
-    NodeId,
-};
+use super::{ActionId, NodeId};
 
 #[derive(Clone, Debug)]
 pub struct ViewNode {
@@ -20,10 +13,7 @@ pub struct ViewNode {
 }
 
 impl ViewNode {
-    pub fn new(
-        id: NodeId,
-        kind: ViewNodeKind,
-    ) -> Self {
+    pub fn new(id: NodeId, kind: ViewNodeKind) -> Self {
         Self {
             id,
             kind,
@@ -31,16 +21,8 @@ impl ViewNode {
         }
     }
 
-    pub fn with_children(
-        id: NodeId,
-        kind: ViewNodeKind,
-        children: Vec<ViewNode>,
-    ) -> Self {
-        Self {
-            id,
-            kind,
-            children,
-        }
+    pub fn with_children(id: NodeId, kind: ViewNodeKind, children: Vec<ViewNode>) -> Self {
+        Self { id, kind, children }
     }
 }
 
@@ -48,21 +30,13 @@ impl ViewNode {
 pub enum ViewNodeKind {
     Root,
 
-    VStack(
-        VStackNode,
-    ),
+    VStack(VStackNode),
 
-    Text(
-        TextNode,
-    ),
+    Text(TextNode),
 
-    Button(
-        ButtonNode,
-    ),
+    Button(ButtonNode),
 
-    Padding(
-        PaddingNode,
-    ),
+    Padding(PaddingNode),
 }
 
 #[derive(Clone, Debug)]

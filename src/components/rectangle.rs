@@ -260,7 +260,7 @@ fn paint_shadow(bounds: Rect, radius: f32, shadow: Shadow, context: &mut PaintCo
 
         return;
     }
-    
+
     let layers = blur_radius.ceil().clamp(2.0, shadow.color.alpha as f32) as u32;
 
     let weight_sum = (1..=layers)

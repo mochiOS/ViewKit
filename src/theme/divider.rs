@@ -6,9 +6,7 @@ pub struct DividerTokens {
 }
 
 impl DividerTokens {
-    pub const DEFAULT: Self = Self {
-        thickness: 1.0,
-    };
+    pub const DEFAULT: Self = Self { thickness: 1.0 };
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -20,18 +18,11 @@ pub enum DividerThickness {
 }
 
 impl DividerThickness {
-    pub fn resolve(
-        self,
-        tokens: &DividerTokens,
-    ) -> f32 {
+    pub fn resolve(self, tokens: &DividerTokens) -> f32 {
         match self {
-            Self::Standard => {
-                tokens.thickness
-            }
+            Self::Standard => tokens.thickness,
 
-            Self::Custom(value) => {
-                value.max(0.0)
-            }
+            Self::Custom(value) => value.max(0.0),
         }
     }
 }

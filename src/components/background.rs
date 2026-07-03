@@ -1,51 +1,22 @@
 //! Viewの背面へ背景を配置するBackgroundを定義
 
-use crate::event::{
-    EventContext,
-    EventResult,
-    ViewEvent,
-};
-use crate::geometry::{
-    Rect,
-    Size,
-};
-use crate::view::{
-    Constraints,
-    MeasureContext,
-    PaintContext,
-    View,
-};
+use crate::event::{EventContext, EventResult, ViewEvent};
+use crate::geometry::{Rect, Size};
+use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct EmptyView;
 
 impl View for EmptyView {
-    fn paint(
-        &self,
-        _bounds: Rect,
-        _context: &mut PaintContext<'_>,
-    ) {
-    }
+    fn paint(&self, _bounds: Rect, _context: &mut PaintContext<'_>) {}
 
-    fn measure(
-        &self,
-        constraints: Constraints,
-        _context: &mut MeasureContext<'_>,
-    ) -> Size {
-        constraints.constrain(
-            Size::new(
-                0.0,
-                0.0,
-            ),
-        )
+    fn measure(&self, constraints: Constraints, _context: &mut MeasureContext<'_>) -> Size {
+        constraints.constrain(Size::new(0.0, 0.0))
     }
 }
 
-pub struct Background<
-    B = EmptyView,
-    C = EmptyView,
-> {
+pub struct Background<B = EmptyView, C = EmptyView> {
     background: B,
     content: C,
 }
@@ -79,10 +50,7 @@ impl<B, C> Background<B, C> {
         }
     }
 
-    pub fn content<NewContent>(
-        self,
-        content: NewContent,
-    ) -> Background<B, NewContent>
+    pub fn content<NewContent>(self, content: NewContent) -> Background<B, NewContent>
     where
         NewContent: View,
     {
@@ -98,20 +66,10 @@ where
     B: View,
     C: View,
 {
-    fn paint(
-        &self,
-        bounds: Rect,
-        context: &mut PaintContext<'_>,
-    ) {
-        self.background.paint(
-            bounds,
-            context,
-        );
+    fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
+        self.background.paint(bounds, context);
 
-        self.content.paint(
-            bounds,
-            context,
-        );
+        self.content.paint(bounds, context);
     }
 
     fn handle_event(
@@ -120,21 +78,10 @@ where
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
-        self.content.handle_event(
-            bounds,
-            event,
-            context,
-        )
+        self.content.handle_event(bounds, event, context)
     }
 
-    fn measure(
-        &self,
-        constraints: Constraints,
-        context: &mut MeasureContext<'_>,
-    ) -> Size {
-        self.content.measure(
-            constraints,
-            context,
-        )
+    fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
+        self.content.measure(constraints, context)
     }
 }

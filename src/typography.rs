@@ -1,9 +1,6 @@
 //! 文字スタイルを定義
 
-use cosmic_text::{
-    Align,
-    FontSystem,
-};
+use cosmic_text::{Align, FontSystem};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TextAlignment {
@@ -15,24 +12,16 @@ pub enum TextAlignment {
 }
 
 impl TextAlignment {
-    pub(crate) fn to_cosmic(
-        self,
-    ) -> Option<Align> {
+    pub(crate) fn to_cosmic(self) -> Option<Align> {
         match self {
             // Noneは通常の行列配置
             Self::Start => None,
 
-            Self::Center => {
-                Some(Align::Center)
-            }
+            Self::Center => Some(Align::Center),
 
-            Self::End => {
-                Some(Align::End)
-            }
+            Self::End => Some(Align::End),
 
-            Self::Justified => {
-                Some(Align::Justified)
-            }
+            Self::Justified => Some(Align::Justified),
         }
     }
 }
@@ -50,14 +39,11 @@ impl Default for TextMeasurer {
 impl TextMeasurer {
     pub fn new() -> Self {
         Self {
-            font_system:
-            FontSystem::new(),
+            font_system: FontSystem::new(),
         }
     }
 
-    pub(crate) fn font_system_mut(
-        &mut self,
-    ) -> &mut FontSystem {
+    pub(crate) fn font_system_mut(&mut self) -> &mut FontSystem {
         &mut self.font_system
     }
 }

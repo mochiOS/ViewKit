@@ -1,10 +1,7 @@
 //! 描画処理の共通インターフェースを定義
 
 use crate::draw_command::DisplayList;
-use crate::geometry::{
-    Rect,
-    Size,
-};
+use crate::geometry::{Rect, Size};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Viewport {
@@ -30,25 +27,14 @@ impl Viewport {
     }
 
     pub const fn logical_bounds(self) -> Rect {
-        Rect::new(
-            0.0,
-            0.0,
-            self.logical_size.width,
-            self.logical_size.height,
-        )
+        Rect::new(0.0, 0.0, self.logical_size.width, self.logical_size.height)
     }
 }
 
 pub trait Renderer {
     type Error: std::error::Error + 'static;
 
-    fn resize(
-        &mut self,
-        viewport: Viewport,
-    ) -> Result<(), Self::Error>;
+    fn resize(&mut self, viewport: Viewport) -> Result<(), Self::Error>;
 
-    fn render(
-        &mut self,
-        display_list: &DisplayList,
-    ) -> Result<(), Self::Error>;
+    fn render(&mut self, display_list: &DisplayList) -> Result<(), Self::Error>;
 }

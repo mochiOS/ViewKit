@@ -1,9 +1,9 @@
 //! プラットフォームウィンドウの共通インターフェースを定義
 
-use crate::geometry::Size;
-use crate::renderer::Viewport;
 use crate::draw_command::DisplayList;
+use crate::geometry::Size;
 use crate::platform::event::PlatformEvent;
+use crate::renderer::Viewport;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct WindowConfig {
@@ -31,17 +31,9 @@ pub trait PlatformWindow {
 }
 
 pub trait PlatformApplication {
-    fn handle_event(
-        &mut self,
-        event: PlatformEvent,
-        window: &dyn PlatformWindow,
-    );
+    fn handle_event(&mut self, event: PlatformEvent, window: &dyn PlatformWindow);
 
-    fn draw(
-        &mut self,
-        viewport: Viewport,
-        display_list: &mut DisplayList,
-    ) {
+    fn draw(&mut self, viewport: Viewport, display_list: &mut DisplayList) {
         let _ = viewport;
         let _ = display_list;
     }

@@ -2,18 +2,9 @@
 
 use crate::draw_command::DrawCommand;
 use crate::geometry::Rect;
-use crate::layout::{
-    IntoStackChild,
-    StackChild,
-};
-use crate::theme::{
-    Color,
-    DividerThickness,
-};
-use crate::view::{
-    PaintContext,
-    View,
-};
+use crate::layout::{IntoStackChild, StackChild};
+use crate::theme::{Color, DividerThickness};
+use crate::view::{PaintContext, View};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum DividerColor {
@@ -24,18 +15,11 @@ pub enum DividerColor {
 }
 
 impl DividerColor {
-    fn resolve(
-        self,
-        context: &PaintContext<'_>,
-    ) -> Color {
+    fn resolve(self, context: &PaintContext<'_>) -> Color {
         match self {
-            Self::Border => {
-                context.theme.colors.border
-            }
+            Self::Border => context.theme.colors.border,
 
-            Self::Custom(color) => {
-                color
-            }
+            Self::Custom(color) => color,
         }
     }
 }
@@ -54,18 +38,12 @@ impl Divider {
         }
     }
 
-    pub const fn color(
-        mut self,
-        color: DividerColor,
-    ) -> Self {
+    pub const fn color(mut self, color: DividerColor) -> Self {
         self.color = color;
         self
     }
 
-    pub const fn thickness(
-        mut self,
-        thickness: DividerThickness,
-    ) -> Self {
+    pub const fn thickness(mut self, thickness: DividerThickness) -> Self {
         self.thickness = thickness;
         self
     }
@@ -73,12 +51,7 @@ impl Divider {
 
 impl IntoStackChild for Divider {
     fn into_stack_child(self) -> StackChild {
-        StackChild::divider(
-            DividerView {
-                color: self.color,
-            },
-            self.thickness,
-        )
+        StackChild::divider(DividerView { color: self.color }, self.thickness)
     }
 }
 
@@ -87,16 +60,10 @@ struct DividerView {
 }
 
 impl View for DividerView {
-    fn paint(
-        &self,
-        bounds: Rect,
-        context: &mut PaintContext<'_>,
-    ) {
-        context.display_list.push(
-            DrawCommand::FillRect {
-                rect: bounds,
-                color: self.color.resolve(context),
-            },
-        );
+    fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
+        context.display_list.push(DrawCommand::FillRect {
+            rect: bounds,
+            color: self.color.resolve(context),
+        });
     }
 }

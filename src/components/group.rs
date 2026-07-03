@@ -1,9 +1,6 @@
 //! 見た目や独自のレイアウトを持たず、複数の子要素をまとめるGroupを定義
 
-use crate::layout::{
-    IntoStackChildren,
-    StackChild,
-};
+use crate::layout::{IntoStackChildren, StackChild};
 
 #[derive(Default)]
 pub struct Group {
@@ -15,31 +12,21 @@ impl Group {
         Self::default()
     }
 
-    pub fn child<C>(
-        mut self,
-        child: C,
-    ) -> Self
+    pub fn child<C>(mut self, child: C) -> Self
     where
         C: IntoStackChildren,
     {
-        self.children.extend(
-            child.into_stack_children(),
-        );
+        self.children.extend(child.into_stack_children());
 
         self
     }
 
-    pub fn children<C>(
-        mut self,
-        children: impl IntoIterator<Item = C>,
-    ) -> Self
+    pub fn children<C>(mut self, children: impl IntoIterator<Item = C>) -> Self
     where
         C: IntoStackChildren,
     {
         for child in children {
-            self.children.extend(
-                child.into_stack_children(),
-            );
+            self.children.extend(child.into_stack_children());
         }
 
         self
@@ -55,9 +42,7 @@ impl Group {
 }
 
 impl IntoStackChildren for Group {
-    fn into_stack_children(
-        self,
-    ) -> Vec<StackChild> {
+    fn into_stack_children(self) -> Vec<StackChild> {
         self.children
     }
 }

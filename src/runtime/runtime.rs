@@ -3,87 +3,50 @@ use std::collections::HashSet;
 use crate::view::View;
 
 use super::{
-    ActionQueue,
-    ComponentInstanceId,
-    RuntimeAction,
-    RuntimeEvent,
-    RuntimeStateStore,
-    ViewAdapter,
-    ViewNode,
-    ViewNodeKind,
+    ActionQueue, ComponentInstanceId, RuntimeAction, RuntimeEvent, RuntimeStateStore, ViewAdapter,
+    ViewNode, ViewNodeKind,
 };
 
 pub struct ViewRuntime {
-    component_instance:
-        ComponentInstanceId,
+    component_instance: ComponentInstanceId,
 
-    tree:
-        Option<ViewNode>,
+    tree: Option<ViewNode>,
 
-    states:
-        RuntimeStateStore,
+    states: RuntimeStateStore,
 
-    actions:
-        ActionQueue,
+    actions: ActionQueue,
 }
 
 impl ViewRuntime {
-    pub fn new(
-        component_instance:
-        ComponentInstanceId,
-    ) -> Self {
+    pub fn new(component_instance: ComponentInstanceId) -> Self {
         Self {
             component_instance,
             tree: None,
-            states:
-            RuntimeStateStore::default(),
-            actions:
-            ActionQueue::default(),
+            states: RuntimeStateStore::default(),
+            actions: ActionQueue::default(),
         }
     }
 
-    pub fn commit(
-        &mut self,
-        tree: ViewNode,
-    ) {
-        let mut active_nodes =
-            HashSet::new();
+    pub fn commit(&mut self, tree: ViewNode) {
+        let mut active_nodes = HashSet::new();
 
-        collect_node_ids(
-            &tree,
-            &mut active_nodes,
-        );
+        collect_node_ids(&tree, &mut active_nodes);
 
-        self.states.retain_nodes(
-            &active_nodes,
-        );
+        self.states.retain_nodes(&active_nodes);
 
-        self.tree =
-            Some(tree);
+        self.tree = Some(tree);
     }
 
-    pub fn build_view(
-        &mut self,
-    ) -> Option<Box<dyn View>> {
-        let tree =
-            self.tree.as_ref()?;
+    pub fn build_view(&mut self) -> Option<Box<dyn View>> {
+        let tree = self.tree.as_ref()?;
 
-        let mut adapter =
-            ViewAdapter::new(
-                &mut self.states,
-            );
+        let mut adapter = ViewAdapter::new(&mut self.states);
 
-        Some(
-            adapter.build(tree),
-        )
+        Some(adapter.build(tree))
     }
 
-    pub fn collect_actions(
-        &mut self,
-    ) {
-        let Some(tree) =
-            self.tree.as_ref()
-        else {
+    pub fn collect_actions(&mut self) {
+        let Some(tree) = self.tree.as_ref() else {
             return;
         };
 
@@ -95,74 +58,45 @@ impl ViewRuntime {
         );
     }
 
-    pub fn poll_action(
-        &mut self,
-    ) -> Option<RuntimeAction> {
+    pub fn poll_action(&mut self) -> Option<RuntimeAction> {
         self.actions.poll()
     }
-    
-    pub fn tree(
-        &mut self,
-    ) -> Option<&ViewNode> {
+
+    pub fn tree(&mut self) -> Option<&ViewNode> {
         self.tree.as_ref()
     }
 }
 
-fn collect_node_ids(
-    node: &ViewNode,
-    output:
-    &mut HashSet<super::NodeId>,
-) {
+fn collect_node_ids(node: &ViewNode, output: &mut HashSet<super::NodeId>) {
     output.insert(node.id);
 
     for child in &node.children {
-        collect_node_ids(
-            child,
-            output,
-        );
+        collect_node_ids(child, output);
     }
 }
 
 fn collect_button_actions(
     node: &ViewNode,
-    component_instance:
-    ComponentInstanceId,
-    states:
-    &mut RuntimeStateStore,
-    actions:
-    &mut ActionQueue,
+    component_instance: ComponentInstanceId,
+    states: &mut RuntimeStateStore,
+    actions: &mut ActionQueue,
 ) {
-    if let ViewNodeKind::Button(
-        properties,
-    ) = &node.kind
-    {
-        let state =
-            states.button(node.id);
+    if let ViewNodeKind::Button(properties) = &node.kind {
+        let state = states.button(node.id);
 
         if state.take_clicked() {
-            if let Some(action_id) =
-                properties.action
-            {
-                actions.push(
-                    RuntimeAction {
-                        component_instance,
-                        node_id: node.id,
-                        action_id,
-                        event:
-                        RuntimeEvent::
-                        ButtonClicked,
-                    },
-                );
+            if let Some(action_id) = properties.action {
+                actions.push(RuntimeAction {
+                    component_instance,
+                    node_id: node.id,
+                    action_id,
+                    event: RuntimeEvent::ButtonClicked,
+                });
             }
         }
     }
 
     for child in &node.children {
-        collect_button_actions(
-            child,
-            component_instance,
-            states,
-            actions,
-        );
+        collect_button_actions(child, component_instance, states, actions);
     }
 }

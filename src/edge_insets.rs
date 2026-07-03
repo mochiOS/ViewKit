@@ -14,12 +14,7 @@ impl EdgeInsets {
         left: 0.0,
     };
 
-    pub fn new(
-        top: f32,
-        right: f32,
-        bottom: f32,
-        left: f32,
-    ) -> Self {
+    pub fn new(top: f32, right: f32, bottom: f32, left: f32) -> Self {
         Self {
             top: finite_non_negative(top),
             right: finite_non_negative(right),
@@ -28,11 +23,8 @@ impl EdgeInsets {
         }
     }
 
-    pub fn all(
-        value: f32,
-    ) -> Self {
-        let value =
-            finite_non_negative(value);
+    pub fn all(value: f32) -> Self {
+        let value = finite_non_negative(value);
 
         Self {
             top: value,
@@ -42,15 +34,10 @@ impl EdgeInsets {
         }
     }
 
-    pub fn symmetric(
-        horizontal: f32,
-        vertical: f32,
-    ) -> Self {
-        let horizontal =
-            finite_non_negative(horizontal);
+    pub fn symmetric(horizontal: f32, vertical: f32) -> Self {
+        let horizontal = finite_non_negative(horizontal);
 
-        let vertical =
-            finite_non_negative(vertical);
+        let vertical = finite_non_negative(vertical);
 
         Self {
             top: vertical,
@@ -60,35 +47,20 @@ impl EdgeInsets {
         }
     }
 
-    pub fn horizontal(
-        self,
-    ) -> f32 {
-        finite_non_negative(self.left)
-            + finite_non_negative(self.right)
+    pub fn horizontal(self) -> f32 {
+        finite_non_negative(self.left) + finite_non_negative(self.right)
     }
 
-    pub fn vertical(
-        self,
-    ) -> f32 {
-        finite_non_negative(self.top)
-            + finite_non_negative(self.bottom)
+    pub fn vertical(self) -> f32 {
+        finite_non_negative(self.top) + finite_non_negative(self.bottom)
     }
 
-    pub fn sanitized(
-        self,
-    ) -> Self {
-        Self::new(
-            self.top,
-            self.right,
-            self.bottom,
-            self.left,
-        )
+    pub fn sanitized(self) -> Self {
+        Self::new(self.top, self.right, self.bottom, self.left)
     }
 }
 
-fn finite_non_negative(
-    value: f32,
-) -> f32 {
+fn finite_non_negative(value: f32) -> f32 {
     if value.is_finite() {
         value.max(0.0)
     } else {

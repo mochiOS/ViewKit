@@ -1,30 +1,14 @@
 //! ViewKitのレイアウト型とui_layout-rsとの接続を定義
 
 use ui_layout::{
-    AlignItems,
-    Display,
-    FlexDirection,
-    ItemStyle,
-    JustifyContent,
-    LayoutEngine,
-    LayoutNode,
-    Length,
-    SizeStyle,
-    Style,
+    AlignItems, Display, FlexDirection, ItemStyle, JustifyContent, LayoutEngine, LayoutNode,
+    Length, SizeStyle, Style,
 };
 
-use crate::geometry::{
-    Point,
-    Rect,
-    Size,
-};
+use crate::event::{EventContext, EventResult, ViewEvent};
+use crate::geometry::{Point, Rect, Size};
 use crate::theme::{DividerThickness, DividerTokens, SpacingTokens, Theme};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
-use crate::event::{
-    EventContext,
-    EventResult,
-    ViewEvent,
-};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum LayoutLength {
@@ -50,10 +34,7 @@ impl LayoutLength {
         }
     }
 
-    fn resolve_overlay(
-        self,
-        available: f32,
-    ) -> f32 {
+    fn resolve_overlay(self, available: f32) -> f32 {
         match self {
             Self::Auto => {
                 if available.is_finite() {
@@ -109,29 +90,19 @@ pub enum StackDistribution {
 }
 
 impl StackDistribution {
-    fn to_ui_justification(
-        self,
-    ) -> JustifyContent {
+    fn to_ui_justification(self) -> JustifyContent {
         match self {
             Self::Start => JustifyContent::Start,
 
-            Self::Center => {
-                JustifyContent::Center
-            }
+            Self::Center => JustifyContent::Center,
 
             Self::End => JustifyContent::End,
 
-            Self::SpaceBetween => {
-                JustifyContent::SpaceBetween
-            }
+            Self::SpaceBetween => JustifyContent::SpaceBetween,
 
-            Self::SpaceAround => {
-                JustifyContent::SpaceAround
-            }
+            Self::SpaceAround => JustifyContent::SpaceAround,
 
-            Self::SpaceEvenly => {
-                JustifyContent::SpaceEvenly
-            }
+            Self::SpaceEvenly => JustifyContent::SpaceEvenly,
         }
     }
 }
@@ -157,16 +128,11 @@ pub enum StackGap {
 }
 
 impl StackGap {
-    pub fn resolve(
-        self,
-        tokens: &SpacingTokens,
-    ) -> f32 {
+    pub fn resolve(self, tokens: &SpacingTokens) -> f32 {
         match self {
             Self::None => 0.0,
 
-            Self::ExtraSmall => {
-                tokens.extra_small
-            }
+            Self::ExtraSmall => tokens.extra_small,
 
             Self::Small => tokens.small,
 
@@ -174,17 +140,11 @@ impl StackGap {
 
             Self::Large => tokens.large,
 
-            Self::ExtraLarge => {
-                tokens.extra_large
-            }
+            Self::ExtraLarge => tokens.extra_large,
 
-            Self::DoubleExtraLarge => {
-                tokens.double_extra_large
-            }
+            Self::DoubleExtraLarge => tokens.double_extra_large,
 
-            Self::Custom(value) => {
-                value.max(0.0)
-            }
+            Self::Custom(value) => value.max(0.0),
         }
     }
 }
@@ -193,9 +153,7 @@ impl StackGap {
 enum StackChildKind {
     Normal,
 
-    Divider {
-        thickness: DividerThickness,
-    },
+    Divider { thickness: DividerThickness },
 }
 
 pub struct StackChild {
@@ -211,9 +169,7 @@ pub struct StackChild {
 }
 
 impl StackChild {
-    pub fn new<V>(
-        view: V,
-    ) -> Self
+    pub fn new<V>(view: V) -> Self
     where
         V: View + 'static,
     {
@@ -249,71 +205,40 @@ impl StackChild {
         constraints: Constraints,
         context: &mut MeasureContext<'_>,
     ) -> Size {
-        let (
-            minimum_width,
-            maximum_width,
-        ) = resolve_axis_constraints(
+        let (minimum_width, maximum_width) = resolve_axis_constraints(
             self.width,
             constraints.minimum.width,
             constraints.maximum.width,
         );
 
-        let (
-            minimum_height,
-            maximum_height,
-        ) = resolve_axis_constraints(
+        let (minimum_height, maximum_height) = resolve_axis_constraints(
             self.height,
             constraints.minimum.height,
             constraints.maximum.height,
         );
 
-        let child_constraints =
-            Constraints::new(
-                Size::new(
-                    minimum_width,
-                    minimum_height,
-                ),
-                Size::new(
-                    maximum_width,
-                    maximum_height,
-                ),
-            );
+        let child_constraints = Constraints::new(
+            Size::new(minimum_width, minimum_height),
+            Size::new(maximum_width, maximum_height),
+        );
 
-        let measured =
-            self.view.measure(
-                child_constraints,
-                context,
-            );
+        let measured = self.view.measure(child_constraints, context);
 
-        constraints.constrain(
-            Size::new(
-                match self.width {
-                    LayoutLength::Auto => {
-                        measured.width
-                    }
+        constraints.constrain(Size::new(
+            match self.width {
+                LayoutLength::Auto => measured.width,
 
-                    LayoutLength::Fixed(value) => {
-                        sanitize_length(value)
-                    }
-                },
+                LayoutLength::Fixed(value) => sanitize_length(value),
+            },
+            match self.height {
+                LayoutLength::Auto => measured.height,
 
-                match self.height {
-                    LayoutLength::Auto => {
-                        measured.height
-                    }
-
-                    LayoutLength::Fixed(value) => {
-                        sanitize_length(value)
-                    }
-                },
-            ),
-        )
+                LayoutLength::Fixed(value) => sanitize_length(value),
+            },
+        ))
     }
 
-    pub(crate) fn divider<V>(
-        view: V,
-        thickness: DividerThickness,
-    ) -> Self
+    pub(crate) fn divider<V>(view: V, thickness: DividerThickness) -> Self
     where
         V: View + 'static,
     {
@@ -326,9 +251,7 @@ impl StackChild {
             flex_grow: 0.0,
             flex_shrink: 0.0,
 
-            kind: StackChildKind::Divider {
-                thickness,
-            },
+            kind: StackChildKind::Divider { thickness },
         }
     }
 
@@ -338,13 +261,9 @@ impl StackChild {
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
-        self.view.handle_event(
-            bounds,
-            event,
-            context,
-        )
+        self.view.handle_event(bounds, event, context)
     }
-    
+
     #[allow(unused)]
     fn create_layout_node(
         &self,
@@ -352,159 +271,96 @@ impl StackChild {
         available_size: Size,
         theme: &Theme,
     ) -> LayoutNode {
-        let mut width =
-            self.width.to_ui_length();
+        let mut width = self.width.to_ui_length();
 
-        let mut height =
-            self.height.to_ui_length();
+        let mut height = self.height.to_ui_length();
 
-        if matches!(
-            self.kind,
-            StackChildKind::Divider { .. }
-        ) {
+        if matches!(self.kind, StackChildKind::Divider { .. }) {
             match direction {
                 StackDirection::Vertical => {
-                    width = Length::Px(
-                        available_size.width.max(0.0),
-                    );
+                    width = Length::Px(available_size.width.max(0.0));
 
-                    height = Length::Px(
-                        theme
-                            .divider
-                            .thickness
-                            .max(0.0),
-                    );
+                    height = Length::Px(theme.divider.thickness.max(0.0));
                 }
 
                 StackDirection::Horizontal => {
-                    width = Length::Px(
-                        theme
-                            .divider
-                            .thickness
-                            .max(0.0),
-                    );
+                    width = Length::Px(theme.divider.thickness.max(0.0));
 
-                    height = Length::Px(
-                        available_size.height.max(0.0),
-                    );
+                    height = Length::Px(available_size.height.max(0.0));
                 }
             }
         }
 
         let flex_basis = match direction {
-            StackDirection::Horizontal => {
-                width.clone()
-            }
+            StackDirection::Horizontal => width.clone(),
 
-            StackDirection::Vertical => {
-                height.clone()
-            }
+            StackDirection::Vertical => height.clone(),
         };
 
-        LayoutNode::new(
-            Style {
-                display: Display::Block,
+        LayoutNode::new(Style {
+            display: Display::Block,
 
-                size: SizeStyle {
-                    width,
-                    height,
-                    ..SizeStyle::default()
-                },
-
-                item_style: ItemStyle {
-                    flex_grow:
-                    self.flex_grow.max(0.0),
-
-                    flex_shrink:
-                    self.flex_shrink.max(0.0),
-
-                    flex_basis,
-
-                    align_self: None,
-                },
-
-                ..Style::default()
+            size: SizeStyle {
+                width,
+                height,
+                ..SizeStyle::default()
             },
-        )
+
+            item_style: ItemStyle {
+                flex_grow: self.flex_grow.max(0.0),
+
+                flex_shrink: self.flex_shrink.max(0.0),
+
+                flex_basis,
+
+                align_self: None,
+            },
+
+            ..Style::default()
+        })
     }
 
-    pub fn width(
-        mut self,
-        width: f32,
-    ) -> Self {
-        self.width =
-            LayoutLength::Fixed(width);
+    pub fn width(mut self, width: f32) -> Self {
+        self.width = LayoutLength::Fixed(width);
 
         self
     }
 
-    pub fn height(
-        mut self,
-        height: f32,
-    ) -> Self {
-        self.height =
-            LayoutLength::Fixed(height);
+    pub fn height(mut self, height: f32) -> Self {
+        self.height = LayoutLength::Fixed(height);
 
         self
     }
 
-    pub fn frame(
-        mut self,
-        width: f32,
-        height: f32,
-    ) -> Self {
-        self.width =
-            LayoutLength::Fixed(width);
+    pub fn frame(mut self, width: f32, height: f32) -> Self {
+        self.width = LayoutLength::Fixed(width);
 
-        self.height =
-            LayoutLength::Fixed(height);
+        self.height = LayoutLength::Fixed(height);
 
         self
     }
 
-    pub fn flex_grow(
-        mut self,
-        value: f32,
-    ) -> Self {
-        self.flex_grow =
-            value.max(0.0);
+    pub fn flex_grow(mut self, value: f32) -> Self {
+        self.flex_grow = value.max(0.0);
 
         self
     }
 
-    pub fn flex_shrink(
-        mut self,
-        value: f32,
-    ) -> Self {
-        self.flex_shrink =
-            value.max(0.0);
+    pub fn flex_shrink(mut self, value: f32) -> Self {
+        self.flex_shrink = value.max(0.0);
 
         self
     }
 
-    pub(crate) fn overlay_size(
-        &self,
-        available: Size,
-    ) -> Size {
+    pub(crate) fn overlay_size(&self, available: Size) -> Size {
         Size::new(
-            self.width.resolve_overlay(
-                available.width,
-            ),
-            self.height.resolve_overlay(
-                available.height,
-            ),
+            self.width.resolve_overlay(available.width),
+            self.height.resolve_overlay(available.height),
         )
     }
 
-    pub(crate) fn paint(
-        &self,
-        bounds: Rect,
-        context: &mut PaintContext<'_>,
-    ) {
-        self.view.paint(
-            bounds,
-            context,
-        );
+    pub(crate) fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
+        self.view.paint(bounds, context);
     }
 
     fn layout_node(
@@ -514,93 +370,57 @@ impl StackChild {
         measured_size: Size,
         divider_tokens: &DividerTokens,
     ) -> LayoutNode {
-        let mut width =
-            measured_ui_length(
-                self.width,
-                measured_size.width,
-            );
+        let mut width = measured_ui_length(self.width, measured_size.width);
 
-        let mut height =
-            measured_ui_length(
-                self.height,
-                measured_size.height,
-            );
+        let mut height = measured_ui_length(self.height, measured_size.height);
 
-        if let StackChildKind::Divider {
-            thickness,
-        } = self.kind
-        {
-            let thickness =
-                thickness.resolve(
-                    divider_tokens,
-                );
+        if let StackChildKind::Divider { thickness } = self.kind {
+            let thickness = thickness.resolve(divider_tokens);
 
             match direction {
                 StackDirection::Vertical => {
-                    width = Length::Px(
-                        bounds
-                            .size
-                            .width
-                            .max(0.0),
-                    );
+                    width = Length::Px(bounds.size.width.max(0.0));
 
-                    height = Length::Px(
-                        thickness.max(0.0),
-                    );
+                    height = Length::Px(thickness.max(0.0));
                 }
 
                 StackDirection::Horizontal => {
-                    width = Length::Px(
-                        thickness.max(0.0),
-                    );
+                    width = Length::Px(thickness.max(0.0));
 
-                    height = Length::Px(
-                        bounds
-                            .size
-                            .height
-                            .max(0.0),
-                    );
+                    height = Length::Px(bounds.size.height.max(0.0));
                 }
             }
         }
 
-        LayoutNode::new(
-            Style {
-                display: Display::Block,
+        LayoutNode::new(Style {
+            display: Display::Block,
 
-                size: SizeStyle {
-                    width,
-                    height,
-
-                    ..Default::default()
-                },
-
-                item_style: ItemStyle {
-                    flex_grow:
-                    self.flex_grow,
-
-                    flex_shrink:
-                    self.flex_shrink,
-
-                    ..Default::default()
-                },
+            size: SizeStyle {
+                width,
+                height,
 
                 ..Default::default()
             },
-        )
+
+            item_style: ItemStyle {
+                flex_grow: self.flex_grow,
+
+                flex_shrink: self.flex_shrink,
+
+                ..Default::default()
+            },
+
+            ..Default::default()
+        })
     }
 }
 
 pub trait IntoStackChild {
-    fn into_stack_child(
-        self,
-    ) -> StackChild;
+    fn into_stack_child(self) -> StackChild;
 }
 
 impl IntoStackChild for StackChild {
-    fn into_stack_child(
-        self,
-    ) -> StackChild {
+    fn into_stack_child(self) -> StackChild {
         self
     }
 }
@@ -609,73 +429,43 @@ impl<V> IntoStackChild for V
 where
     V: View + 'static,
 {
-    fn into_stack_child(
-        self,
-    ) -> StackChild {
+    fn into_stack_child(self) -> StackChild {
         StackChild::new(self)
     }
 }
 
 pub trait IntoStackChildren {
-    fn into_stack_children(
-        self,
-    ) -> Vec<StackChild>;
+    fn into_stack_children(self) -> Vec<StackChild>;
 }
 
 impl<T> IntoStackChildren for T
 where
     T: IntoStackChild,
 {
-    fn into_stack_children(
-        self,
-    ) -> Vec<StackChild> {
-        vec![
-            self.into_stack_child(),
-        ]
+    fn into_stack_children(self) -> Vec<StackChild> {
+        vec![self.into_stack_child()]
     }
 }
 
-pub trait ViewExt:
-View + Sized + 'static
-{
+pub trait ViewExt: View + Sized + 'static {
     fn layout(self) -> StackChild {
         StackChild::new(self)
     }
 
-    fn frame(
-        self,
-        width: f32,
-        height: f32,
-    ) -> StackChild {
-        StackChild::new(self)
-            .frame(
-                width,
-                height,
-            )
+    fn frame(self, width: f32, height: f32) -> StackChild {
+        StackChild::new(self).frame(width, height)
     }
 
-    fn width(
-        self,
-        width: f32,
-    ) -> StackChild {
-        StackChild::new(self)
-            .width(width)
+    fn width(self, width: f32) -> StackChild {
+        StackChild::new(self).width(width)
     }
 
-    fn height(
-        self,
-        height: f32,
-    ) -> StackChild {
-        StackChild::new(self)
-            .height(height)
+    fn height(self, height: f32) -> StackChild {
+        StackChild::new(self).height(height)
     }
 }
 
-impl<T> ViewExt for T
-where
-    T: View + Sized + 'static,
-{
-}
+impl<T> ViewExt for T where T: View + Sized + 'static {}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum StackDirection {
@@ -712,17 +502,11 @@ impl StackDistribution {
             Self::Center => JustifyContent::Center,
             Self::End => JustifyContent::End,
 
-            Self::SpaceBetween => {
-                JustifyContent::SpaceBetween
-            }
+            Self::SpaceBetween => JustifyContent::SpaceBetween,
 
-            Self::SpaceAround => {
-                JustifyContent::SpaceAround
-            }
+            Self::SpaceAround => JustifyContent::SpaceAround,
 
-            Self::SpaceEvenly => {
-                JustifyContent::SpaceEvenly
-            }
+            Self::SpaceEvenly => JustifyContent::SpaceEvenly,
         }
     }
 }
@@ -737,18 +521,13 @@ pub(crate) fn paint_stack(
     context: &mut PaintContext<'_>,
 ) {
     let child_bounds = {
-        let mut measure_context =
-            MeasureContext {
-                theme:
-                context.theme,
+        let mut measure_context = MeasureContext {
+            theme: context.theme,
 
-                typography:
-                context.typography,
+            typography: context.typography,
 
-                text_measurer:
-                &mut *context
-                    .text_measurer,
-            };
+            text_measurer: &mut *context.text_measurer,
+        };
 
         layout_stack(
             direction,
@@ -762,51 +541,28 @@ pub(crate) fn paint_stack(
         )
     };
 
-    for (
-        child,
-        child_bounds,
-    ) in children
-        .iter()
-        .zip(child_bounds)
-    {
-        child.paint(
-            child_bounds,
-            context,
-        );
+    for (child, child_bounds) in children.iter().zip(child_bounds) {
+        child.paint(child_bounds, context);
     }
 }
 
-pub fn border_box(
-    node: &LayoutNode,
-    parent_origin: Point,
-) -> Option<Rect> {
-    let box_model = node
-        .layout_boxes
-        .iter()
-        .next()?;
+pub fn border_box(node: &LayoutNode, parent_origin: Point) -> Option<Rect> {
+    let box_model = node.layout_boxes.iter().next()?;
 
-    let rect =
-        box_model.border_box;
+    let rect = box_model.border_box;
 
-    Some(
-        Rect::new(
-            parent_origin.x + rect.x,
-            parent_origin.y + rect.y,
-            rect.width,
-            rect.height,
-        ),
-    )
+    Some(Rect::new(
+        parent_origin.x + rect.x,
+        parent_origin.y + rect.y,
+        rect.width,
+        rect.height,
+    ))
 }
 
 struct EmptyView;
 
 impl View for EmptyView {
-    fn paint(
-        &self,
-        _bounds: Rect,
-        _context: &mut PaintContext<'_>,
-    ) {
-    }
+    fn paint(&self, _bounds: Rect, _context: &mut PaintContext<'_>) {}
 }
 
 #[allow(unused)]
@@ -816,53 +572,29 @@ pub(crate) fn dispatch_child_event(
     event: &ViewEvent,
     context: &mut EventContext,
 ) -> EventResult {
-    if !event.requires_broadcast()
-        && !event.is_inside(bounds)
-    {
+    if !event.requires_broadcast() && !event.is_inside(bounds) {
         return EventResult::Ignored;
     }
 
-    child.handle_event(
-        bounds,
-        event,
-        context,
-    )
+    child.handle_event(bounds, event, context)
 }
 
 #[allow(unused)]
 pub(crate) fn dispatch_children_in_order<'a>(
-    children: impl IntoIterator<
-        Item = (&'a StackChild, Rect),
-    >,
+    children: impl IntoIterator<Item = (&'a StackChild, Rect)>,
     event: &ViewEvent,
     context: &mut EventContext,
 ) -> EventResult {
-    let broadcast =
-        event.requires_broadcast();
+    let broadcast = event.requires_broadcast();
 
-    let mut result =
-        EventResult::Ignored;
+    let mut result = EventResult::Ignored;
 
-    for (
-        child,
-        bounds,
-    ) in children {
-        let child_result =
-            dispatch_child_event(
-                child,
-                bounds,
-                event,
-                context,
-            );
+    for (child, bounds) in children {
+        let child_result = dispatch_child_event(child, bounds, event, context);
 
-        result =
-            result.merge(
-                child_result,
-            );
+        result = result.merge(child_result);
 
-        if !broadcast
-            && child_result.is_consumed()
-        {
+        if !broadcast && child_result.is_consumed() {
             break;
         }
     }
@@ -880,151 +612,73 @@ pub(crate) fn layout_stack(
     theme: &Theme,
     measure_context: &mut MeasureContext<'_>,
 ) -> Vec<Rect> {
-    if children.is_empty()
-        || bounds.size.width <= 0.0
-        || bounds.size.height <= 0.0
-    {
+    if children.is_empty() || bounds.size.width <= 0.0 || bounds.size.height <= 0.0 {
         return Vec::new();
     }
 
-    let resolved_gap =
-        gap.resolve(
-            &theme.spacing,
-        )
-            .max(0.0);
+    let resolved_gap = gap.resolve(&theme.spacing).max(0.0);
 
-    let child_constraints =
-        Constraints::loose(
-            bounds.size,
-        );
+    let child_constraints = Constraints::loose(bounds.size);
 
-    let measured_sizes: Vec<Size> =
-        children
-            .iter()
-            .map(|child| {
-                child.measure(
-                    child_constraints,
-                    measure_context,
-                )
-            })
-            .collect();
+    let measured_sizes: Vec<Size> = children
+        .iter()
+        .map(|child| child.measure(child_constraints, measure_context))
+        .collect();
 
-    let child_nodes: Vec<LayoutNode> =
-        children
-            .iter()
-            .zip(
-                measured_sizes
-                    .iter()
-                    .copied(),
-            )
-            .map(
-                |(
-                     child,
-                     measured_size,
-                 )| {
-                    child.layout_node(
-                        direction,
-                        bounds,
-                        measured_size,
-                        &theme.divider,
-                    )
-                },
-            )
-            .collect();
+    let child_nodes: Vec<LayoutNode> = children
+        .iter()
+        .zip(measured_sizes.iter().copied())
+        .map(|(child, measured_size)| {
+            child.layout_node(direction, bounds, measured_size, &theme.divider)
+        })
+        .collect();
 
-    let (
-        row_gap,
-        column_gap,
-    ) = match direction {
-        StackDirection::Horizontal => {
-            (
-                Length::Px(0.0),
-                Length::Px(
-                    resolved_gap,
-                ),
-            )
-        }
+    let (row_gap, column_gap) = match direction {
+        StackDirection::Horizontal => (Length::Px(0.0), Length::Px(resolved_gap)),
 
-        StackDirection::Vertical => {
-            (
-                Length::Px(
-                    resolved_gap,
-                ),
-                Length::Px(0.0),
-            )
-        }
+        StackDirection::Vertical => (Length::Px(resolved_gap), Length::Px(0.0)),
     };
 
-    let mut root =
-        LayoutNode::with_children(
-            Style {
-                display: Display::Flex {
-                    flex_direction:
-                    direction
-                        .to_ui_flex_direction(),
-                },
-
-                size: SizeStyle {
-                    width: Length::Px(
-                        bounds.size.width,
-                    ),
-
-                    height: Length::Px(
-                        bounds.size.height,
-                    ),
-
-                    ..SizeStyle::default()
-                },
-
-                align_items:
-                alignment
-                    .to_ui_alignment(),
-
-                justify_content:
-                distribution
-                    .to_ui_justification(),
-
-                row_gap,
-                column_gap,
-
-                ..Style::default()
+    let mut root = LayoutNode::with_children(
+        Style {
+            display: Display::Flex {
+                flex_direction: direction.to_ui_flex_direction(),
             },
 
-            child_nodes,
-        );
+            size: SizeStyle {
+                width: Length::Px(bounds.size.width),
 
-    LayoutEngine::layout(
-        &mut root,
-        bounds.size.width,
-        bounds.size.height,
+                height: Length::Px(bounds.size.height),
+
+                ..SizeStyle::default()
+            },
+
+            align_items: alignment.to_ui_alignment(),
+
+            justify_content: distribution.to_ui_justification(),
+
+            row_gap,
+            column_gap,
+
+            ..Style::default()
+        },
+        child_nodes,
     );
+
+    LayoutEngine::layout(&mut root, bounds.size.width, bounds.size.height);
 
     root.children
         .iter()
         .map(|node| {
-            let Some(box_model) =
-                node.layout_boxes
-                    .iter()
-                    .next()
-            else {
-                return Rect::new(
-                    bounds.origin.x,
-                    bounds.origin.y,
-                    0.0,
-                    0.0,
-                );
+            let Some(box_model) = node.layout_boxes.iter().next() else {
+                return Rect::new(bounds.origin.x, bounds.origin.y, 0.0, 0.0);
             };
 
-            let rect =
-                box_model.border_box;
+            let rect = box_model.border_box;
 
             Rect::new(
-                bounds.origin.x
-                    + rect.x,
-
-                bounds.origin.y
-                    + rect.y,
-
+                bounds.origin.x + rect.x,
+                bounds.origin.y + rect.y,
                 rect.width.max(0.0),
                 rect.height.max(0.0),
             )
@@ -1043,21 +697,17 @@ pub(crate) fn handle_stack_event(
     context: &mut EventContext<'_>,
 ) -> EventResult {
     let child_bounds = {
-        let theme =
-            context.theme;
+        let theme = context.theme;
 
-        let typography =
-            context.typography;
+        let typography = context.typography;
 
-        let text_measurer =
-            &mut *context.text_measurer;
+        let text_measurer = &mut *context.text_measurer;
 
-        let mut measure_context =
-            MeasureContext {
-                theme,
-                typography,
-                text_measurer,
-            };
+        let mut measure_context = MeasureContext {
+            theme,
+            typography,
+            text_measurer,
+        };
 
         layout_stack(
             direction,
@@ -1072,55 +722,27 @@ pub(crate) fn handle_stack_event(
     };
 
     if event.requires_broadcast() {
-        let mut result =
-            EventResult::Ignored;
+        let mut result = EventResult::Ignored;
 
-        for (
-            child,
-            child_bounds,
-        ) in children
-            .iter()
-            .zip(child_bounds.iter().copied())
-        {
-            result = result.merge(
-                child.handle_event(
-                    child_bounds,
-                    event,
-                    context,
-                ),
-            );
+        for (child, child_bounds) in children.iter().zip(child_bounds.iter().copied()) {
+            result = result.merge(child.handle_event(child_bounds, event, context));
         }
 
         return result;
     }
 
-    let Some(position) =
-        event.position()
-    else {
+    let Some(position) = event.position() else {
         return EventResult::Ignored;
     };
 
-    for index in (
-        0..children
-            .len()
-            .min(child_bounds.len())
-    )
-        .rev()
-    {
-        let bounds =
-            child_bounds[index];
+    for index in (0..children.len().min(child_bounds.len())).rev() {
+        let bounds = child_bounds[index];
 
         if !bounds.contains(position) {
             continue;
         }
 
-        let result =
-            children[index]
-                .handle_event(
-                    bounds,
-                    event,
-                    context,
-                );
+        let result = children[index].handle_event(bounds, event, context);
 
         if result.is_consumed() {
             return result;
@@ -1130,38 +752,19 @@ pub(crate) fn handle_stack_event(
     EventResult::Ignored
 }
 
-fn resolve_axis_constraints(
-    length: LayoutLength,
-    minimum: f32,
-    maximum: f32,
-) -> (f32, f32) {
+fn resolve_axis_constraints(length: LayoutLength, minimum: f32, maximum: f32) -> (f32, f32) {
     match length {
-        LayoutLength::Auto => {
-            (
-                minimum.max(0.0),
-                maximum.max(minimum),
-            )
-        }
+        LayoutLength::Auto => (minimum.max(0.0), maximum.max(minimum)),
 
         LayoutLength::Fixed(value) => {
-            let value =
-                sanitize_length(value)
-                    .clamp(
-                        minimum.max(0.0),
-                        maximum.max(minimum),
-                    );
+            let value = sanitize_length(value).clamp(minimum.max(0.0), maximum.max(minimum));
 
-            (
-                value,
-                value,
-            )
+            (value, value)
         }
     }
 }
 
-fn sanitize_length(
-    value: f32,
-) -> f32 {
+fn sanitize_length(value: f32) -> f32 {
     if value.is_finite() {
         value.max(0.0)
     } else {
@@ -1169,20 +772,12 @@ fn sanitize_length(
     }
 }
 
-fn measured_ui_length(
-    length: LayoutLength,
-    measured: f32,
-) -> Length {
+fn measured_ui_length(length: LayoutLength, measured: f32) -> Length {
     match length {
-        LayoutLength::Fixed(value) => {
-            Length::Px(
-                sanitize_length(value),
-            )
-        }
+        LayoutLength::Fixed(value) => Length::Px(sanitize_length(value)),
 
         LayoutLength::Auto => {
-            let measured =
-                sanitize_length(measured);
+            let measured = sanitize_length(measured);
 
             if measured > 0.0 {
                 Length::Px(measured)

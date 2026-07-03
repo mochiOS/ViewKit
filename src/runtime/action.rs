@@ -1,62 +1,42 @@
 use std::collections::VecDeque;
 
-use super::{
-    ActionId,
-    ComponentInstanceId,
-    NodeId,
-};
+use super::{ActionId, ComponentInstanceId, NodeId};
 
 #[derive(Clone, Debug)]
 pub enum RuntimeEvent {
     ButtonClicked,
 
-    TextChanged {
-        value: String,
-    },
+    TextChanged { value: String },
 
-    TextSubmitted {
-        value: String,
-    },
+    TextSubmitted { value: String },
 }
 
 #[derive(Clone, Debug)]
 pub struct RuntimeAction {
-    pub component_instance:
-        ComponentInstanceId,
+    pub component_instance: ComponentInstanceId,
 
-    pub node_id:
-        NodeId,
+    pub node_id: NodeId,
 
-    pub action_id:
-        ActionId,
+    pub action_id: ActionId,
 
-    pub event:
-        RuntimeEvent,
+    pub event: RuntimeEvent,
 }
 
 #[derive(Default)]
 pub struct ActionQueue {
-    queue:
-        VecDeque<RuntimeAction>,
+    queue: VecDeque<RuntimeAction>,
 }
 
 impl ActionQueue {
-    pub fn push(
-        &mut self,
-        action: RuntimeAction,
-    ) {
+    pub fn push(&mut self, action: RuntimeAction) {
         self.queue.push_back(action);
     }
 
-    pub fn poll(
-        &mut self,
-    ) -> Option<RuntimeAction> {
+    pub fn poll(&mut self) -> Option<RuntimeAction> {
         self.queue.pop_front()
     }
 
-    pub fn is_empty(
-        &self,
-    ) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.queue.is_empty()
     }
 }

@@ -18,17 +18,7 @@ impl ScrollBarTokens {
         inset: 4.0,
         length_inset: 1.0,
         horizontal_offset: 2.0,
-        track_color: Color::rgba(
-            0,
-            0,
-            0,
-            20,
-        ),
-        thumb_color: Color::rgba(
-            0,
-            0,
-            0,
-            96,
-        ),
+        track_color: Color::rgba(0, 0, 0, 20),
+        thumb_color: Color::rgba(0, 0, 0, 96),
     };
 }
