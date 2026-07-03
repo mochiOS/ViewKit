@@ -17,6 +17,7 @@ struct TextFieldInteractionInner {
     focused: bool,
     enabled: bool,
     value: String,
+    cursor: usize,
     value_initialized: bool,
 }
 
@@ -93,9 +94,11 @@ impl TextFieldInteractionState {
     }
 
     pub fn set_value(&self, value: impl Into<String>) {
+        let value = value.into();
         let mut inner = self.inner.borrow_mut();
 
-        inner.value = value.into();
+        inner.cursor = value.len();
+        inner.value = value;
 
         inner.value_initialized = true;
     }
@@ -107,6 +110,7 @@ impl TextFieldInteractionState {
             return;
         }
 
+        inner.cursor = value.len();
         inner.value = value;
         inner.value_initialized = true;
     }
@@ -123,15 +127,30 @@ impl TextFieldInteractionState {
 
         let mut inner = self.inner.borrow_mut();
 
-        inner.value.push_str(filtered.as_str());
+        let cursor = inner.cursor.min(inner.value.len());
+        inner.value.insert_str(cursor, filtered.as_str());
+        inner.cursor = cursor + filtered.len();
 
         true
     }
 
     fn delete_backward(&self) -> bool {
         let mut inner = self.inner.borrow_mut();
+        let cursor = inner.cursor.min(inner.value.len());
 
-        inner.value.pop().is_some()
+        if cursor == 0 {
+            return false;
+        }
+
+        let previous = inner.value[..cursor]
+            .char_indices()
+            .next_back()
+            .map(|(index, _)| index)
+            .unwrap_or(0);
+
+        inner.value.replace_range(previous..cursor, "");
+        inner.cursor = previous;
+        true
     }
 }
 
