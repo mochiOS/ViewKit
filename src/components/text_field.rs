@@ -201,6 +201,10 @@ impl TextFieldInteractionState {
         true
     }
 
+    fn reset_caret_blink(&self) {
+        self.inner.borrow_mut().caret_blink_origin = Some(Instant::now());
+    }
+
     fn caret_blink_state(&self, now: Instant) -> (bool, Instant) {
         let mut inner = self.inner.borrow_mut();
         let origin = *inner.caret_blink_origin.get_or_insert(now);
@@ -634,9 +638,9 @@ impl View for TextField {
                     return EventResult::Ignored;
                 }
 
-                if self.interaction.insert_text(text) {
-                    context.request_redraw();
-                }
+                self.interaction.insert_text(text);
+                self.interaction.reset_caret_blink();
+                context.request_redraw();
 
                 EventResult::Consumed
             }
@@ -646,9 +650,9 @@ impl View for TextField {
                     return EventResult::Ignored;
                 }
 
-                if self.interaction.delete_backward() {
-                    context.request_redraw();
-                }
+                self.interaction.delete_backward();
+                self.interaction.reset_caret_blink();
+                context.request_redraw();
 
                 EventResult::Consumed
             }
@@ -658,9 +662,9 @@ impl View for TextField {
                     return EventResult::Ignored;
                 }
 
-                if self.interaction.move_cursor_left() {
-                    context.request_redraw();
-                }
+                self.interaction.move_cursor_left();
+                self.interaction.reset_caret_blink();
+                context.request_redraw();
 
                 EventResult::Consumed
             }
@@ -670,9 +674,9 @@ impl View for TextField {
                     return EventResult::Ignored;
                 }
 
-                if self.interaction.move_cursor_right() {
-                    context.request_redraw();
-                }
+                self.interaction.move_cursor_right();
+                self.interaction.reset_caret_blink();
+                context.request_redraw();
 
                 EventResult::Consumed
             }
