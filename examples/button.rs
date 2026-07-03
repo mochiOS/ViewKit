@@ -209,15 +209,12 @@ impl PlatformApplication for ExampleApplication {
 
         let root = self.build_root();
 
-        let mut context = PaintContext {
+        let mut context = PaintContext::new(
             display_list,
-
-            theme: &self.theme,
-
-            typography: &self.typography,
-
-            text_measurer: &mut self.text_measurer,
-        };
+            &self.theme,
+            &self.typography,
+            &mut self.text_measurer,
+        );
 
         root.paint(viewport.logical_bounds(), &mut context);
     }
