@@ -10,18 +10,36 @@ pub struct Color {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ColorTokens {
-    pub background: Color,
+    pub canvas: Color,
+
     pub surface: Color,
-    pub elevated_surface: Color,
+    pub surface_subtle: Color,
+    pub surface_muted: Color,
+
     pub text_primary: Color,
     pub text_secondary: Color,
+    pub text_tertiary: Color,
     pub text_disabled: Color,
+
+    pub border: Color,
+    pub border_strong: Color,
+
     pub accent: Color,
     pub accent_hovered: Color,
     pub accent_pressed: Color,
-    pub border: Color,
+    pub accent_soft: Color,
+
+    pub success: Color,
+    pub success_soft: Color,
+
+    pub warning: Color,
+    pub warning_soft: Color,
+
+    pub danger: Color,
+    pub danger_hovered: Color,
+    pub danger_soft: Color,
+
     pub focus_ring: Color,
-    pub destructive: Color,
 }
 
 impl Color {
