@@ -1,8 +1,8 @@
 //! ViewKitのレイアウト型とui_layout-rsとの接続を定義
 
 use ui_layout::{
-    AlignItems, Display, FlexDirection, ItemStyle, JustifyContent, LayoutEngine, LayoutNode,
-    Length, SizeStyle, Style,
+    AlignItems, Display, FlexDirection, ItemStyle, JustifyContent, LayoutNode, Length, SizeStyle,
+    Style,
 };
 
 use crate::event::{EventContext, EventResult, ViewEvent};
@@ -375,22 +375,25 @@ impl StackChild {
         let mut height = measured_ui_length(self.height, measured_size.height);
 
         if let StackChildKind::Divider { thickness } = self.kind {
-            let thickness = thickness.resolve(divider_tokens);
+            let thickness = thickness.resolve(divider_tokens).max(0.0);
 
             match direction {
                 StackDirection::Vertical => {
                     width = Length::Px(bounds.size.width.max(0.0));
-
-                    height = Length::Px(thickness.max(0.0));
+                    height = Length::Px(thickness);
                 }
 
                 StackDirection::Horizontal => {
-                    width = Length::Px(thickness.max(0.0));
-
+                    width = Length::Px(thickness);
                     height = Length::Px(bounds.size.height.max(0.0));
                 }
             }
         }
+
+        let flex_basis = match direction {
+            StackDirection::Horizontal => width.clone(),
+            StackDirection::Vertical => height.clone(),
+        };
 
         LayoutNode::new(Style {
             display: Display::Block,
@@ -403,11 +406,10 @@ impl StackChild {
             },
 
             item_style: ItemStyle {
-                flex_grow: self.flex_grow,
-
-                flex_shrink: self.flex_shrink,
-
-                ..Default::default()
+                flex_grow: self.flex_grow.max(0.0),
+                flex_shrink: self.flex_shrink.max(0.0),
+                flex_basis,
+                align_self: None,
             },
 
             ..Default::default()
@@ -675,93 +677,238 @@ pub(crate) fn layout_stack(
         return Vec::new();
     }
 
-    let resolved_gap = gap.resolve(&theme.spacing).max(0.0);
+    #[derive(Clone, Copy)]
+    struct LayoutItem {
+        main_size: f32,
+        cross_size: f32,
+
+        flex_grow: f32,
+        flex_shrink: f32,
+
+        cross_auto: bool,
+        divider: bool,
+    }
+
+    fn finite_non_negative(value: f32) -> f32 {
+        if value.is_finite() {
+            value.max(0.0)
+        } else {
+            0.0
+        }
+    }
+
+    let available_main = match direction {
+        StackDirection::Horizontal => bounds.size.width,
+
+        StackDirection::Vertical => bounds.size.height,
+    }
+    .max(0.0);
+
+    let available_cross = match direction {
+        StackDirection::Horizontal => bounds.size.height,
+
+        StackDirection::Vertical => bounds.size.width,
+    }
+    .max(0.0);
+
+    let resolved_gap = finite_non_negative(gap.resolve(&theme.spacing));
 
     let child_constraints = Constraints::loose(bounds.size);
 
-    let measured_sizes: Vec<Size> = children
-        .iter()
-        .map(|child| child.measure(child_constraints, measure_context))
-        .collect();
+    let mut items = Vec::with_capacity(children.len());
 
-    let child_nodes: Vec<LayoutNode> = children
-        .iter()
-        .zip(measured_sizes.iter().copied())
-        .map(|(child, measured_size)| {
-            child.layout_node(direction, bounds, measured_size, &theme.divider)
-        })
-        .collect();
+    for child in children {
+        let measured = child.measure(child_constraints, measure_context);
 
-    let (row_gap, column_gap) = match direction {
-        StackDirection::Horizontal => (Length::Px(0.0), Length::Px(resolved_gap)),
+        let (width, height, divider) = match child.kind {
+            StackChildKind::Normal => {
+                let width = match child.width {
+                    LayoutLength::Auto => finite_non_negative(measured.width),
 
-        StackDirection::Vertical => (Length::Px(resolved_gap), Length::Px(0.0)),
-    };
+                    LayoutLength::Fixed(value) => sanitize_length(value),
+                };
 
-    let mut root = LayoutNode::with_children(
-        Style {
-            display: Display::Flex {
-                flex_direction: direction.to_ui_flex_direction(),
-            },
+                let height = match child.height {
+                    LayoutLength::Auto => finite_non_negative(measured.height),
 
-            size: SizeStyle {
-                width: Length::Px(bounds.size.width),
+                    LayoutLength::Fixed(value) => sanitize_length(value),
+                };
 
-                height: Length::Px(bounds.size.height),
+                (width, height, false)
+            }
 
-                ..SizeStyle::default()
-            },
+            StackChildKind::Divider { thickness } => {
+                let thickness = finite_non_negative(thickness.resolve(&theme.divider));
 
-            align_items: alignment.to_ui_alignment(),
-
-            justify_content: distribution.to_ui_justification(),
-
-            row_gap,
-            column_gap,
-
-            ..Style::default()
-        },
-        child_nodes,
-    );
-
-    LayoutEngine::layout(&mut root, bounds.size.width, bounds.size.height);
-
-    root.children
-        .iter()
-        .zip(children.iter())
-        .map(|(node, child)| {
-            let Some(box_model) = node.layout_boxes.iter().next() else {
-                return Rect::new(bounds.origin.x, bounds.origin.y, 0.0, 0.0);
-            };
-
-            let rect = box_model.border_box;
-            let mut child_bounds = Rect::new(
-                bounds.origin.x + rect.x,
-                bounds.origin.y + rect.y,
-                rect.width.max(0.0),
-                rect.height.max(0.0),
-            );
-
-            if alignment == StackAlignment::Stretch {
                 match direction {
-                    StackDirection::Horizontal if matches!(child.height, LayoutLength::Auto) => {
-                        child_bounds.origin.y = bounds.origin.y;
+                    StackDirection::Horizontal => (thickness, available_cross, true),
 
-                        child_bounds.size.height = bounds.size.height;
-                    }
-
-                    StackDirection::Vertical if matches!(child.width, LayoutLength::Auto) => {
-                        child_bounds.origin.x = bounds.origin.x;
-
-                        child_bounds.size.width = bounds.size.width;
-                    }
-
-                    _ => {}
+                    StackDirection::Vertical => (available_cross, thickness, true),
                 }
             }
-            child_bounds
-        })
-        .collect()
+        };
+
+        let (main_size, cross_size, cross_auto) = match direction {
+            StackDirection::Horizontal => {
+                (width, height, matches!(child.height, LayoutLength::Auto))
+            }
+
+            StackDirection::Vertical => (height, width, matches!(child.width, LayoutLength::Auto)),
+        };
+
+        items.push(LayoutItem {
+            main_size: finite_non_negative(main_size),
+
+            cross_size: finite_non_negative(cross_size),
+
+            flex_grow: if divider {
+                0.0
+            } else {
+                finite_non_negative(child.flex_grow)
+            },
+
+            flex_shrink: if divider {
+                0.0
+            } else {
+                finite_non_negative(child.flex_shrink)
+            },
+
+            cross_auto,
+            divider,
+        });
+    }
+
+    let gap_count = items.len().saturating_sub(1);
+    let total_gap = resolved_gap * gap_count as f32;
+    let base_main_size = items.iter().map(|item| item.main_size).sum::<f32>();
+    let free_space = available_main - base_main_size - total_gap;
+
+    if free_space > 0.0 {
+        let total_grow = items.iter().map(|item| item.flex_grow).sum::<f32>();
+
+        if total_grow > 0.0 {
+            for item in &mut items {
+                if item.flex_grow <= 0.0 {
+                    continue;
+                }
+
+                item.main_size += free_space * (item.flex_grow / total_grow);
+            }
+        }
+    } else if free_space < 0.0 {
+        let overflow = -free_space;
+
+        let total_shrink_weight = items
+            .iter()
+            .map(|item| item.flex_shrink * item.main_size)
+            .sum::<f32>();
+
+        if total_shrink_weight > 0.0 {
+            for item in &mut items {
+                let weight = item.flex_shrink * item.main_size;
+
+                if weight <= 0.0 {
+                    continue;
+                }
+
+                let reduction = overflow * (weight / total_shrink_weight);
+
+                item.main_size = (item.main_size - reduction).max(0.0);
+            }
+        }
+    }
+
+    let occupied_main = items.iter().map(|item| item.main_size).sum::<f32>() + total_gap;
+
+    let remaining_space = (available_main - occupied_main).max(0.0);
+
+    let mut leading_space = 0.0;
+    let mut actual_gap = resolved_gap;
+
+    match distribution {
+        StackDistribution::Start => {}
+
+        StackDistribution::Center => {
+            leading_space = remaining_space / 2.0;
+        }
+
+        StackDistribution::End => {
+            leading_space = remaining_space;
+        }
+
+        StackDistribution::SpaceBetween => {
+            if gap_count > 0 {
+                actual_gap += remaining_space / gap_count as f32;
+            }
+        }
+
+        StackDistribution::SpaceAround => {
+            let spacing = remaining_space / items.len() as f32;
+
+            leading_space = spacing / 2.0;
+
+            actual_gap += spacing;
+        }
+
+        StackDistribution::SpaceEvenly => {
+            let spacing = remaining_space / (items.len() as f32 + 1.0);
+
+            leading_space = spacing;
+            actual_gap += spacing;
+        }
+    }
+
+    let mut cursor = match direction {
+        StackDirection::Horizontal => bounds.origin.x,
+
+        StackDirection::Vertical => bounds.origin.y,
+    } + leading_space;
+
+    let mut result = Vec::with_capacity(items.len());
+
+    for (index, item) in items.iter().enumerate() {
+        let cross_size =
+            if item.divider || (alignment == StackAlignment::Stretch && item.cross_auto) {
+                available_cross
+            } else {
+                item.cross_size.min(available_cross)
+            };
+
+        let cross_offset = match alignment {
+            StackAlignment::Start | StackAlignment::Stretch => 0.0,
+
+            StackAlignment::Center => (available_cross - cross_size) / 2.0,
+
+            StackAlignment::End => available_cross - cross_size,
+        }
+        .max(0.0);
+
+        let child_bounds = match direction {
+            StackDirection::Horizontal => Rect::new(
+                cursor,
+                bounds.origin.y + cross_offset,
+                item.main_size,
+                cross_size,
+            ),
+
+            StackDirection::Vertical => Rect::new(
+                bounds.origin.x + cross_offset,
+                cursor,
+                cross_size,
+                item.main_size,
+            ),
+        };
+
+        result.push(child_bounds);
+
+        cursor += item.main_size;
+
+        if index + 1 < items.len() {
+            cursor += actual_gap;
+        }
+    }
+
+    result
 }
 
 pub(crate) fn handle_stack_event(
