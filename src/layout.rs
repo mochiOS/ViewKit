@@ -728,19 +728,38 @@ pub(crate) fn layout_stack(
 
     root.children
         .iter()
-        .map(|node| {
+        .zip(children.iter())
+        .map(|(node, child)| {
             let Some(box_model) = node.layout_boxes.iter().next() else {
                 return Rect::new(bounds.origin.x, bounds.origin.y, 0.0, 0.0);
             };
 
             let rect = box_model.border_box;
-
-            Rect::new(
+            let mut child_bounds = Rect::new(
                 bounds.origin.x + rect.x,
                 bounds.origin.y + rect.y,
                 rect.width.max(0.0),
                 rect.height.max(0.0),
-            )
+            );
+
+            if alignment == StackAlignment::Stretch {
+                match direction {
+                    StackDirection::Horizontal if matches!(child.height, LayoutLength::Auto) => {
+                        child_bounds.origin.y = bounds.origin.y;
+
+                        child_bounds.size.height = bounds.size.height;
+                    }
+
+                    StackDirection::Vertical if matches!(child.width, LayoutLength::Auto) => {
+                        child_bounds.origin.x = bounds.origin.x;
+
+                        child_bounds.size.width = bounds.size.width;
+                    }
+
+                    _ => {}
+                }
+            }
+            child_bounds
         })
         .collect()
 }
