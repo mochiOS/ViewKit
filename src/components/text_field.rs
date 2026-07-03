@@ -8,6 +8,7 @@ use crate::platform::PointerButton;
 use crate::theme::{Color, CornerRadius, ShadowStyle};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 use std::cell::RefCell;
+use std::ops::Range;
 use std::rc::Rc;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
@@ -22,6 +23,9 @@ struct TextFieldInteractionInner {
     value: String,
     cursor: usize,
     scroll_offset_x: f32,
+    selection_anchor: Option<usize>,
+    selecting: bool,
+
     value_initialized: bool,
     caret_blink_origin: Option<Instant>,
 }
@@ -106,6 +110,8 @@ impl TextFieldInteractionState {
         inner.scroll_offset_x = 0.0;
         inner.value = value;
         inner.value_initialized = true;
+        inner.selection_anchor = None;
+        inner.selecting = false;
     }
 
     fn initialize_value(&self, value: String) {
@@ -119,10 +125,17 @@ impl TextFieldInteractionState {
         inner.scroll_offset_x = 0.0;
         inner.value = value;
         inner.value_initialized = true;
+        inner.selection_anchor = None;
+        inner.selecting = false;
     }
 
     fn delete_forward(&self) -> bool {
         let mut inner = self.inner.borrow_mut();
+
+        if delete_selection(&mut inner) {
+            return true;
+        }
+
         let cursor = inner.cursor.min(inner.value.len());
 
         if cursor >= inner.value.len() {
@@ -148,27 +161,25 @@ impl TextFieldInteractionState {
 
     fn move_cursor_home(&self) -> bool {
         let mut inner = self.inner.borrow_mut();
-
-        if inner.cursor == 0 {
-            return false;
-        }
+        let changed = inner.cursor != 0 || inner.selection_anchor.is_some();
 
         inner.cursor = 0;
+        inner.selection_anchor = None;
+        inner.selecting = false;
 
-        true
+        changed
     }
 
     fn move_cursor_end(&self) -> bool {
         let mut inner = self.inner.borrow_mut();
         let end = inner.value.len();
-
-        if inner.cursor == end {
-            return false;
-        }
+        let changed = inner.cursor != end || inner.selection_anchor.is_some();
 
         inner.cursor = end;
+        inner.selection_anchor = None;
+        inner.selecting = false;
 
-        true
+        changed
     }
 
     fn insert_text(&self, text: &str) -> bool {
@@ -183,15 +194,23 @@ impl TextFieldInteractionState {
 
         let mut inner = self.inner.borrow_mut();
 
+        delete_selection(&mut inner);
         let cursor = inner.cursor.min(inner.value.len());
         inner.value.insert_str(cursor, filtered.as_str());
         inner.cursor = cursor + filtered.len();
+        inner.selection_anchor = None;
+        inner.selecting = false;
 
         true
     }
 
     fn delete_backward(&self) -> bool {
         let mut inner = self.inner.borrow_mut();
+
+        if delete_selection(&mut inner) {
+            return true;
+        }
+
         let cursor = inner.cursor.min(inner.value.len());
 
         if cursor == 0 {
@@ -212,6 +231,13 @@ impl TextFieldInteractionState {
     fn move_cursor_left(&self) -> bool {
         let mut inner = self.inner.borrow_mut();
 
+        if let Some(range) = selection_range(&inner) {
+            inner.cursor = range.start;
+            inner.selection_anchor = None;
+            inner.selecting = false;
+
+            return true;
+        }
         let cursor = inner.cursor.min(inner.value.len());
 
         if cursor == 0 {
@@ -232,6 +258,13 @@ impl TextFieldInteractionState {
     fn move_cursor_right(&self) -> bool {
         let mut inner = self.inner.borrow_mut();
 
+        if let Some(range) = selection_range(&inner) {
+            inner.cursor = range.end;
+            inner.selection_anchor = None;
+            inner.selecting = false;
+
+            return true;
+        }
         let cursor = inner.cursor.min(inner.value.len());
 
         if cursor >= inner.value.len() {
@@ -495,7 +528,7 @@ impl View for TextField {
 
         let appearance = self.appearance(context);
 
-        let (value, cursor, focused, stored_scroll_offset_x) = {
+        let (value, cursor, focused, stored_scroll_offset_x, selection) = {
             let inner = self.interaction.inner.borrow();
 
             (
@@ -503,6 +536,7 @@ impl View for TextField {
                 inner.cursor.min(inner.value.len()),
                 inner.focused && inner.enabled,
                 inner.scroll_offset_x,
+                selection_range(&inner),
             )
         };
 
@@ -611,18 +645,75 @@ impl View for TextField {
                     text_bounds.size.height,
                 );
 
-                context
-                    .display_list
-                    .push(DrawCommand::PushClip { rect: text_bounds });
+                let selection_bounds = if let Some(range) = selection.as_ref() {
+                    let start_width = if range.start == 0 {
+                        0.0
+                    } else {
+                        Text::new(&value[..range.start])
+                            .font_size(self.size.font_size())
+                            .line_height(line_height)
+                            .measure_unbounded(context.text_measurer)
+                            .width
+                    };
+
+                    let end_width = Text::new(&value[..range.end])
+                        .font_size(self.size.font_size())
+                        .line_height(line_height)
+                        .measure_unbounded(context.text_measurer)
+                        .width;
+
+                    let viewport_left = text_bounds.origin.x;
+                    let viewport_right = text_bounds.origin.x + text_bounds.size.width;
+                    let selection_left =
+                        (text_bounds.origin.x + start_width - scroll_offset_x).max(viewport_left);
+                    let selection_right =
+                        (text_bounds.origin.x + end_width - scroll_offset_x).min(viewport_right);
+
+                    if selection_right > selection_left {
+                        let selection_height =
+                            (self.size.font_size() + 4.0).min(text_bounds.size.height);
+                        let selection_y = text_bounds.origin.y
+                            + (text_bounds.size.height - selection_height) / 2.0;
+
+                        Some(Rect::new(
+                            selection_left,
+                            selection_y,
+                            selection_right - selection_left,
+                            selection_height,
+                        ))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                if let Some(selection_bounds) = selection_bounds {
+                    context
+                        .display_list
+                        .push(DrawCommand::PushClip { rect: text_bounds });
+
+                    context.display_list.push(DrawCommand::FillRoundedRect {
+                        rect: selection_bounds,
+                        radius: 3.0,
+                        color: context.theme.colors.accent.alpha(0.2),
+                    });
+
+                    context.display_list.push(DrawCommand::PopClip);
+                }
 
                 Text::new(display_text)
                     .font_size(self.size.font_size())
                     .line_height(line_height)
                     .color(appearance.foreground)
                     .paint(content_bounds, context);
-
-                context.display_list.push(DrawCommand::PopClip);
             }
+        }
+
+        if selection.is_some() {
+            self.interaction.stop_caret_blink();
+
+            return;
         }
 
         if !focused {
@@ -657,7 +748,7 @@ impl View for TextField {
         context.display_list.push(DrawCommand::FillRoundedRect {
             rect: Rect::new(caret_x, caret_y, caret_width, caret_height),
             radius: caret_half_width,
-            color: context.theme.colors.accent,
+            color: context.theme.colors.accent.alpha(0.5),
         });
     }
 
@@ -680,12 +771,67 @@ impl View for TextField {
         match event {
             ViewEvent::PointerMoved { position } => {
                 let hovered = bounds.contains(*position);
+                let selecting = {
+                    let mut inner = self.interaction.inner.borrow_mut();
+                    let hover_changed = inner.hovered != hovered;
+                    inner.hovered = hovered;
 
+                    if hover_changed {
+                        context.request_redraw();
+                    }
+
+                    inner.selecting && inner.focused
+                };
+
+                if selecting {
+                    let cursor = self.cursor_at_x(position.x, bounds, context);
+                    let mut inner = self.interaction.inner.borrow_mut();
+                    if inner.cursor != cursor {
+                        inner.cursor = cursor;
+                        inner.caret_blink_origin = Some(Instant::now());
+
+                        context.request_redraw();
+                    }
+                }
+
+                EventResult::Ignored
+            }
+
+            ViewEvent::PointerReleased {
+                button: PointerButton::Primary,
+                ..
+            } => {
                 let mut inner = self.interaction.inner.borrow_mut();
 
-                let changed = inner.hovered != hovered;
+                if !inner.selecting {
+                    return EventResult::Ignored;
+                }
 
-                inner.hovered = hovered;
+                inner.selecting = false;
+
+                if inner.selection_anchor == Some(inner.cursor) {
+                    inner.selection_anchor = None;
+                }
+
+                drop(inner);
+                context.request_redraw();
+
+                EventResult::Consumed
+            }
+
+            ViewEvent::PointerFocusRequested { position } => {
+                let should_focus = bounds.contains(*position);
+                let mut inner = self.interaction.inner.borrow_mut();
+                let changed = inner.focused != should_focus
+                    || (!should_focus && inner.selection_anchor.is_some());
+
+                inner.focused = should_focus && inner.enabled;
+
+                if !should_focus {
+                    inner.selection_anchor = None;
+                    inner.selecting = false;
+                    inner.caret_blink_origin = None;
+                }
 
                 drop(inner);
 
@@ -710,6 +856,8 @@ impl View for TextField {
                 inner.hovered = true;
                 inner.focused = true;
                 inner.cursor = cursor;
+                inner.selection_anchor = Some(cursor);
+                inner.selecting = true;
                 inner.caret_blink_origin = Some(Instant::now());
 
                 drop(inner);
@@ -836,21 +984,6 @@ impl View for TextField {
                 EventResult::Consumed
             }
 
-            ViewEvent::PointerFocusRequested { position } => {
-                let should_focus = bounds.contains(*position);
-                let changed = self.interaction.set_focused(should_focus);
-
-                if !should_focus {
-                    self.interaction.stop_caret_blink();
-                }
-
-                if changed {
-                    context.request_redraw();
-                }
-
-                EventResult::Ignored
-            }
-
             _ => EventResult::Ignored,
         }
     }
@@ -863,4 +996,34 @@ fn caret_is_visible() -> bool {
     let interval_millis = CARET_BLINK_INTERVAL.as_millis();
 
     (elapsed_millis / interval_millis) % 2 == 0
+}
+
+fn selection_range(inner: &TextFieldInteractionInner) -> Option<Range<usize>> {
+    let anchor = inner.selection_anchor?;
+
+    let cursor = inner.cursor.min(inner.value.len());
+
+    let anchor = anchor.min(inner.value.len());
+
+    if anchor == cursor {
+        return None;
+    }
+
+    Some(anchor.min(cursor)..anchor.max(cursor))
+}
+
+fn delete_selection(inner: &mut TextFieldInteractionInner) -> bool {
+    let Some(range) = selection_range(inner) else {
+        inner.selection_anchor = None;
+
+        return false;
+    };
+
+    inner.value.replace_range(range.clone(), "");
+
+    inner.cursor = range.start;
+    inner.selection_anchor = None;
+    inner.selecting = false;
+
+    true
 }
