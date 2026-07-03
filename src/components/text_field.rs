@@ -1,13 +1,13 @@
 //! 単一行のテキストフィールド
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
+use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
 use crate::platform::PointerButton;
 use crate::theme::{Color, CornerRadius, ShadowStyle};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use super::{BorderStyle, Rectangle, RectangleColor, Text};
 
@@ -377,7 +377,15 @@ impl View for TextField {
 
         let appearance = self.appearance(context);
 
-        let focused = self.interaction.is_focused() && self.enabled;
+        let (value, cursor, focused) = {
+            let inner = self.interaction.inner.borrow();
+
+            (
+                inner.value.clone(),
+                inner.cursor.min(inner.value.len()),
+                inner.focused && inner.enabled,
+            )
+        };
 
         if focused {
             let ring_width = 3.0;
@@ -408,30 +416,69 @@ impl View for TextField {
             .border(BorderStyle::custom(appearance.border, 1.0))
             .paint(bounds, context);
 
-        let text = self.display_text();
+        let showing_placeholder = value.is_empty();
 
-        if text.is_empty() {
-            return;
-        }
+        let display_text = if showing_placeholder {
+            self.placeholder.as_str()
+        } else {
+            value.as_str()
+        };
 
         let horizontal_padding = self.size.horizontal_padding();
 
         let line_height = self.size.line_height();
 
-        let text_y = bounds.origin.y + (bounds.size.height - line_height).max(0.0) / 2.0;
-
         let text_bounds = Rect::new(
             bounds.origin.x + horizontal_padding,
-            text_y,
+            bounds.origin.y + (bounds.size.height - line_height).max(0.0) / 2.0,
             (bounds.size.width - horizontal_padding * 2.0).max(0.0),
             line_height.min(bounds.size.height),
         );
 
-        Text::new(text)
-            .font_size(self.size.font_size())
-            .line_height(line_height)
-            .color(appearance.foreground)
-            .paint(text_bounds, context);
+        if !display_text.is_empty() {
+            Text::new(display_text)
+                .font_size(self.size.font_size())
+                .line_height(line_height)
+                .color(appearance.foreground)
+                .paint(text_bounds, context);
+        }
+
+        if !focused {
+            return;
+        }
+
+        let prefix_width = if cursor == 0 {
+            0.0
+        } else {
+            Text::new(&value[..cursor])
+                .font_size(self.size.font_size())
+                .line_height(line_height)
+                .measure_unbounded(context.text_measurer)
+                .width
+        };
+
+        let caret_width = 2.0;
+
+        let minimum_caret_x = text_bounds.origin.x;
+
+        let maximum_caret_x =
+            (text_bounds.origin.x + text_bounds.size.width - caret_width).max(minimum_caret_x);
+
+        let caret_x = (text_bounds.origin.x + prefix_width).clamp(minimum_caret_x, maximum_caret_x);
+
+        let caret_height = (line_height - 2.0)
+            .max(12.0)
+            .min((bounds.size.height - 8.0).max(1.0));
+
+        let caret_y = bounds.origin.y + (bounds.size.height - caret_height) / 2.0;
+
+        context.display_list.push(DrawCommand::FillRoundedRect {
+            rect: Rect::new(caret_x, caret_y, caret_width, caret_height),
+
+            radius: caret_width / 2.0,
+
+            color: context.theme.colors.accent,
+        });
     }
 
     fn handle_event(
