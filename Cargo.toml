@@ -51,3 +51,7 @@ path = "examples/scroll.rs"
 [[example]]
 name = "border"
 path = "examples/border.rs"
+
+[[example]]
+name = "text_field"
+path = "examples/text_field.rs"
