@@ -341,8 +341,18 @@ where
                     return;
                 }
 
-                if matches!(&event.logical_key, Key::Named(NamedKey::Backspace,)) {
-                    self.emit(PlatformEvent::Backspace);
+                let platform_event = match &event.logical_key {
+                    Key::Named(NamedKey::Backspace) => Some(PlatformEvent::Backspace),
+
+                    Key::Named(NamedKey::ArrowLeft) => Some(PlatformEvent::ArrowLeft),
+
+                    Key::Named(NamedKey::ArrowRight) => Some(PlatformEvent::ArrowRight),
+
+                    _ => None,
+                };
+
+                if let Some(platform_event) = platform_event {
+                    self.emit(platform_event);
 
                     self.request_redraw();
 

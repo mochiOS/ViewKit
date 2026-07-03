@@ -127,6 +127,8 @@ impl PlatformApplication for ExampleApplication {
             | PlatformEvent::PointerLeft
             | PlatformEvent::Scroll { .. }
             | PlatformEvent::RedrawRequested => {}
+
+            _ => {}
         }
     }
 

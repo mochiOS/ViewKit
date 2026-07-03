@@ -44,6 +44,8 @@ pub enum PlatformEvent {
         text: String,
     },
     Backspace,
+    ArrowLeft,
+    ArrowRight,
     Focused(bool),
     RedrawRequested,
     CloseRequested,

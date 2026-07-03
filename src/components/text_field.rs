@@ -152,6 +152,50 @@ impl TextFieldInteractionState {
         inner.cursor = previous;
         true
     }
+
+    fn move_cursor_left(&self) -> bool {
+        let mut inner = self.inner.borrow_mut();
+
+        let cursor = inner.cursor.min(inner.value.len());
+
+        if cursor == 0 {
+            return false;
+        }
+
+        let previous = inner.value[..cursor]
+            .char_indices()
+            .next_back()
+            .map(|(index, _)| index)
+            .unwrap_or(0);
+
+        inner.cursor = previous;
+
+        true
+    }
+
+    fn move_cursor_right(&self) -> bool {
+        let mut inner = self.inner.borrow_mut();
+
+        let cursor = inner.cursor.min(inner.value.len());
+
+        if cursor >= inner.value.len() {
+            return false;
+        }
+
+        let character_length = inner.value[cursor..]
+            .chars()
+            .next()
+            .map(char::len_utf8)
+            .unwrap_or(0);
+
+        if character_length == 0 {
+            return false;
+        }
+
+        inner.cursor = cursor + character_length;
+
+        true
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -525,6 +569,30 @@ impl View for TextField {
                 }
 
                 if self.interaction.delete_backward() {
+                    context.request_redraw();
+                }
+
+                EventResult::Consumed
+            }
+
+            ViewEvent::ArrowLeft => {
+                if !self.interaction.is_focused() {
+                    return EventResult::Ignored;
+                }
+
+                if self.interaction.move_cursor_left() {
+                    context.request_redraw();
+                }
+
+                EventResult::Consumed
+            }
+
+            ViewEvent::ArrowRight => {
+                if !self.interaction.is_focused() {
+                    return EventResult::Ignored;
+                }
+
+                if self.interaction.move_cursor_right() {
                     context.request_redraw();
                 }
 
