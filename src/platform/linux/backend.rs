@@ -359,10 +359,11 @@ where
 
                 let platform_event = match &event.logical_key {
                     Key::Named(NamedKey::Backspace) => Some(PlatformEvent::Backspace),
-
                     Key::Named(NamedKey::ArrowLeft) => Some(PlatformEvent::ArrowLeft),
-
                     Key::Named(NamedKey::ArrowRight) => Some(PlatformEvent::ArrowRight),
+                    Key::Named(NamedKey::Delete) => Some(PlatformEvent::Delete),
+                    Key::Named(NamedKey::Home) => Some(PlatformEvent::Home),
+                    Key::Named(NamedKey::End) => Some(PlatformEvent::End),
 
                     _ => None,
                 };

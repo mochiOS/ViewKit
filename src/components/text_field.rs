@@ -121,6 +121,56 @@ impl TextFieldInteractionState {
         inner.value_initialized = true;
     }
 
+    fn delete_forward(&self) -> bool {
+        let mut inner = self.inner.borrow_mut();
+        let cursor = inner.cursor.min(inner.value.len());
+
+        if cursor >= inner.value.len() {
+            return false;
+        }
+
+        let character_length = inner.value[cursor..]
+            .chars()
+            .next()
+            .map(char::len_utf8)
+            .unwrap_or(0);
+
+        if character_length == 0 {
+            return false;
+        }
+
+        inner
+            .value
+            .replace_range(cursor..cursor + character_length, "");
+
+        true
+    }
+
+    fn move_cursor_home(&self) -> bool {
+        let mut inner = self.inner.borrow_mut();
+
+        if inner.cursor == 0 {
+            return false;
+        }
+
+        inner.cursor = 0;
+
+        true
+    }
+
+    fn move_cursor_end(&self) -> bool {
+        let mut inner = self.inner.borrow_mut();
+        let end = inner.value.len();
+
+        if inner.cursor == end {
+            return false;
+        }
+
+        inner.cursor = end;
+
+        true
+    }
+
     fn insert_text(&self, text: &str) -> bool {
         let filtered: String = text
             .chars()
@@ -726,6 +776,18 @@ impl View for TextField {
                 EventResult::Consumed
             }
 
+            ViewEvent::Delete => {
+                if !self.interaction.is_focused() {
+                    return EventResult::Ignored;
+                }
+
+                self.interaction.delete_forward();
+                self.interaction.reset_caret_blink();
+                context.request_redraw();
+
+                EventResult::Consumed
+            }
+
             ViewEvent::ArrowLeft => {
                 if !self.interaction.is_focused() {
                     return EventResult::Ignored;
@@ -744,6 +806,30 @@ impl View for TextField {
                 }
 
                 self.interaction.move_cursor_right();
+                self.interaction.reset_caret_blink();
+                context.request_redraw();
+
+                EventResult::Consumed
+            }
+
+            ViewEvent::Home => {
+                if !self.interaction.is_focused() {
+                    return EventResult::Ignored;
+                }
+
+                self.interaction.move_cursor_home();
+                self.interaction.reset_caret_blink();
+                context.request_redraw();
+
+                EventResult::Consumed
+            }
+
+            ViewEvent::End => {
+                if !self.interaction.is_focused() {
+                    return EventResult::Ignored;
+                }
+
+                self.interaction.move_cursor_end();
                 self.interaction.reset_caret_blink();
                 context.request_redraw();
 

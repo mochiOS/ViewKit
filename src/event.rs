@@ -37,6 +37,9 @@ pub enum ViewEvent {
     Backspace,
     ArrowLeft,
     ArrowRight,
+    Home,
+    End,
+    Delete,
 
     PointerFocusRequested {
         position: Point,
@@ -60,8 +63,11 @@ impl ViewEvent {
             | Self::TextInput { .. }
             | Self::FocusChanged { .. }
             | Self::Backspace
+            | Self::Delete
             | Self::ArrowLeft
-            | Self::ArrowRight => None,
+            | Self::ArrowRight
+            | Self::Home
+            | Self::End => None,
         }
     }
 
@@ -81,6 +87,9 @@ impl ViewEvent {
                 | Self::PointerLeft
                 | Self::TextInput { .. }
                 | Self::Backspace
+                | Self::Delete
+                | Self::Home
+                | Self::End
                 | Self::ArrowLeft
                 | Self::ArrowRight
                 | Self::FocusChanged { .. }
@@ -251,8 +260,11 @@ impl EventDispatcher {
 
             PlatformEvent::TextInput { text } => Some(ViewEvent::TextInput { text: text.clone() }),
             PlatformEvent::Backspace => Some(ViewEvent::Backspace),
+            PlatformEvent::Delete => Some(ViewEvent::Delete),
             PlatformEvent::ArrowLeft => Some(ViewEvent::ArrowLeft),
             PlatformEvent::ArrowRight => Some(ViewEvent::ArrowRight),
+            PlatformEvent::Home => Some(ViewEvent::Home),
+            PlatformEvent::End => Some(ViewEvent::End),
 
             PlatformEvent::Resumed { .. }
             | PlatformEvent::Resized { .. }
