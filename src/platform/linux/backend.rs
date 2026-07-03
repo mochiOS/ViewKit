@@ -619,6 +619,32 @@ where
                     event_loop,
                 );
             }
+            
+            WindowEvent::KeyboardInput {
+                event,
+                ..
+            } => {
+                if event.state != ElementState::Pressed {
+                    return;
+                }
+                
+                let Some(text) = event.text
+                else {
+                    return;
+                };
+                
+                let text: String = text.chars().filter(|c| {
+                    !c.is_control()
+                }).collect();
+                
+                if text.is_empty() {
+                    return;
+                }
+                
+                self.emit(
+                    PlatformEvent::TextInput { text },
+                )
+            }
 
             _ => {}
         }
