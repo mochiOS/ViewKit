@@ -18,6 +18,7 @@ use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::error::{EventLoopError, OsError};
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, OwnedDisplayHandle};
+use winit::keyboard::{Key, NamedKey};
 use winit::window::{Window, WindowId};
 
 const LINE_SCROLL_PIXELS: f32 = 40.0;
@@ -340,17 +341,30 @@ where
                     return;
                 }
 
+                if matches!(&event.logical_key, Key::Named(NamedKey::Backspace,)) {
+                    self.emit(PlatformEvent::Backspace);
+
+                    self.request_redraw();
+
+                    return;
+                }
+
                 let Some(text) = event.text else {
                     return;
                 };
 
-                let text: String = text.chars().filter(|c| !c.is_control()).collect();
+                let text: String = text
+                    .chars()
+                    .filter(|character| !character.is_control())
+                    .collect();
 
                 if text.is_empty() {
                     return;
                 }
 
-                self.emit(PlatformEvent::TextInput { text })
+                self.emit(PlatformEvent::TextInput { text });
+
+                self.request_redraw();
             }
 
             _ => {}

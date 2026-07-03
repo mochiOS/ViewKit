@@ -34,6 +34,8 @@ pub enum ViewEvent {
         text: String,
     },
 
+    Backspace,
+
     FocusChanged {
         focused: bool,
     },
@@ -47,7 +49,10 @@ impl ViewEvent {
             | Self::PointerReleased { position, .. }
             | Self::Scroll { position, .. } => Some(*position),
 
-            Self::PointerLeft | Self::TextInput { .. } | Self::FocusChanged { .. } => None,
+            Self::PointerLeft
+            | Self::TextInput { .. }
+            | Self::FocusChanged { .. }
+            | ViewEvent::Backspace => None,
         }
     }
 
@@ -66,6 +71,7 @@ impl ViewEvent {
                 | Self::PointerLeft
                 | Self::TextInput { .. }
                 | Self::FocusChanged { .. }
+                | Self::Backspace
         )
     }
 }
@@ -212,6 +218,7 @@ impl EventDispatcher {
             }
 
             PlatformEvent::TextInput { text } => Some(ViewEvent::TextInput { text: text.clone() }),
+            PlatformEvent::Backspace => Some(ViewEvent::Backspace),
 
             PlatformEvent::Resumed { .. }
             | PlatformEvent::Resized { .. }

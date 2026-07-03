@@ -43,6 +43,7 @@ pub enum PlatformEvent {
     TextInput {
         text: String,
     },
+    Backspace,
     Focused(bool),
     RedrawRequested,
     CloseRequested,

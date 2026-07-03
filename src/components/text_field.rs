@@ -127,6 +127,12 @@ impl TextFieldInteractionState {
 
         true
     }
+
+    fn delete_backward(&self) -> bool {
+        let mut inner = self.inner.borrow_mut();
+
+        inner.value.pop().is_some()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -488,6 +494,18 @@ impl View for TextField {
                 }
 
                 if self.interaction.insert_text(text) {
+                    context.request_redraw();
+                }
+
+                EventResult::Consumed
+            }
+
+            ViewEvent::Backspace => {
+                if !self.interaction.is_focused() {
+                    return EventResult::Ignored;
+                }
+
+                if self.interaction.delete_backward() {
                     context.request_redraw();
                 }
 
