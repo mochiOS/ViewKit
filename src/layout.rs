@@ -511,6 +511,65 @@ impl StackDistribution {
     }
 }
 
+pub(crate) fn measure_stack(
+    direction: StackDirection,
+    children: &[StackChild],
+    gap: StackGap,
+    constraints: Constraints,
+    context: &mut MeasureContext<'_>,
+) -> Size {
+    if children.is_empty() {
+        return constraints.constrain(Size::ZERO);
+    }
+
+    let resolved_gap = gap.resolve(&context.theme.spacing).max(0.0);
+    let divider_tokens = context.theme.divider;
+    let child_constraints = Constraints::loose(constraints.maximum);
+
+    let mut main_size = 0.0_f32;
+    let mut cross_size = 0.0_f32;
+
+    for child in children {
+        let measured = match child.kind {
+            StackChildKind::Normal => child.measure(child_constraints, context),
+
+            StackChildKind::Divider { thickness } => {
+                let thickness = thickness.resolve(&divider_tokens).max(0.0);
+
+                match direction {
+                    StackDirection::Horizontal => Size::new(thickness, 0.0),
+
+                    StackDirection::Vertical => Size::new(0.0, thickness),
+                }
+            }
+        };
+
+        match direction {
+            StackDirection::Horizontal => {
+                main_size += measured.width;
+
+                cross_size = cross_size.max(measured.height);
+            }
+
+            StackDirection::Vertical => {
+                main_size += measured.height;
+
+                cross_size = cross_size.max(measured.width);
+            }
+        }
+    }
+
+    main_size += resolved_gap * children.len().saturating_sub(1) as f32;
+
+    let measured = match direction {
+        StackDirection::Horizontal => Size::new(main_size, cross_size),
+
+        StackDirection::Vertical => Size::new(cross_size, main_size),
+    };
+
+    constraints.constrain(measured)
+}
+
 pub(crate) fn paint_stack(
     direction: StackDirection,
     children: &[StackChild],

@@ -55,3 +55,7 @@ path = "examples/border.rs"
 [[example]]
 name = "text_field"
 path = "examples/text_field.rs"
+
+[[example]]
+name = "all"
+path = "examples/all.rs"

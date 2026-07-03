@@ -1,12 +1,12 @@
 //! 子Viewを横方向に配置するHStackを定義
 
 use crate::event::{EventContext, EventResult, ViewEvent};
-use crate::geometry::Rect;
+use crate::geometry::{Rect, Size};
 use crate::layout::{
     IntoStackChildren, StackAlignment, StackChild, StackDirection, StackDistribution, StackGap,
-    handle_stack_event, paint_stack,
+    handle_stack_event, measure_stack, paint_stack,
 };
-use crate::view::{PaintContext, View};
+use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 pub struct HStack {
     children: Vec<StackChild>,
@@ -68,6 +68,16 @@ impl HStack {
 }
 
 impl View for HStack {
+    fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
+        measure_stack(
+            StackDirection::Horizontal,
+            &self.children,
+            self.gap,
+            constraints,
+            context,
+        )
+    }
+
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
         paint_stack(
             StackDirection::Horizontal,
