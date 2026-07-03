@@ -508,7 +508,7 @@ impl View for TextField {
         context.display_list.push(DrawCommand::FillRoundedRect {
             rect: Rect::new(caret_x, caret_y, caret_width, caret_height),
             radius: caret_width / 2.0,
-            color: context.theme.colors.accent,
+            color: context.theme.colors.accent.alpha(0.75),
         });
     }
 
