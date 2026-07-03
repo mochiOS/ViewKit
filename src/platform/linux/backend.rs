@@ -12,7 +12,7 @@ use crate::renderer::{Renderer, Viewport};
 use softbuffer::Context;
 
 use std::rc::Rc;
-
+use std::time::Instant;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::error::{EventLoopError, OsError};
@@ -222,6 +222,22 @@ where
         self.emit(PlatformEvent::Resumed { viewport });
 
         self.request_redraw();
+    }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(deadline) = self.application.next_redraw_at() else {
+            event_loop.set_control_flow(ControlFlow::Wait);
+
+            return;
+        };
+
+        if deadline <= Instant::now() {
+            self.request_redraw();
+
+            event_loop.set_control_flow(ControlFlow::Wait);
+        } else {
+            event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
+        }
     }
 
     fn window_event(

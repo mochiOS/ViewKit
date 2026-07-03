@@ -1,3 +1,4 @@
+use std::time::Instant;
 use viewkit::components::{TextField, TextFieldInteractionState, TextFieldSize, VStack};
 use viewkit::draw_command::{DisplayList, DrawCommand};
 use viewkit::event::{EventContext, EventDispatcher};
@@ -8,7 +9,7 @@ use viewkit::platform::{PlatformApplication, PlatformEvent, PlatformWindow, Wind
 use viewkit::renderer::Viewport;
 use viewkit::theme::Theme;
 use viewkit::typography::{TextMeasurer, Typography};
-use viewkit::view::{PaintContext, View};
+use viewkit::view::{PaintContext, RedrawSchedule, View};
 
 struct ExampleApplication {
     theme: Theme,
@@ -16,12 +17,10 @@ struct ExampleApplication {
     text_measurer: TextMeasurer,
     event_dispatcher: EventDispatcher,
 
+    redraw_schedule: RedrawSchedule,
     empty_state: TextFieldInteractionState,
-
     value_state: TextFieldInteractionState,
-
     invalid_state: TextFieldInteractionState,
-
     disabled_state: TextFieldInteractionState,
 }
 
@@ -35,12 +34,10 @@ impl ExampleApplication {
 
             event_dispatcher: EventDispatcher::new(),
 
+            redraw_schedule: RedrawSchedule::new(),
             empty_state: TextFieldInteractionState::new(),
-
             value_state: TextFieldInteractionState::new(),
-
             invalid_state: TextFieldInteractionState::new(),
-
             disabled_state: TextFieldInteractionState::new(),
         }
     }
@@ -93,19 +90,25 @@ impl PlatformApplication for ExampleApplication {
         }
     }
 
+    fn next_redraw_at(&self) -> Option<Instant> {
+        self.redraw_schedule.deadline()
+    }
+
     fn draw(&mut self, viewport: Viewport, display_list: &mut DisplayList) {
         display_list.push(DrawCommand::Clear {
             color: self.theme.colors.background,
         });
 
+        self.redraw_schedule.clear();
         let root = self.build_root();
 
-        let mut context = PaintContext {
+        let mut context = PaintContext::new(
             display_list,
-            theme: &self.theme,
-            typography: &self.typography,
-            text_measurer: &mut self.text_measurer,
-        };
+            &self.theme,
+            &self.typography,
+            &mut self.text_measurer,
+        )
+        .with_redraw_schedule(&mut self.redraw_schedule);
 
         root.paint(viewport.logical_bounds(), &mut context);
     }

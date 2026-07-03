@@ -4,6 +4,7 @@ use crate::draw_command::DisplayList;
 use crate::geometry::Size;
 use crate::platform::event::PlatformEvent;
 use crate::renderer::Viewport;
+use std::time::Instant;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct WindowConfig {
@@ -36,5 +37,9 @@ pub trait PlatformApplication {
     fn draw(&mut self, viewport: Viewport, display_list: &mut DisplayList) {
         let _ = viewport;
         let _ = display_list;
+    }
+
+    fn next_redraw_at(&self) -> Option<Instant> {
+        None
     }
 }

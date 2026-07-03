@@ -10,9 +10,9 @@ use crate::view::{Constraints, MeasureContext, PaintContext, View};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::OnceLock;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-const CARET_BLINK_MILLIS: u128 = 500;
+const CARET_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct TextFieldInteractionInner {
@@ -22,6 +22,7 @@ struct TextFieldInteractionInner {
     value: String,
     cursor: usize,
     value_initialized: bool,
+    caret_blink_origin: Option<Instant>,
 }
 
 #[derive(Clone)]
@@ -198,6 +199,24 @@ impl TextFieldInteractionState {
         inner.cursor = cursor + character_length;
 
         true
+    }
+
+    fn caret_blink_state(&self, now: Instant) -> (bool, Instant) {
+        let mut inner = self.inner.borrow_mut();
+        let origin = *inner.caret_blink_origin.get_or_insert(now);
+        let elapsed = now.saturating_duration_since(origin);
+        let interval_millis = CARET_BLINK_INTERVAL.as_millis();
+        let elapsed_millis = elapsed.as_millis();
+        let phase = elapsed_millis / interval_millis;
+        let visible = phase % 2 == 0;
+        let remaining_millis = interval_millis - elapsed_millis % interval_millis;
+        let next_redraw = now + Duration::from_millis(remaining_millis as u64);
+
+        (visible, next_redraw)
+    }
+
+    fn stop_caret_blink(&self) {
+        self.inner.borrow_mut().caret_blink_origin = None;
     }
 }
 
@@ -446,7 +465,18 @@ impl View for TextField {
                 .paint(text_bounds, context);
         }
 
-        if !focused || !caret_is_visible() {
+        if !focused {
+            self.interaction.stop_caret_blink();
+            return;
+        }
+
+        let now = Instant::now();
+
+        let (caret_visible, next_redraw) = self.interaction.caret_blink_state(now);
+
+        context.request_redraw_at(next_redraw);
+
+        if !caret_visible {
             return;
         }
 
@@ -652,10 +682,11 @@ impl View for TextField {
     }
 }
 
+#[allow(unused)]
 fn caret_is_visible() -> bool {
     static BLINK_EPOCH: OnceLock<Instant> = OnceLock::new();
+    let elapsed_millis = BLINK_EPOCH.get_or_init(Instant::now).elapsed().as_millis();
+    let interval_millis = CARET_BLINK_INTERVAL.as_millis();
 
-    let elapsed = BLINK_EPOCH.get_or_init(Instant::now).elapsed().as_millis();
-
-    (elapsed / CARET_BLINK_MILLIS) % 2 == 0
+    (elapsed_millis / interval_millis) % 2 == 0
 }

@@ -42,6 +42,7 @@ pub struct PaintContext<'a> {
     pub theme: &'a Theme,
     pub typography: &'a Typography,
     pub text_measurer: &'a mut TextMeasurer,
+    redraw_schedule: Option<&'a mut RedrawSchedule>,
 }
 
 impl<'a> PaintContext<'a> {
@@ -56,7 +57,22 @@ impl<'a> PaintContext<'a> {
             theme,
             typography,
             text_measurer,
+
+            redraw_schedule: None,
         }
+    }
+
+    pub fn with_redraw_schedule(mut self, redraw_schedule: &'a mut RedrawSchedule) -> Self {
+        self.redraw_schedule = Some(redraw_schedule);
+        self
+    }
+
+    pub fn request_redraw_at(&mut self, deadline: Instant) {
+        let Some(schedule) = self.redraw_schedule.as_deref_mut() else {
+            return;
+        };
+
+        schedule.request_at(deadline);
     }
 }
 

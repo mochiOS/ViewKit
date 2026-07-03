@@ -193,6 +193,7 @@ impl View for Rectangle {
     }
 }
 
+#[allow(unused)]
 fn paint_border(bounds: Rect, radius: f32, border: BorderStyle, context: &mut PaintContext<'_>) {
     let Some((color, width)) = border.resolve(context) else {
         return;
