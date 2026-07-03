@@ -44,6 +44,22 @@ pub struct PaintContext<'a> {
     pub text_measurer: &'a mut TextMeasurer,
 }
 
+impl<'a> PaintContext<'a> {
+    pub fn new(
+        display_list: &'a mut DisplayList,
+        theme: &'a Theme,
+        typography: &'a Typography,
+        text_measurer: &'a mut TextMeasurer,
+    ) -> Self {
+        Self {
+            display_list,
+            theme,
+            typography,
+            text_measurer,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RedrawSchedule {
     deadline: Option<Instant>,
