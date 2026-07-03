@@ -30,36 +30,46 @@ impl Shadow {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ShadowSet {
+    pub layers: [Option<Shadow>; 2],
+}
+
+impl ShadowSet {
+    pub const fn single(shadow: Shadow) -> Self {
+        Self {
+            layers: [Some(shadow), None],
+        }
+    }
+
+    pub const fn double(first: Shadow, second: Shadow) -> Self {
+        Self {
+            layers: [Some(first), Some(second)],
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ShadowTokens {
-    pub small: Shadow,
-    pub medium: Shadow,
-    pub large: Shadow,
+    pub card: ShadowSet,
+    pub floating: ShadowSet,
+    pub window: ShadowSet,
 }
 
 impl ShadowTokens {
     pub const DEFAULT: Self = Self {
-        small: Shadow::new(
-            Color::rgba(0, 0, 0, 32),
-            0.0,
-            2.0,
-            6.0,
-            0.0,
+        card: ShadowSet::double(
+            Shadow::new(Color::rgba(0, 0, 0, 12), 0.0, 1.0, 2.0, 0.0),
+            Shadow::new(Color::rgba(0, 0, 0, 8), 0.0, 6.0, 12.0, 0.0),
         ),
 
-        medium: Shadow::new(
-            Color::rgba(0, 0, 0, 40),
-            0.0,
-            4.0,
-            12.0,
-            0.0,
+        floating: ShadowSet::double(
+            Shadow::new(Color::rgba(0, 0, 0, 31), 0.0, 8.0, 24.0, 0.0),
+            Shadow::new(Color::rgba(0, 0, 0, 31), 0.0, 24.0, 72.0, 0.0),
         ),
 
-        large: Shadow::new(
-            Color::rgba(0, 0, 0, 48),
-            0.0,
-            8.0,
-            24.0,
-            0.0,
+        window: ShadowSet::double(
+            Shadow::new(Color::rgba(0, 0, 0, 20), 0.0, 2.0, 6.0, 0.0),
+            Shadow::new(Color::rgba(0, 0, 0, 43), 0.0, 24.0, 72.0, 0.0),
         ),
     };
 }
@@ -68,23 +78,26 @@ impl ShadowTokens {
 pub enum ShadowStyle {
     #[default]
     None,
-    Small,
-    Medium,
-    Large,
-    Custom(Shadow),
+
+    Card,
+    Floating,
+    Window,
+
+    Custom(ShadowSet),
 }
 
 impl ShadowStyle {
-    pub fn resolve(
-        self,
-        tokens: &ShadowTokens,
-    ) -> Option<Shadow> {
+    pub fn resolve(self, tokens: &ShadowTokens) -> Option<ShadowSet> {
         match self {
             Self::None => None,
-            Self::Small => Some(tokens.small),
-            Self::Medium => Some(tokens.medium),
-            Self::Large => Some(tokens.large),
-            Self::Custom(shadow) => Some(shadow),
+
+            Self::Card => Some(tokens.card),
+
+            Self::Floating => Some(tokens.floating),
+
+            Self::Window => Some(tokens.window),
+
+            Self::Custom(shadow_set) => Some(shadow_set),
         }
     }
 }

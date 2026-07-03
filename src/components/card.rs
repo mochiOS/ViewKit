@@ -1,36 +1,15 @@
 //! 標準的なカードコンポーネントを定義
 
 use crate::draw_command::DrawCommand;
-use crate::event::{
-    EventContext,
-    EventResult,
-    ViewEvent,
-};
-use crate::geometry::{
-    Rect,
-    Size,
-};
-use crate::theme::{
-    CornerRadius,
-    ShadowStyle,
-};
-use crate::view::{
-    Constraints,
-    MeasureContext,
-    PaintContext,
-    View,
-};
+use crate::event::{EventContext, EventResult, ViewEvent};
+use crate::geometry::{Rect, Size};
+use crate::theme::{CornerRadius, ShadowStyle};
+use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 use super::background::EmptyView;
-use super::{
-    BorderStyle,
-    Rectangle,
-    RectangleColor,
-};
+use super::{BorderStyle, Rectangle, RectangleColor};
 
-pub struct Card<
-    Content = EmptyView,
-> {
+pub struct Card<Content = EmptyView> {
     content: Content,
     color: RectangleColor,
     radius: CornerRadius,
@@ -42,16 +21,14 @@ impl Card<EmptyView> {
     pub const fn new() -> Self {
         Self {
             content: EmptyView,
-            color:
-                RectangleColor::Surface,
-            radius:
-                CornerRadius::Card,
-            shadow:
-                ShadowStyle::Small,
-            border:
-                BorderStyle::Standard {
-                    width: 1.0,
-                },
+
+            color: RectangleColor::Surface,
+
+            radius: CornerRadius::Card,
+
+            shadow: ShadowStyle::Card,
+
+            border: BorderStyle::Standard { width: 1.0 },
         }
     }
 }
@@ -63,10 +40,7 @@ impl Default for Card<EmptyView> {
 }
 
 impl<Content> Card<Content> {
-    pub fn content<NewContent>(
-        self,
-        content: NewContent,
-    ) -> Card<NewContent>
+    pub fn content<NewContent>(self, content: NewContent) -> Card<NewContent>
     where
         NewContent: View,
     {
@@ -79,92 +53,50 @@ impl<Content> Card<Content> {
         }
     }
 
-    pub fn color(
-        mut self,
-        color: RectangleColor,
-    ) -> Self {
+    pub fn color(mut self, color: RectangleColor) -> Self {
         self.color = color;
         self
     }
 
-    pub fn radius(
-        mut self,
-        radius: CornerRadius,
-    ) -> Self {
+    pub fn radius(mut self, radius: CornerRadius) -> Self {
         self.radius = radius;
         self
     }
 
-    pub fn shadow(
-        mut self,
-        shadow: ShadowStyle,
-    ) -> Self {
+    pub fn shadow(mut self, shadow: ShadowStyle) -> Self {
         self.shadow = shadow;
         self
     }
 
-    pub fn border(
-        mut self,
-        border: BorderStyle,
-    ) -> Self {
+    pub fn border(mut self, border: BorderStyle) -> Self {
         self.border = border;
         self
     }
 }
 
-impl<Content> View
-    for Card<Content>
+impl<Content> View for Card<Content>
 where
     Content: View,
 {
-    fn measure(
-        &self,
-        constraints: Constraints,
-        context: &mut MeasureContext<'_>,
-    ) -> Size {
-        self.content.measure(
-            constraints,
-            context,
-        )
+    fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
+        self.content.measure(constraints, context)
     }
 
-    fn paint(
-        &self,
-        bounds: Rect,
-        context: &mut PaintContext<'_>,
-    ) {
+    fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
         Rectangle::new()
-            .color(
-                self.color,
-            )
-            .radius(
-                self.radius,
-            )
-            .shadow(
-                self.shadow,
-            )
-            .border(
-                self.border,
-            )
-            .paint(
-                bounds,
-                context,
-            );
+            .color(self.color)
+            .radius(self.radius)
+            .shadow(self.shadow)
+            .border(self.border)
+            .paint(bounds, context);
 
-        context.display_list.push(
-            DrawCommand::PushClip {
-                rect: bounds,
-            },
-        );
+        context
+            .display_list
+            .push(DrawCommand::PushClip { rect: bounds });
 
-        self.content.paint(
-            bounds,
-            context,
-        );
+        self.content.paint(bounds, context);
 
-        context.display_list.push(
-            DrawCommand::PopClip,
-        );
+        context.display_list.push(DrawCommand::PopClip);
     }
 
     fn handle_event(
@@ -173,10 +105,6 @@ where
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
-        self.content.handle_event(
-            bounds,
-            event,
-            context,
-        )
+        self.content.handle_event(bounds, event, context)
     }
 }

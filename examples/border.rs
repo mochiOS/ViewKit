@@ -1,13 +1,11 @@
-use viewkit::components::{
-    Background, BorderStyle, Padding, Rectangle, RectangleColor, Text, VStack,
-};
+use viewkit::components::{Background, Card, Padding, Text, VStack};
 use viewkit::draw_command::{DisplayList, DrawCommand};
 use viewkit::geometry::Size;
 use viewkit::layout::{StackAlignment, StackDistribution, StackGap, ViewExt};
 use viewkit::platform::linux::LinuxBackend;
 use viewkit::platform::{PlatformApplication, PlatformEvent, PlatformWindow, WindowConfig};
 use viewkit::renderer::Viewport;
-use viewkit::theme::{ShadowStyle, Theme};
+use viewkit::theme::Theme;
 use viewkit::typography::{TextMeasurer, Typography};
 use viewkit::view::{PaintContext, View};
 
@@ -27,56 +25,35 @@ impl ExampleApplication {
     }
 
     fn build_root(&self) -> VStack {
-        let standard_border = Background::new()
-            .background(
-                Rectangle::new()
-                    .color(RectangleColor::Surface)
-                    .shadow(ShadowStyle::None)
-                    .border(BorderStyle::standard(1.0)),
-            )
-            .content(
-                Padding::symmetric(20.0, 16.0).content(
-                    Text::new("Standard border")
-                        .font_size(14.0)
-                        .line_height(20.0)
-                        .weight(600)
-                        .color(self.theme.colors.text_primary),
-                ),
-            );
+        let standard_border = Background::new().background(Card::new()).content(
+            Padding::symmetric(20.0, 16.0).content(
+                Text::new("Standard border")
+                    .font_size(14.0)
+                    .line_height(20.0)
+                    .weight(600)
+                    .color(self.theme.colors.text_primary),
+            ),
+        );
 
-        let strong_border = Background::new()
-            .background(
-                Rectangle::new()
-                    .color(RectangleColor::Surface)
-                    .shadow(ShadowStyle::None)
-                    .border(BorderStyle::strong(1.0)),
-            )
-            .content(
-                Padding::symmetric(20.0, 16.0).content(
-                    Text::new("Strong border")
-                        .font_size(14.0)
-                        .line_height(20.0)
-                        .weight(600)
-                        .color(self.theme.colors.text_primary),
-                ),
-            );
+        let strong_border = Background::new().background(Card::new()).content(
+            Padding::symmetric(20.0, 16.0).content(
+                Text::new("Strong border")
+                    .font_size(14.0)
+                    .line_height(20.0)
+                    .weight(600)
+                    .color(self.theme.colors.text_primary),
+            ),
+        );
 
-        let custom_border = Background::new()
-            .background(
-                Rectangle::new()
-                    .color(RectangleColor::Surface)
-                    .shadow(ShadowStyle::None)
-                    .border(BorderStyle::custom(self.theme.colors.accent, 2.0)),
-            )
-            .content(
-                Padding::symmetric(20.0, 16.0).content(
-                    Text::new("Custom accent border")
-                        .font_size(14.0)
-                        .line_height(20.0)
-                        .weight(600)
-                        .color(self.theme.colors.text_primary),
-                ),
-            );
+        let custom_border = Background::new().background(Card::new()).content(
+            Padding::symmetric(20.0, 16.0).content(
+                Text::new("Custom accent border")
+                    .font_size(14.0)
+                    .line_height(20.0)
+                    .weight(600)
+                    .color(self.theme.colors.text_primary),
+            ),
+        );
 
         VStack::new()
             .gap(StackGap::Large)

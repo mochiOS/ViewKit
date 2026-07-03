@@ -4,40 +4,16 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::draw_command::DrawCommand;
-use crate::event::{
-    EventContext,
-    EventResult,
-    ViewEvent,
-};
+use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::Rect;
-use crate::layout::{
-    IntoStackChild,
-    StackChild,
-};
+use crate::layout::{IntoStackChild, StackChild};
 use crate::platform::PointerButton;
-use crate::theme::{
-    Color,
-    CornerRadius,
-    ShadowStyle,
-};
-use crate::view::{
-    PaintContext,
-    View,
-};
+use crate::theme::{Color, CornerRadius, ShadowStyle};
+use crate::view::{PaintContext, View};
 
-use super::{
-    Rectangle,
-    RectangleColor,
-    ZStackAlignment,
-};
+use super::{Rectangle, RectangleColor, ZStackAlignment};
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum ButtonColor {
     Surface,
 
@@ -50,92 +26,32 @@ pub enum ButtonColor {
 }
 
 impl ButtonColor {
-    fn resolve(
-        self,
-        context: &PaintContext<'_>,
-    ) -> Color {
+    fn resolve(self, context: &PaintContext<'_>) -> Color {
         match self {
-            Self::Surface => {
-                context
-                    .theme
-                    .colors
-                    .elevated_surface
-            }
-
-            Self::Accent => {
-                context
-                    .theme
-                    .colors
-                    .accent
-            }
-
-            Self::Destructive => {
-                context
-                    .theme
-                    .colors
-                    .destructive
-            }
-
+            Self::Surface => context.theme.colors.elevated_surface,
+            Self::Accent => context.theme.colors.accent,
+            Self::Destructive => context.theme.colors.destructive,
             Self::Custom(color) => color,
         }
     }
 
     fn hover_overlay(self) -> Color {
         match self {
-            Self::Surface => {
-                Color::rgba(
-                    0,
-                    0,
-                    0,
-                    16,
-                )
-            }
-
-            Self::Accent
-            | Self::Destructive
-            | Self::Custom(_) => {
-                Color::rgba(
-                    255,
-                    255,
-                    255,
-                    24,
-                )
-            }
+            Self::Surface => Color::rgba(0, 0, 0, 16),
+            Self::Accent | Self::Destructive | Self::Custom(_) => Color::rgba(255, 255, 255, 24),
         }
     }
 
     fn pressed_overlay(self) -> Color {
         match self {
-            Self::Surface => {
-                Color::rgba(
-                    0,
-                    0,
-                    0,
-                    32,
-                )
-            }
+            Self::Surface => Color::rgba(0, 0, 0, 32),
 
-            Self::Accent
-            | Self::Destructive
-            | Self::Custom(_) => {
-                Color::rgba(
-                    0,
-                    0,
-                    0,
-                    36,
-                )
-            }
+            Self::Accent | Self::Destructive | Self::Custom(_) => Color::rgba(0, 0, 0, 36),
         }
     }
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct ButtonInteractionInner {
     hovered: bool,
 
@@ -157,22 +73,17 @@ struct ButtonInteractionInner {
 
 #[derive(Clone)]
 pub struct ButtonInteractionState {
-    inner:
-        Rc<RefCell<ButtonInteractionInner>>,
+    inner: Rc<RefCell<ButtonInteractionInner>>,
 }
 
 impl Default for ButtonInteractionState {
     fn default() -> Self {
         Self {
-            inner: Rc::new(
-                RefCell::new(
-                    ButtonInteractionInner {
-                        enabled: true,
+            inner: Rc::new(RefCell::new(ButtonInteractionInner {
+                enabled: true,
 
-                        ..ButtonInteractionInner::default()
-                    },
-                ),
-            ),
+                ..ButtonInteractionInner::default()
+            })),
         }
     }
 }
@@ -183,29 +94,21 @@ impl ButtonInteractionState {
     }
 
     pub fn is_hovered(&self) -> bool {
-        self.inner
-            .borrow()
-            .hovered
+        self.inner.borrow().hovered
     }
 
     pub fn is_pressed(&self) -> bool {
-        self.inner
-            .borrow()
-            .pressed
+        self.inner.borrow().pressed
     }
 
     pub fn is_enabled(&self) -> bool {
-        self.inner
-            .borrow()
-            .enabled
+        self.inner.borrow().enabled
     }
 
     pub fn take_clicked(&self) -> bool {
-        let mut inner =
-            self.inner.borrow_mut();
+        let mut inner = self.inner.borrow_mut();
 
-        let clicked =
-            inner.clicked;
+        let clicked = inner.clicked;
 
         inner.clicked = false;
 
@@ -213,8 +116,7 @@ impl ButtonInteractionState {
     }
 
     pub fn reset(&self) {
-        let mut inner =
-            self.inner.borrow_mut();
+        let mut inner = self.inner.borrow_mut();
 
         inner.hovered = false;
         inner.armed = false;
@@ -222,15 +124,10 @@ impl ButtonInteractionState {
         inner.clicked = false;
     }
 
-    fn set_enabled(
-        &self,
-        enabled: bool,
-    ) -> bool {
-        let mut inner =
-            self.inner.borrow_mut();
+    fn set_enabled(&self, enabled: bool) -> bool {
+        let mut inner = self.inner.borrow_mut();
 
-        let changed =
-            inner.enabled != enabled;
+        let changed = inner.enabled != enabled;
 
         inner.enabled = enabled;
 
@@ -243,11 +140,8 @@ impl ButtonInteractionState {
         changed
     }
 
-    fn visual_state(
-        &self,
-    ) -> ButtonVisualState {
-        let inner =
-            self.inner.borrow();
+    fn visual_state(&self) -> ButtonVisualState {
+        let inner = self.inner.borrow();
 
         if !inner.enabled {
             ButtonVisualState::Disabled
@@ -261,13 +155,7 @@ impl ButtonInteractionState {
     }
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ButtonVisualState {
     Normal,
     Hovered,
@@ -276,240 +164,132 @@ enum ButtonVisualState {
 }
 
 pub struct Button {
-    interaction:
-        ButtonInteractionState,
-
-    content:
-        Option<StackChild>,
-
-    color:
-        ButtonColor,
-
-    radius:
-        CornerRadius,
-
-    shadow:
-        ShadowStyle,
-
-    alignment:
-        ZStackAlignment,
-
-    enabled:
-        bool,
+    interaction: ButtonInteractionState,
+    content: Option<StackChild>,
+    color: ButtonColor,
+    radius: CornerRadius,
+    shadow: ShadowStyle,
+    alignment: ZStackAlignment,
+    enabled: bool,
 }
 
 impl Button {
-    pub fn new(
-        interaction:
-        ButtonInteractionState,
-    ) -> Self {
+    pub fn new(interaction: ButtonInteractionState) -> Self {
         Self {
             interaction,
             content: None,
             color: ButtonColor::Accent,
             radius: CornerRadius::Medium,
-            shadow: ShadowStyle::Small,
+            shadow: ShadowStyle::None,
             alignment: ZStackAlignment::Center,
             enabled: true,
         }
     }
 
-    pub fn content<C>(
-        mut self,
-        content: C,
-    ) -> Self
+    pub fn content<C>(mut self, content: C) -> Self
     where
         C: IntoStackChild,
     {
-        self.content = Some(
-            content.into_stack_child(),
-        );
+        self.content = Some(content.into_stack_child());
 
         self
     }
 
-    pub fn color(
-        mut self,
-        color: ButtonColor,
-    ) -> Self {
+    pub fn color(mut self, color: ButtonColor) -> Self {
         self.color = color;
         self
     }
 
-    pub fn radius(
-        mut self,
-        radius: CornerRadius,
-    ) -> Self {
+    pub fn radius(mut self, radius: CornerRadius) -> Self {
         self.radius = radius;
         self
     }
 
-    pub fn shadow(
-        mut self,
-        shadow: ShadowStyle,
-    ) -> Self {
+    pub fn shadow(mut self, shadow: ShadowStyle) -> Self {
         self.shadow = shadow;
         self
     }
 
-    pub fn alignment(
-        mut self,
-        alignment: ZStackAlignment,
-    ) -> Self {
+    pub fn alignment(mut self, alignment: ZStackAlignment) -> Self {
         self.alignment = alignment;
         self
     }
 
-    pub fn enabled(
-        mut self,
-        enabled: bool,
-    ) -> Self {
+    pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
         self
     }
 
-    pub fn interaction(
-        &self,
-    ) -> &ButtonInteractionState {
+    pub fn interaction(&self) -> &ButtonInteractionState {
         &self.interaction
     }
 }
 
 impl View for Button {
-    fn paint(
-        &self,
-        bounds: Rect,
-        context: &mut PaintContext<'_>,
-    ) {
-        if bounds.size.width <= 0.0
-            || bounds.size.height <= 0.0
-        {
+    fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
+        if bounds.size.width <= 0.0 || bounds.size.height <= 0.0 {
             return;
         }
 
-        self.interaction
-            .set_enabled(
-                self.enabled,
-            );
+        self.interaction.set_enabled(self.enabled);
 
-        let visual_state =
-            self.interaction
-                .visual_state();
+        let visual_state = self.interaction.visual_state();
 
-        let mut background_color =
-            self.color.resolve(
-                context,
-            );
+        let mut background_color = self.color.resolve(context);
 
-        if visual_state
-            == ButtonVisualState::Disabled
-        {
-            background_color =
-                background_color
-                    .with_alpha(96);
+        if visual_state == ButtonVisualState::Disabled {
+            background_color = background_color.with_alpha(96);
         }
 
-        let shadow =
-            if visual_state
-                == ButtonVisualState::Pressed
-            {
-                ShadowStyle::None
-            } else {
-                self.shadow
-            };
+        let shadow = if visual_state == ButtonVisualState::Pressed {
+            ShadowStyle::None
+        } else {
+            self.shadow
+        };
 
         Rectangle::new()
-            .color(
-                RectangleColor::Custom(
-                    background_color,
+            .color(RectangleColor::Custom(background_color))
+            .radius(self.radius)
+            .shadow(shadow)
+            .paint(bounds, context);
+
+        let overlay_color = match visual_state {
+            ButtonVisualState::Hovered => Some(self.color.hover_overlay()),
+
+            ButtonVisualState::Pressed => Some(self.color.pressed_overlay()),
+
+            ButtonVisualState::Normal | ButtonVisualState::Disabled => None,
+        };
+
+        if let Some(color) = overlay_color {
+            context.display_list.push(DrawCommand::FillRoundedRect {
+                rect: bounds,
+
+                radius: self.radius.resolve(
+                    &context.theme.radius,
+                    bounds.size.width,
+                    bounds.size.height,
                 ),
-            )
-            .radius(
-                self.radius,
-            )
-            .shadow(
-                shadow,
-            )
-            .paint(
-                bounds,
-                context,
-            );
 
-        let overlay_color =
-            match visual_state {
-                ButtonVisualState::Hovered => {
-                    Some(
-                        self.color
-                            .hover_overlay(),
-                    )
-                }
-
-                ButtonVisualState::Pressed => {
-                    Some(
-                        self.color
-                            .pressed_overlay(),
-                    )
-                }
-
-                ButtonVisualState::Normal
-                | ButtonVisualState::Disabled => {
-                    None
-                }
-            };
-
-        if let Some(color) =
-            overlay_color
-        {
-            context.display_list.push(
-                DrawCommand::FillRoundedRect {
-                    rect: bounds,
-
-                    radius:
-                    self.radius.resolve(
-                        &context
-                            .theme
-                            .radius,
-                        bounds.size.width,
-                        bounds.size.height,
-                    ),
-
-                    color,
-                },
-            );
+                color,
+            });
         }
 
-        let Some(content) =
-            self.content.as_ref()
-        else {
+        let Some(content) = self.content.as_ref() else {
             return;
         };
 
-        let content_size =
-            content.overlay_size(
-                bounds.size,
-            );
+        let content_size = content.overlay_size(bounds.size);
 
-        let content_bounds =
-            self.alignment
-                .child_bounds(
-                    bounds,
-                    content_size,
-                );
+        let content_bounds = self.alignment.child_bounds(bounds, content_size);
 
-        context.display_list.push(
-            DrawCommand::PushClip {
-                rect: bounds,
-            },
-        );
+        context
+            .display_list
+            .push(DrawCommand::PushClip { rect: bounds });
 
-        content.paint(
-            content_bounds,
-            context,
-        );
+        content.paint(content_bounds, context);
 
-        context.display_list.push(
-            DrawCommand::PopClip,
-        );
+        context.display_list.push(DrawCommand::PopClip);
     }
 
     fn handle_event(
@@ -518,11 +298,7 @@ impl View for Button {
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
-        let enabled_changed =
-            self.interaction
-                .set_enabled(
-                    self.enabled,
-                );
+        let enabled_changed = self.interaction.set_enabled(self.enabled);
 
         if enabled_changed {
             context.request_redraw();
@@ -533,37 +309,20 @@ impl View for Button {
         }
 
         match event {
-            ViewEvent::PointerMoved {
-                position,
-            } => {
-                let mut inner =
-                    self.interaction
-                        .inner
-                        .borrow_mut();
+            ViewEvent::PointerMoved { position } => {
+                let mut inner = self.interaction.inner.borrow_mut();
 
-                let hovered =
-                    bounds.contains(
-                        *position,
-                    );
+                let hovered = bounds.contains(*position);
 
-                let pressed =
-                    inner.armed
-                        && hovered;
+                let pressed = inner.armed && hovered;
 
-                let changed =
-                    inner.hovered
-                        != hovered
-                        || inner.pressed
-                        != pressed;
+                let changed = inner.hovered != hovered || inner.pressed != pressed;
 
-                inner.hovered =
-                    hovered;
+                inner.hovered = hovered;
 
-                inner.pressed =
-                    pressed;
+                inner.pressed = pressed;
 
-                let armed =
-                    inner.armed;
+                let armed = inner.armed;
 
                 drop(inner);
 
@@ -580,19 +339,13 @@ impl View for Button {
 
             ViewEvent::PointerPressed {
                 position,
-                button:
-                PointerButton::Primary,
+                button: PointerButton::Primary,
             } => {
-                if !bounds.contains(
-                    *position,
-                ) {
+                if !bounds.contains(*position) {
                     return EventResult::Ignored;
                 }
 
-                let mut inner =
-                    self.interaction
-                        .inner
-                        .borrow_mut();
+                let mut inner = self.interaction.inner.borrow_mut();
 
                 inner.hovered = true;
                 inner.armed = true;
@@ -607,25 +360,17 @@ impl View for Button {
 
             ViewEvent::PointerReleased {
                 position,
-                button:
-                PointerButton::Primary,
+                button: PointerButton::Primary,
             } => {
-                let mut inner =
-                    self.interaction
-                        .inner
-                        .borrow_mut();
+                let mut inner = self.interaction.inner.borrow_mut();
 
-                let owned_press =
-                    inner.armed;
+                let owned_press = inner.armed;
 
                 if !owned_press {
                     return EventResult::Ignored;
                 }
 
-                let inside =
-                    bounds.contains(
-                        *position,
-                    );
+                let inside = bounds.contains(*position);
 
                 if inside {
                     inner.clicked = true;
@@ -643,15 +388,9 @@ impl View for Button {
             }
 
             ViewEvent::PointerLeft => {
-                let mut inner =
-                    self.interaction
-                        .inner
-                        .borrow_mut();
+                let mut inner = self.interaction.inner.borrow_mut();
 
-                let changed =
-                    inner.hovered
-                        || inner.armed
-                        || inner.pressed;
+                let changed = inner.hovered || inner.armed || inner.pressed;
 
                 inner.hovered = false;
                 inner.armed = false;
@@ -666,17 +405,10 @@ impl View for Button {
                 EventResult::Ignored
             }
 
-            ViewEvent::FocusChanged {
-                focused: false,
-            } => {
-                let mut inner =
-                    self.interaction
-                        .inner
-                        .borrow_mut();
+            ViewEvent::FocusChanged { focused: false } => {
+                let mut inner = self.interaction.inner.borrow_mut();
 
-                let changed =
-                    inner.armed
-                        || inner.pressed;
+                let changed = inner.armed || inner.pressed;
 
                 inner.armed = false;
                 inner.pressed = false;

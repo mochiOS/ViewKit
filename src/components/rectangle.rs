@@ -2,7 +2,7 @@
 
 use crate::draw_command::DrawCommand;
 use crate::geometry::{Rect, Size};
-use crate::theme::{Color, CornerRadius, Shadow, ShadowStyle};
+use crate::theme::{Color, CornerRadius, Shadow, ShadowSet, ShadowStyle};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -142,8 +142,8 @@ impl View for Rectangle {
             self.radius
                 .resolve(&context.theme.radius, bounds.size.width, bounds.size.height);
 
-        if let Some(shadow) = self.shadow.resolve(&context.theme.shadows) {
-            paint_shadow(bounds, radius, shadow, context);
+        if let Some(shadow_set) = self.shadow.resolve(&context.theme.shadows) {
+            paint_shadow_set(bounds, radius, shadow_set, context);
         }
 
         if radius > 0.0 {
@@ -159,7 +159,37 @@ impl View for Rectangle {
             });
         }
 
-        paint_border(bounds, radius, self.border, context);
+        if let Some((border_color, border_width)) = self.border.resolve(context) {
+            let half_width = border_width / 2.0;
+
+            let border_bounds = Rect::new(
+                bounds.origin.x + half_width,
+                bounds.origin.y + half_width,
+                (bounds.size.width - border_width).max(0.0),
+                (bounds.size.height - border_width).max(0.0),
+            );
+
+            if border_bounds.size.width > 0.0 && border_bounds.size.height > 0.0 {
+                let border_radius = (radius - half_width).max(0.0);
+
+                let command = if border_radius > 0.0 {
+                    DrawCommand::StrokeRoundedRect {
+                        rect: border_bounds,
+                        radius: border_radius,
+                        color: border_color,
+                        width: border_width,
+                    }
+                } else {
+                    DrawCommand::StrokeRect {
+                        rect: border_bounds,
+                        color: border_color,
+                        width: border_width,
+                    }
+                };
+
+                context.display_list.push(command);
+            }
+        }
     }
 }
 
@@ -196,6 +226,17 @@ fn paint_border(bounds: Rect, radius: f32, border: BorderStyle, context: &mut Pa
             color,
             width,
         });
+    }
+}
+
+fn paint_shadow_set(
+    bounds: Rect,
+    radius: f32,
+    shadow_set: ShadowSet,
+    context: &mut PaintContext<'_>,
+) {
+    for shadow in shadow_set.layers.iter().rev().flatten() {
+        paint_shadow(bounds, radius, *shadow, context);
     }
 }
 
