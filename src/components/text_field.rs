@@ -1,5 +1,6 @@
 //! 単一行のテキストフィールド
 
+use super::{BorderStyle, Rectangle, RectangleColor, Text};
 use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
@@ -8,8 +9,10 @@ use crate::theme::{Color, CornerRadius, ShadowStyle};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::OnceLock;
+use std::time::Instant;
 
-use super::{BorderStyle, Rectangle, RectangleColor, Text};
+const CARET_BLINK_MILLIS: u128 = 500;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct TextFieldInteractionInner {
@@ -443,7 +446,7 @@ impl View for TextField {
                 .paint(text_bounds, context);
         }
 
-        if !focused {
+        if !focused || !caret_is_visible() {
             return;
         }
 
@@ -457,7 +460,7 @@ impl View for TextField {
                 .width
         };
 
-        let caret_width = 2.0;
+        let caret_width = 3.0;
 
         let minimum_caret_x = text_bounds.origin.x;
 
@@ -474,9 +477,7 @@ impl View for TextField {
 
         context.display_list.push(DrawCommand::FillRoundedRect {
             rect: Rect::new(caret_x, caret_y, caret_width, caret_height),
-
             radius: caret_width / 2.0,
-
             color: context.theme.colors.accent,
         });
     }
@@ -649,4 +650,12 @@ impl View for TextField {
             _ => EventResult::Ignored,
         }
     }
+}
+
+fn caret_is_visible() -> bool {
+    static BLINK_EPOCH: OnceLock<Instant> = OnceLock::new();
+
+    let elapsed = BLINK_EPOCH.get_or_init(Instant::now).elapsed().as_millis();
+
+    (elapsed / CARET_BLINK_MILLIS) % 2 == 0
 }
