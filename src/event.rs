@@ -18,7 +18,6 @@ use crate::view::View;
 
 #[derive(
     Clone,
-    Copy,
     Debug,
     PartialEq,
 )]
@@ -43,6 +42,10 @@ pub enum ViewEvent {
         position: Point,
         delta_x: f32,
         delta_y: f32,
+    },
+
+    TextInput {
+        text: String,
     },
 
     FocusChanged {
@@ -72,6 +75,9 @@ impl ViewEvent {
             } => Some(*position),
 
             Self::PointerLeft
+            | Self::TextInput {
+                ..
+            }
             | Self::FocusChanged {
                 ..
             } => None,
@@ -98,18 +104,21 @@ impl ViewEvent {
         &self,
     ) -> bool {
         matches!(
-            self,
-            Self::PointerMoved {
+        self,
+        Self::PointerMoved {
+            ..
+        }
+            | Self::PointerReleased {
                 ..
             }
-                | Self::PointerReleased {
-                    ..
-                }
-                | Self::PointerLeft
-                | Self::FocusChanged {
-                    ..
-                }
-        )
+            | Self::PointerLeft
+            | Self::TextInput {
+                ..
+            }
+            | Self::FocusChanged {
+                ..
+            }
+    )
     }
 }
 
@@ -340,8 +349,16 @@ impl EventDispatcher {
                     },
                 )
             }
-            
-            PlatformEvent::TextInput { text: _ } => { todo!() }
+
+            PlatformEvent::TextInput {
+                text,
+            } => {
+                Some(
+                    ViewEvent::TextInput {
+                        text: text.clone(),
+                    },
+                )
+            }
 
             PlatformEvent::Resumed {
                 ..
