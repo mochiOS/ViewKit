@@ -82,6 +82,16 @@ impl Color {
         Self::rgba(self.red, self.green, self.blue, alpha)
     }
 
+    pub fn alpha(self, opacity: f32) -> Self {
+        let opacity = if opacity.is_nan() {
+            0.0
+        } else {
+            opacity.clamp(0.0, 1.0)
+        };
+
+        self.with_alpha((opacity * 255.0).round() as u8)
+    }
+
     pub const TRANSPARENT: Self = Self::rgba(0, 0, 0, 0);
     pub const BLACK: Self = Self::rgb(0, 0, 0);
     pub const WHITE: Self = Self::rgb(255, 255, 255);
