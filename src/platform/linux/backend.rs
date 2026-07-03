@@ -64,10 +64,11 @@ pub struct LinuxBackend<A> {
     config: WindowConfig,
 
     context: Option<Context<OwnedDisplayHandle>>,
-
     window: Option<Rc<Window>>,
-
     renderer: Option<SoftwareRenderer>,
+
+    shift_pressed: bool,
+    shortcut_pressed: bool,
 
     runtime_error: Option<LinuxBackendError>,
 }
@@ -84,6 +85,9 @@ where
             context: None,
             window: None,
             renderer: None,
+
+            shift_pressed: false,
+            shortcut_pressed: false,
 
             runtime_error: None,
         }
@@ -296,6 +300,11 @@ where
             }
 
             WindowEvent::Focused(focused) => {
+                if !focused {
+                    self.shift_pressed = false;
+                    self.shortcut_pressed = false;
+                }
+
                 self.emit(PlatformEvent::Focused(focused));
             }
 
@@ -320,6 +329,14 @@ where
                 self.emit(PlatformEvent::PointerLeft);
 
                 self.request_redraw();
+            }
+
+            WindowEvent::ModifiersChanged(modifiers) => {
+                let state = modifiers.state();
+
+                self.shift_pressed = state.shift_key();
+
+                self.shortcut_pressed = state.control_key() || state.super_key();
             }
 
             WindowEvent::MouseInput { state, button, .. } => {
@@ -358,12 +375,34 @@ where
                 }
 
                 let platform_event = match &event.logical_key {
+                    Key::Character(character)
+                        if self.shortcut_pressed
+                            && character.as_str().eq_ignore_ascii_case("a") =>
+                    {
+                        Some(PlatformEvent::SelectAll)
+                    }
                     Key::Named(NamedKey::Backspace) => Some(PlatformEvent::Backspace),
-                    Key::Named(NamedKey::ArrowLeft) => Some(PlatformEvent::ArrowLeft),
-                    Key::Named(NamedKey::ArrowRight) => Some(PlatformEvent::ArrowRight),
                     Key::Named(NamedKey::Delete) => Some(PlatformEvent::Delete),
-                    Key::Named(NamedKey::Home) => Some(PlatformEvent::Home),
-                    Key::Named(NamedKey::End) => Some(PlatformEvent::End),
+                    Key::Named(NamedKey::ArrowLeft) => Some(if self.shift_pressed {
+                        PlatformEvent::SelectLeft
+                    } else {
+                        PlatformEvent::ArrowLeft
+                    }),
+                    Key::Named(NamedKey::ArrowRight) => Some(if self.shift_pressed {
+                        PlatformEvent::SelectRight
+                    } else {
+                        PlatformEvent::ArrowRight
+                    }),
+                    Key::Named(NamedKey::Home) => Some(if self.shift_pressed {
+                        PlatformEvent::SelectHome
+                    } else {
+                        PlatformEvent::Home
+                    }),
+                    Key::Named(NamedKey::End) => Some(if self.shift_pressed {
+                        PlatformEvent::SelectEnd
+                    } else {
+                        PlatformEvent::End
+                    }),
 
                     _ => None,
                 };

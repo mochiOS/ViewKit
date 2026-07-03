@@ -41,6 +41,12 @@ pub enum ViewEvent {
     End,
     Delete,
 
+    SelectRight,
+    SelectLeft,
+    SelectHome,
+    SelectEnd,
+    SelectAll,
+
     PointerFocusRequested {
         position: Point,
     },
@@ -67,7 +73,12 @@ impl ViewEvent {
             | Self::ArrowLeft
             | Self::ArrowRight
             | Self::Home
-            | Self::End => None,
+            | Self::End
+            | Self::SelectRight
+            | Self::SelectLeft
+            | Self::SelectHome
+            | Self::SelectEnd
+            | Self::SelectAll => None,
         }
     }
 
@@ -93,6 +104,11 @@ impl ViewEvent {
                 | Self::ArrowLeft
                 | Self::ArrowRight
                 | Self::FocusChanged { .. }
+                | Self::SelectLeft
+                | Self::SelectRight
+                | Self::SelectHome
+                | Self::SelectEnd
+                | Self::SelectAll
         )
     }
 }
@@ -265,6 +281,12 @@ impl EventDispatcher {
             PlatformEvent::ArrowRight => Some(ViewEvent::ArrowRight),
             PlatformEvent::Home => Some(ViewEvent::Home),
             PlatformEvent::End => Some(ViewEvent::End),
+
+            PlatformEvent::SelectLeft => Some(ViewEvent::SelectLeft),
+            PlatformEvent::SelectRight => Some(ViewEvent::SelectRight),
+            PlatformEvent::SelectHome => Some(ViewEvent::SelectHome),
+            PlatformEvent::SelectEnd => Some(ViewEvent::SelectEnd),
+            PlatformEvent::SelectAll => Some(ViewEvent::SelectAll),
 
             PlatformEvent::Resumed { .. }
             | PlatformEvent::Resized { .. }

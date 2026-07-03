@@ -43,12 +43,20 @@ pub enum PlatformEvent {
     TextInput {
         text: String,
     },
+
     Backspace,
     ArrowLeft,
     ArrowRight,
     Home,
     End,
     Delete,
+
+    SelectLeft,
+    SelectRight,
+    SelectHome,
+    SelectEnd,
+    SelectAll,
+
     Focused(bool),
     RedrawRequested,
     CloseRequested,

@@ -204,6 +204,123 @@ impl TextFieldInteractionState {
         true
     }
 
+    fn extend_selection_left(&self) -> bool {
+        let mut inner = self.inner.borrow_mut();
+
+        let cursor = inner.cursor.min(inner.value.len());
+
+        if cursor == 0 {
+            return false;
+        }
+
+        if inner.selection_anchor.is_none() {
+            inner.selection_anchor = Some(cursor);
+        }
+
+        let previous = inner.value[..cursor]
+            .char_indices()
+            .next_back()
+            .map(|(index, _)| index)
+            .unwrap_or(0);
+
+        inner.cursor = previous;
+        inner.selecting = false;
+
+        true
+    }
+
+    fn extend_selection_right(&self) -> bool {
+        let mut inner = self.inner.borrow_mut();
+
+        let cursor = inner.cursor.min(inner.value.len());
+
+        if cursor >= inner.value.len() {
+            return false;
+        }
+
+        if inner.selection_anchor.is_none() {
+            inner.selection_anchor = Some(cursor);
+        }
+
+        let character_length = inner.value[cursor..]
+            .chars()
+            .next()
+            .map(char::len_utf8)
+            .unwrap_or(0);
+
+        if character_length == 0 {
+            return false;
+        }
+
+        inner.cursor = cursor + character_length;
+
+        inner.selecting = false;
+
+        true
+    }
+
+    fn extend_selection_home(&self) -> bool {
+        let mut inner = self.inner.borrow_mut();
+
+        let cursor = inner.cursor.min(inner.value.len());
+
+        if cursor == 0 {
+            return false;
+        }
+
+        if inner.selection_anchor.is_none() {
+            inner.selection_anchor = Some(cursor);
+        }
+
+        inner.cursor = 0;
+        inner.selecting = false;
+
+        true
+    }
+
+    fn extend_selection_end(&self) -> bool {
+        let mut inner = self.inner.borrow_mut();
+
+        let cursor = inner.cursor.min(inner.value.len());
+
+        let end = inner.value.len();
+
+        if cursor == end {
+            return false;
+        }
+
+        if inner.selection_anchor.is_none() {
+            inner.selection_anchor = Some(cursor);
+        }
+
+        inner.cursor = end;
+        inner.selecting = false;
+
+        true
+    }
+
+    fn select_all(&self) -> bool {
+        let mut inner = self.inner.borrow_mut();
+
+        let end = inner.value.len();
+
+        if end == 0 {
+            inner.selection_anchor = None;
+            inner.selecting = false;
+
+            return false;
+        }
+
+        let changed = inner.selection_anchor != Some(0) || inner.cursor != end;
+
+        inner.selection_anchor = Some(0);
+
+        inner.cursor = end;
+        inner.selecting = false;
+
+        changed
+    }
+
     fn delete_backward(&self) -> bool {
         let mut inner = self.inner.borrow_mut();
 
@@ -979,6 +1096,76 @@ impl View for TextField {
 
                 self.interaction.move_cursor_end();
                 self.interaction.reset_caret_blink();
+                context.request_redraw();
+
+                EventResult::Consumed
+            }
+
+            ViewEvent::SelectLeft => {
+                if !self.interaction.is_focused() {
+                    return EventResult::Ignored;
+                }
+
+                self.interaction.extend_selection_left();
+
+                self.interaction.reset_caret_blink();
+
+                context.request_redraw();
+
+                EventResult::Consumed
+            }
+
+            ViewEvent::SelectRight => {
+                if !self.interaction.is_focused() {
+                    return EventResult::Ignored;
+                }
+
+                self.interaction.extend_selection_right();
+
+                self.interaction.reset_caret_blink();
+
+                context.request_redraw();
+
+                EventResult::Consumed
+            }
+
+            ViewEvent::SelectHome => {
+                if !self.interaction.is_focused() {
+                    return EventResult::Ignored;
+                }
+
+                self.interaction.extend_selection_home();
+
+                self.interaction.reset_caret_blink();
+
+                context.request_redraw();
+
+                EventResult::Consumed
+            }
+
+            ViewEvent::SelectEnd => {
+                if !self.interaction.is_focused() {
+                    return EventResult::Ignored;
+                }
+
+                self.interaction.extend_selection_end();
+
+                self.interaction.reset_caret_blink();
+
+                context.request_redraw();
+
+                EventResult::Consumed
+            }
+
+            ViewEvent::SelectAll => {
+                if !self.interaction.is_focused() {
+                    return EventResult::Ignored;
+                }
+
+                self.interaction.select_all();
+
+                self.interaction.reset_caret_blink();
+
                 context.request_redraw();
 
                 EventResult::Consumed
