@@ -62,6 +62,7 @@ fn build_counter_tree(counter: i64) -> ViewNode {
             alignment: TextAlignment::Center,
 
             color: Color::BLACK,
+            font_family: "Noto Sans JP".to_string(),
         }),
     ));
 
