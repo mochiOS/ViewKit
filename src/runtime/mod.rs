@@ -11,6 +11,7 @@ mod view_mode;
 
 pub use action::*;
 pub use adapter::*;
+pub use application::{ViewKitError, run};
 pub use builder::*;
 pub use id::*;
 pub use node::*;

@@ -73,6 +73,26 @@ impl WindowOptions {
         self.resizable = resizable;
         self
     }
+
+    /// ウィンドウのタイトルを返します。
+    #[must_use]
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+
+    /// ウィンドウの初期サイズを返します。
+    ///
+    /// 戻り値は論理ピクセル単位です。
+    #[must_use]
+    pub const fn initial_size(&self) -> Size {
+        self.size
+    }
+
+    /// ユーザーによるウィンドウサイズの変更が許可されているか返します。
+    #[must_use]
+    pub const fn is_resizable(&self) -> bool {
+        self.resizable
+    }
 }
 
 /// Actionの処理中にアプリケーションから
