@@ -25,6 +25,22 @@ pub const VK_Z_ALIGNMENT_BOTTOM_LEADING: u32 = 6;
 pub const VK_Z_ALIGNMENT_BOTTOM: u32 = 7;
 pub const VK_Z_ALIGNMENT_BOTTOM_TRAILING: u32 = 8;
 
+pub const VK_ABI_VERSION_MAJOR: u32 = 1;
+pub const VK_ABI_VERSION_MINOR: u32 = 0;
+pub const VK_ABI_VERSION_PATCH: u32 = 0;
+
+/*
+ * 0x00MMmmpp
+ *
+ * MM: major
+ * mm: minor
+ * pp: patch
+ *
+ * 1.0.0は0x00010000になります。
+ */
+pub const VK_ABI_VERSION: u32 =
+    (VK_ABI_VERSION_MAJOR << 16) | (VK_ABI_VERSION_MINOR << 8) | VK_ABI_VERSION_PATCH;
+
 #[repr(i32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VkStatus {
@@ -263,6 +279,46 @@ pub extern "C" fn vk_runtime_create(component_instance_id: u64) -> *mut VkRuntim
         Box::into_raw(Box::new(VkRuntime::new(component_instance_id)))
     }))
     .unwrap_or_else(|_| ptr::null_mut())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vk_abi_version() -> u32 {
+    VK_ABI_VERSION
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vk_status_name(status: i32) -> VkString {
+    VkString::from_str(status_name(status))
+}
+
+fn status_name(status: i32) -> &'static str {
+    match status {
+        value if value == VkStatus::Ok as i32 => "ok",
+
+        value if value == VkStatus::NullPointer as i32 => "null_pointer",
+
+        value if value == VkStatus::InvalidUtf8 as i32 => "invalid_utf8",
+
+        value if value == VkStatus::BuilderAlreadyActive as i32 => "builder_already_active",
+
+        value if value == VkStatus::NoActiveBuilder as i32 => "no_active_builder",
+
+        value if value == VkStatus::NoOpenNode as i32 => "no_open_node",
+
+        value if value == VkStatus::UnclosedNodes as i32 => "unclosed_nodes",
+
+        value if value == VkStatus::MultipleRoots as i32 => "multiple_roots",
+
+        value if value == VkStatus::MissingRoot as i32 => "missing_root",
+
+        value if value == VkStatus::InvalidEnumValue as i32 => "invalid_enum_value",
+
+        value if value == VkStatus::UnsupportedEvent as i32 => "unsupported_event",
+
+        value if value == VkStatus::Panic as i32 => "panic",
+
+        _ => "unknown_status",
+    }
 }
 
 #[unsafe(no_mangle)]

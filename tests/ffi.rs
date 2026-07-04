@@ -1,11 +1,13 @@
 use viewkit::ffi::{
+    VK_ABI_VERSION, VK_ABI_VERSION_MAJOR, VK_ABI_VERSION_MINOR, VK_ABI_VERSION_PATCH,
     VK_ALIGNMENT_CENTER, VK_BORDER_STANDARD, VK_BUTTON_COLOR_ACCENT, VK_CORNER_RADIUS_CARD,
     VK_DISTRIBUTION_CENTER, VK_DISTRIBUTION_START, VK_RECTANGLE_COLOR_SURFACE, VK_STACK_GAP_LARGE,
     VK_STACK_GAP_SMALL, VK_TEXT_ALIGNMENT_START, VK_TEXT_COLOR_BLACK, VkActionEvent, VkLength,
-    VkRectangleStyle, VkStatus, VkString, vk_begin_background, vk_begin_frame, vk_begin_hstack,
-    vk_begin_padding, vk_begin_vstack, vk_end_node, vk_poll_action, vk_push_button,
-    vk_push_divider, vk_push_rectangle, vk_push_spacer, vk_push_text, vk_runtime_collect_actions,
-    vk_runtime_create, vk_runtime_destroy, vk_tree_begin, vk_tree_commit,
+    VkRectangleStyle, VkStatus, VkString, vk_abi_version, vk_begin_background, vk_begin_frame,
+    vk_begin_hstack, vk_begin_padding, vk_begin_vstack, vk_end_node, vk_poll_action,
+    vk_push_button, vk_push_divider, vk_push_rectangle, vk_push_spacer, vk_push_text,
+    vk_runtime_collect_actions, vk_runtime_create, vk_runtime_destroy, vk_status_name,
+    vk_tree_begin, vk_tree_commit,
 };
 
 #[test]
@@ -312,4 +314,43 @@ fn ffi_builds_rectangle_and_background() {
     assert_eq!(vk_tree_commit(runtime), VkStatus::Ok as i32,);
 
     assert_eq!(vk_runtime_destroy(runtime), VkStatus::Ok as i32,);
+}
+
+#[test]
+fn ffi_reports_abi_version() {
+    assert_eq!(VK_ABI_VERSION_MAJOR, 1,);
+
+    assert_eq!(VK_ABI_VERSION_MINOR, 0,);
+
+    assert_eq!(VK_ABI_VERSION_PATCH, 0,);
+
+    assert_eq!(vk_abi_version(), VK_ABI_VERSION,);
+
+    assert_eq!(vk_abi_version(), 0x0001_0000,);
+}
+
+#[test]
+fn ffi_reports_status_names() {
+    let status = vk_status_name(VkStatus::InvalidEnumValue as i32);
+
+    assert!(!status.pointer.is_null(),);
+
+    let bytes = unsafe { std::slice::from_raw_parts(status.pointer, status.length) };
+
+    let name = std::str::from_utf8(bytes).expect("ステータス名はUTF-8であること");
+
+    assert_eq!(name, "invalid_enum_value",);
+}
+
+#[test]
+fn ffi_reports_unknown_status_name() {
+    let status = vk_status_name(12345);
+
+    assert!(!status.pointer.is_null(),);
+
+    let bytes = unsafe { std::slice::from_raw_parts(status.pointer, status.length) };
+
+    let name = std::str::from_utf8(bytes).expect("ステータス名はUTF-8であること");
+
+    assert_eq!(name, "unknown_status",);
 }
