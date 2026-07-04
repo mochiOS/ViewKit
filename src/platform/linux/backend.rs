@@ -321,14 +321,10 @@ where
                     x: position.0,
                     y: position.1,
                 });
-
-                self.request_redraw();
             }
 
             WindowEvent::CursorLeft { .. } => {
                 self.emit(PlatformEvent::PointerLeft);
-
-                self.request_redraw();
             }
 
             WindowEvent::ModifiersChanged(modifiers) => {
@@ -345,8 +341,6 @@ where
 
                     state: convert_button_state(state),
                 });
-
-                self.request_redraw();
             }
 
             WindowEvent::MouseWheel { delta, .. } => {
@@ -359,8 +353,6 @@ where
                 let (delta_x, delta_y) = scroll_delta_to_logical(delta, scale_factor);
 
                 self.emit(PlatformEvent::Scroll { delta_x, delta_y });
-
-                self.request_redraw();
             }
 
             WindowEvent::RedrawRequested => {
@@ -409,9 +401,6 @@ where
 
                 if let Some(platform_event) = platform_event {
                     self.emit(platform_event);
-
-                    self.request_redraw();
-
                     return;
                 }
 
@@ -429,8 +418,6 @@ where
                 }
 
                 self.emit(PlatformEvent::TextInput { text });
-
-                self.request_redraw();
             }
 
             _ => {}
