@@ -182,10 +182,6 @@ impl View for Text {
 
         let line_height = resolved_line_height(font_size, self.line_height);
 
-        context
-            .display_list
-            .push(DrawCommand::PushClip { rect: bounds });
-
         context.display_list.push(DrawCommand::DrawText {
             command: TextCommand {
                 text: self.value.clone(),
@@ -205,8 +201,6 @@ impl View for Text {
                 color: self.color,
             },
         });
-
-        context.display_list.push(DrawCommand::PopClip);
     }
 }
 

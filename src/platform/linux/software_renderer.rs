@@ -1,5 +1,6 @@
 //! softbufferとtiny-skiaを使用したLinux向けソフトウェアレンダラー
 
+use std::collections::HashMap;
 use std::num::NonZeroU32;
 use std::rc::Rc;
 
@@ -15,6 +16,7 @@ use crate::draw_command::{DisplayList, DrawCommand, TextCommand};
 use crate::geometry::Rect;
 use crate::renderer::{Renderer, Viewport};
 use crate::theme::Color;
+use crate::typography::TextAlignment;
 use cosmic_text::{
     Attrs, Buffer, Color as CosmicColor, Family, FontSystem, Metrics, Shaping, SwashCache, Weight,
 };
@@ -37,13 +39,67 @@ pub enum SoftwareRendererError {
     UnclosedClipStack { depth: usize },
 }
 
+const TEXT_LAYOUT_CACHE_CAPACITY: usize = 1024;
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct TextLayoutKey {
+    text: String,
+    font_family: String,
+
+    font_size_bits: u32,
+    line_height_bits: u32,
+
+    width_bits: u32,
+    height_bits: u32,
+    scale_bits: u32,
+
+    weight: u16,
+    alignment: u8,
+}
+
+impl TextLayoutKey {
+    fn new(command: &TextCommand, scale: f32) -> Self {
+        Self {
+            text: command.text.clone(),
+            font_family: command.font_family.clone(),
+
+            font_size_bits: canonical_f32_bits(command.font_size),
+            line_height_bits: canonical_f32_bits(command.line_height),
+
+            width_bits: canonical_f32_bits(command.bounds.size.width),
+            height_bits: canonical_f32_bits(command.bounds.size.height),
+            scale_bits: canonical_f32_bits(scale),
+
+            weight: command.weight.clamp(1, 1000),
+            alignment: alignment_key(command.alignment),
+        }
+    }
+}
+
+fn canonical_f32_bits(value: f32) -> u32 {
+    if value == 0.0 {
+        0.0_f32.to_bits()
+    } else {
+        value.to_bits()
+    }
+}
+
+const fn alignment_key(alignment: TextAlignment) -> u8 {
+    match alignment {
+        TextAlignment::Start => 0,
+        TextAlignment::Center => 1,
+        TextAlignment::End => 2,
+        TextAlignment::Justified => 3,
+    }
+}
+
 pub struct SoftwareRenderer {
     surface: Surface<OwnedDisplayHandle, Rc<Window>>,
-
     viewport: Viewport,
     pixmap: Option<Pixmap>,
     font_system: FontSystem,
     swash_cache: SwashCache,
+    text_layout_cache: HashMap<TextLayoutKey, Buffer>,
 }
 
 impl SoftwareRenderer {
@@ -58,10 +114,9 @@ impl SoftwareRenderer {
             surface,
             viewport,
             pixmap: None,
-
             font_system: FontSystem::new(),
-
             swash_cache: SwashCache::new(),
+            text_layout_cache: HashMap::new(),
         };
 
         renderer.resize_surface(viewport)?;
@@ -70,6 +125,10 @@ impl SoftwareRenderer {
     }
 
     fn resize_surface(&mut self, viewport: Viewport) -> Result<(), SoftwareRendererError> {
+        if self.viewport != viewport {
+            self.text_layout_cache.clear();
+        }
+
         self.viewport = viewport;
 
         if viewport.physical_width == 0 || viewport.physical_height == 0 {
@@ -232,6 +291,7 @@ impl Renderer for SoftwareRenderer {
                         pixmap,
                         &mut self.font_system,
                         &mut self.swash_cache,
+                        &mut self.text_layout_cache,
                         command,
                         scale,
                         clip_stack.last(),
@@ -414,6 +474,7 @@ fn draw_text_command(
     pixmap: &mut Pixmap,
     font_system: &mut FontSystem,
     swash_cache: &mut SwashCache,
+    layout_cache: &mut HashMap<TextLayoutKey, Buffer>,
     command: &TextCommand,
     scale: f32,
     clip: Option<&Mask>,
@@ -443,24 +504,42 @@ fn draw_text_command(
 
     let origin_y = command.bounds.origin.y * scale;
 
-    let metrics = Metrics::new(font_size, line_height);
+    let key = TextLayoutKey::new(command, scale);
 
-    let mut buffer = Buffer::new(font_system, metrics);
+    if !layout_cache.contains_key(&key) {
+        if layout_cache.len() >= TEXT_LAYOUT_CACHE_CAPACITY {
+            layout_cache.clear();
+        }
+
+        let metrics = Metrics::new(font_size, line_height);
+
+        let mut buffer = Buffer::new(font_system, metrics);
+
+        {
+            let mut buffer_with_font_system = buffer.borrow_with(font_system);
+
+            buffer_with_font_system.set_size(Some(width), Some(height));
+
+            let attrs = Attrs::new()
+                .family(Family::Name(command.font_family.as_str()))
+                .weight(Weight(command.weight.clamp(1, 1000)));
+
+            buffer_with_font_system.set_text(
+                command.text.as_str(),
+                &attrs,
+                Shaping::Advanced,
+                command.alignment.to_cosmic(),
+            );
+        }
+
+        layout_cache.insert(key.clone(), buffer);
+    }
+
+    let buffer = layout_cache
+        .get_mut(&key)
+        .expect("Text layout cache does not exist");
 
     let mut buffer = buffer.borrow_with(font_system);
-
-    buffer.set_size(Some(width), Some(height));
-
-    let attrs = Attrs::new()
-        .family(Family::Name(command.font_family.as_str()))
-        .weight(Weight(command.weight.clamp(1, 1000)));
-
-    buffer.set_text(
-        command.text.as_str(),
-        &attrs,
-        Shaping::Advanced,
-        command.alignment.to_cosmic(),
-    );
 
     let text_color = CosmicColor::rgba(
         command.color.red,
@@ -469,12 +548,28 @@ fn draw_text_command(
         command.color.alpha,
     );
 
+    let text_clip = SkiaRect::from_xywh(
+        command.bounds.origin.x * scale,
+        command.bounds.origin.y * scale,
+        command.bounds.size.width * scale,
+        command.bounds.size.height * scale,
+    );
+
     buffer.draw(swash_cache, text_color, |x, y, width, height, color| {
         let draw_x = origin_x + x as f32;
 
         let draw_y = origin_y + y as f32;
 
-        let Some(rect) = SkiaRect::from_xywh(draw_x, draw_y, width as f32, height as f32) else {
+        let Some(glyph_rect) = SkiaRect::from_xywh(draw_x, draw_y, width as f32, height as f32)
+        else {
+            return;
+        };
+
+        let Some(text_clip) = text_clip else {
+            return;
+        };
+
+        let Some(rect) = intersect_rect(glyph_rect, text_clip) else {
             return;
         };
 
@@ -492,4 +587,20 @@ fn draw_text_command(
 
         pixmap.fill_rect(rect, &paint, Transform::identity(), clip);
     });
+}
+
+fn intersect_rect(first: SkiaRect, second: SkiaRect) -> Option<SkiaRect> {
+    let left = first.left().max(second.left());
+    let top = first.top().max(second.top());
+    let right = first.right().min(second.right());
+    let bottom = first.bottom().min(second.bottom());
+
+    let width = right - left;
+    let height = bottom - top;
+
+    if width <= 0.0 || height <= 0.0 {
+        return None;
+    }
+
+    SkiaRect::from_xywh(left, top, width, height)
 }
