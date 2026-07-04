@@ -228,22 +228,6 @@ where
         self.request_redraw();
     }
 
-    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        let Some(deadline) = self.application.next_redraw_at() else {
-            event_loop.set_control_flow(ControlFlow::Wait);
-
-            return;
-        };
-
-        if deadline <= Instant::now() {
-            self.request_redraw();
-
-            event_loop.set_control_flow(ControlFlow::Wait);
-        } else {
-            event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
-        }
-    }
-
     fn window_event(
         &mut self,
         event_loop: &ActiveEventLoop,
@@ -421,6 +405,22 @@ where
             }
 
             _ => {}
+        }
+    }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(deadline) = self.application.next_redraw_at() else {
+            event_loop.set_control_flow(ControlFlow::Wait);
+
+            return;
+        };
+
+        if deadline <= Instant::now() {
+            self.request_redraw();
+
+            event_loop.set_control_flow(ControlFlow::Wait);
+        } else {
+            event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
         }
     }
 }
