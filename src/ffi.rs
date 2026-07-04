@@ -6,10 +6,11 @@ use std::slice;
 use std::str;
 
 use crate::components::{ButtonColor, ZStackAlignment};
-use crate::layout::{StackAlignment, StackDistribution, StackGap};
+use crate::layout::{LayoutLength, StackAlignment, StackDistribution, StackGap};
 use crate::runtime::{
-    ActionId, ButtonNode, ComponentInstanceId, HStackNode, NodeId, PaddingNode, RuntimeEvent,
-    TextNode, VStackNode, ViewNode, ViewNodeKind, ViewRuntime, ViewTreeBuilder, ZStackNode,
+    ActionId, ButtonNode, ComponentInstanceId, FrameNode, HStackNode, NodeId, PaddingNode,
+    RuntimeEvent, TextNode, VStackNode, ViewNode, ViewNodeKind, ViewRuntime, ViewTreeBuilder,
+    ZStackNode,
 };
 use crate::theme::Color;
 use crate::typography::TextAlignment;
@@ -59,6 +60,33 @@ impl VkString {
             pointer: value.as_ptr(),
 
             length: value.len(),
+        }
+    }
+}
+
+pub const VK_LENGTH_AUTO: u32 = 0;
+
+pub const VK_LENGTH_FIXED: u32 = 1;
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct VkLength {
+    pub kind: u32,
+    pub value: f32,
+}
+
+impl VkLength {
+    pub const fn auto() -> Self {
+        Self {
+            kind: VK_LENGTH_AUTO,
+            value: 0.0,
+        }
+    }
+
+    pub const fn fixed(value: f32) -> Self {
+        Self {
+            kind: VK_LENGTH_FIXED,
+            value,
         }
     }
 }
@@ -694,4 +722,39 @@ pub extern "C" fn vk_push_divider(runtime: *mut VkRuntime, node_id: u64) -> i32 
 
         Ok(())
     })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vk_begin_frame(
+    runtime: *mut VkRuntime,
+    node_id: u64,
+    width: VkLength,
+    height: VkLength,
+) -> i32 {
+    ffi_status(|| {
+        let width = decode_layout_length(width)?;
+
+        let height = decode_layout_length(height)?;
+
+        let runtime = runtime_mut(runtime)?;
+
+        let builder = active_builder(runtime)?;
+
+        builder.begin(ViewNode::new(
+            NodeId(node_id),
+            ViewNodeKind::Frame(FrameNode { width, height }),
+        ));
+
+        Ok(())
+    })
+}
+
+fn decode_layout_length(value: VkLength) -> Result<LayoutLength, VkStatus> {
+    match value.kind {
+        VK_LENGTH_AUTO => Ok(LayoutLength::Auto),
+
+        VK_LENGTH_FIXED => Ok(LayoutLength::Fixed(sanitize_length(value.value))),
+
+        _ => Err(VkStatus::InvalidEnumValue),
+    }
 }

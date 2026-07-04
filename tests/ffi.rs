@@ -1,9 +1,9 @@
 use viewkit::ffi::{
     VK_ALIGNMENT_CENTER, VK_BUTTON_COLOR_ACCENT, VK_DISTRIBUTION_CENTER, VK_DISTRIBUTION_START,
     VK_STACK_GAP_LARGE, VK_STACK_GAP_SMALL, VK_TEXT_ALIGNMENT_START, VK_TEXT_COLOR_BLACK,
-    VkActionEvent, VkStatus, VkString, vk_begin_hstack, vk_begin_padding, vk_begin_vstack,
-    vk_end_node, vk_poll_action, vk_push_button, vk_push_divider, vk_push_spacer, vk_push_text,
-    vk_runtime_collect_actions, vk_runtime_create, vk_runtime_destroy, vk_tree_begin,
+    VkActionEvent, VkLength, VkStatus, VkString, vk_begin_frame, vk_begin_hstack, vk_begin_padding,
+    vk_begin_vstack, vk_end_node, vk_poll_action, vk_push_button, vk_push_divider, vk_push_spacer,
+    vk_push_text, vk_runtime_collect_actions, vk_runtime_create, vk_runtime_destroy, vk_tree_begin,
     vk_tree_commit,
 };
 
@@ -188,6 +188,66 @@ fn ffi_builds_stack_with_spacer_and_divider() {
     assert_eq!(vk_end_node(runtime), VkStatus::Ok as i32,);
 
     assert_eq!(vk_tree_commit(runtime), VkStatus::Ok as i32,);
+
+    assert_eq!(vk_runtime_destroy(runtime), VkStatus::Ok as i32,);
+}
+
+#[test]
+fn ffi_builds_fixed_width_frame() {
+    let runtime = vk_runtime_create(1);
+
+    assert!(!runtime.is_null(),);
+
+    assert_eq!(vk_tree_begin(runtime, 100,), VkStatus::Ok as i32,);
+
+    assert_eq!(
+        vk_begin_frame(runtime, 101, VkLength::fixed(320.0), VkLength::auto(),),
+        VkStatus::Ok as i32,
+    );
+
+    let content = String::from("Framed text");
+
+    assert_eq!(
+        vk_push_text(
+            runtime,
+            102,
+            VkString::from_str(&content,),
+            14.0,
+            22.0,
+            400,
+            VK_TEXT_ALIGNMENT_START,
+            VK_TEXT_COLOR_BLACK,
+        ),
+        VkStatus::Ok as i32,
+    );
+
+    assert_eq!(vk_end_node(runtime), VkStatus::Ok as i32,);
+
+    assert_eq!(vk_tree_commit(runtime), VkStatus::Ok as i32,);
+
+    assert_eq!(vk_runtime_destroy(runtime), VkStatus::Ok as i32,);
+}
+
+#[test]
+fn ffi_rejects_invalid_frame_length() {
+    let runtime = vk_runtime_create(1);
+
+    assert!(!runtime.is_null(),);
+
+    assert_eq!(vk_tree_begin(runtime, 100,), VkStatus::Ok as i32,);
+
+    assert_eq!(
+        vk_begin_frame(
+            runtime,
+            101,
+            VkLength {
+                kind: 999,
+                value: 100.0,
+            },
+            VkLength::auto(),
+        ),
+        VkStatus::InvalidEnumValue as i32,
+    );
 
     assert_eq!(vk_runtime_destroy(runtime), VkStatus::Ok as i32,);
 }

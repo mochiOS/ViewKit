@@ -1,5 +1,5 @@
 use crate::components::{ButtonColor, ZStackAlignment};
-use crate::layout::{StackAlignment, StackDistribution, StackGap};
+use crate::layout::{LayoutLength, StackAlignment, StackDistribution, StackGap};
 use crate::theme::Color;
 use crate::typography::TextAlignment;
 
@@ -41,6 +41,7 @@ pub enum ViewNodeKind {
     Divider,
 
     Padding(PaddingNode),
+    Frame(FrameNode),
 }
 
 #[derive(Clone, Debug)]
@@ -94,8 +95,10 @@ impl Default for ZStackNode {
 pub struct TextNode {
     pub content: String,
     pub font_family: String,
+
     pub font_size: f32,
     pub line_height: f32,
+
     pub weight: u16,
     pub alignment: TextAlignment,
     pub color: Color,
@@ -115,4 +118,10 @@ pub struct PaddingNode {
     pub right: f32,
     pub bottom: f32,
     pub left: f32,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FrameNode {
+    pub width: LayoutLength,
+    pub height: LayoutLength,
 }

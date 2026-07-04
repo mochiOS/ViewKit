@@ -1,9 +1,9 @@
 use crate::components::{Button, Divider, HStack, Padding, Spacer, Text, VStack, ZStack};
-use crate::layout::{IntoStackChild, StackChild};
+use crate::layout::{IntoStackChild, LayoutLength, StackAlignment, StackChild, StackGap};
 use crate::theme::CornerRadius;
 use crate::view::View;
 
-use super::{RuntimeStateStore, ViewNode, ViewNodeKind};
+use super::{FrameNode, RuntimeStateStore, ViewNode, ViewNodeKind};
 
 pub struct ViewAdapter<'a> {
     states: &'a mut RuntimeStateStore,
@@ -79,7 +79,7 @@ impl<'a> ViewAdapter<'a> {
                 let content = node
                     .children
                     .first()
-                    .map(|child| self.build(child))
+                    .map(|child| self.build_embedded_child(child))
                     .unwrap_or_else(|| Box::new(VStack::new()));
 
                 Box::new(
@@ -93,7 +93,15 @@ impl<'a> ViewAdapter<'a> {
                 )
             }
 
-            ViewNodeKind::Spacer | ViewNodeKind::Divider => Box::new(VStack::new()),
+            ViewNodeKind::Frame(properties) => self.build_frame_view(node, properties),
+
+            ViewNodeKind::Spacer | ViewNodeKind::Divider => {
+                /*
+                 * これらは通常のViewではなく、
+                 * StackChildとして構築します。
+                 */
+                Box::new(VStack::new())
+            }
         }
     }
 
@@ -103,7 +111,41 @@ impl<'a> ViewAdapter<'a> {
 
             ViewNodeKind::Divider => Divider::new().into_stack_child(),
 
+            ViewNodeKind::Frame(properties) => self.build_frame_child(node, properties),
+
             _ => StackChild::new(self.build(node)),
+        }
+    }
+
+    fn build_frame_child(&mut self, node: &ViewNode, properties: &FrameNode) -> StackChild {
+        let child = node
+            .children
+            .first()
+            .map(|child| self.build_stack_child(child))
+            .unwrap_or_else(|| StackChild::new(VStack::new()));
+
+        apply_frame(child, properties)
+    }
+
+    fn build_frame_view(&mut self, node: &ViewNode, properties: &FrameNode) -> Box<dyn View> {
+        Box::new(
+            VStack::new()
+                .gap(StackGap::None)
+                .alignment(StackAlignment::Start)
+                .child(self.build_frame_child(node, properties)),
+        )
+    }
+
+    fn build_embedded_child(&mut self, node: &ViewNode) -> Box<dyn View> {
+        match &node.kind {
+            ViewNodeKind::Frame(_) | ViewNodeKind::Spacer | ViewNodeKind::Divider => Box::new(
+                VStack::new()
+                    .gap(StackGap::None)
+                    .alignment(StackAlignment::Start)
+                    .child(self.build_stack_child(node)),
+            ),
+
+            _ => self.build(node),
         }
     }
 
@@ -116,4 +158,16 @@ impl<'a> ViewAdapter<'a> {
 
         Box::new(root)
     }
+}
+
+fn apply_frame(mut child: StackChild, properties: &FrameNode) -> StackChild {
+    if let LayoutLength::Fixed(width) = properties.width {
+        child = child.width(width);
+    }
+
+    if let LayoutLength::Fixed(height) = properties.height {
+        child = child.height(height);
+    }
+
+    child
 }
