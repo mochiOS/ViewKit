@@ -6,11 +6,12 @@ use std::rc::Rc;
 use crate::components::{BorderStyle, Text};
 use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
-use crate::geometry::Rect;
+use crate::geometry::{Rect, Size};
 use crate::layout::{IntoStackChild, StackChild};
 use crate::platform::PointerButton;
 use crate::theme::{Color, CornerRadius, ShadowStyle, Theme};
-use crate::view::{PaintContext, View};
+use crate::typography::TextAlignment;
+use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 use super::{Rectangle, RectangleColor, ZStackAlignment};
 
@@ -327,6 +328,7 @@ enum ButtonVisualState {
 
 pub struct Button {
     interaction: ButtonInteractionState,
+    label: Option<String>,
     content: Option<StackChild>,
     style: ButtonStyle,
     radius: CornerRadius,
@@ -335,11 +337,13 @@ pub struct Button {
     enabled: bool,
     on_click: Option<RefCell<Box<dyn FnMut()>>>,
 }
+
 impl Button {
     pub fn new(label: impl Into<String>) -> Self {
         Self {
             interaction: ButtonInteractionState::new(),
-            content: Some(Text::new(label).into_stack_child()),
+            label: Some(label.into()),
+            content: None,
             style: ButtonStyle::Standard,
             radius: CornerRadius::Medium,
             shadow: ShadowStyle::None,
@@ -353,6 +357,7 @@ impl Button {
     where
         C: IntoStackChild,
     {
+        self.label = None;
         self.content = Some(content.into_stack_child());
 
         self
@@ -393,9 +398,10 @@ impl Button {
         &self.interaction
     }
 
-    pub fn with_interaction(interaction: ButtonInteractionState) -> Self {
+    pub(crate) fn with_interaction(interaction: ButtonInteractionState) -> Self {
         Self {
             interaction,
+            label: None,
             content: None,
             style: ButtonStyle::Standard,
             radius: CornerRadius::Medium,
@@ -410,6 +416,36 @@ impl Button {
     pub fn on_click(mut self, callback: impl FnMut() + 'static) -> Self {
         self.on_click = Some(RefCell::new(Box::new(callback)));
         self
+    }
+
+    fn label_text_alignment(&self) -> TextAlignment {
+        match self.alignment {
+            ZStackAlignment::TopLeading
+            | ZStackAlignment::Leading
+            | ZStackAlignment::BottomLeading => TextAlignment::Start,
+
+            ZStackAlignment::Top | ZStackAlignment::Center | ZStackAlignment::Bottom => {
+                TextAlignment::Center
+            }
+
+            ZStackAlignment::TopTrailing
+            | ZStackAlignment::Trailing
+            | ZStackAlignment::BottomTrailing => TextAlignment::End,
+        }
+    }
+
+    fn label_vertical_factor(&self) -> f32 {
+        match self.alignment {
+            ZStackAlignment::TopLeading | ZStackAlignment::Top | ZStackAlignment::TopTrailing => {
+                0.0
+            }
+
+            ZStackAlignment::Leading | ZStackAlignment::Center | ZStackAlignment::Trailing => 0.5,
+
+            ZStackAlignment::BottomLeading
+            | ZStackAlignment::Bottom
+            | ZStackAlignment::BottomTrailing => 1.0,
+        }
     }
 }
 
@@ -442,6 +478,33 @@ impl View for Button {
             .border(BorderStyle::custom(appearance.border, 1.0))
             .paint(bounds, context);
 
+        if let Some(label) = self.label.as_ref() {
+            const HORIZONTAL_PADDING: f32 = 12.0;
+            const LINE_HEIGHT: f32 = 20.0;
+
+            let text_height = LINE_HEIGHT.min(bounds.size.height);
+
+            let text_y =
+                bounds.origin.y + (bounds.size.height - text_height) * self.label_vertical_factor();
+
+            let text_bounds = Rect::new(
+                bounds.origin.x + HORIZONTAL_PADDING,
+                text_y,
+                (bounds.size.width - HORIZONTAL_PADDING * 2.0).max(0.0),
+                text_height,
+            );
+
+            Text::new(label.as_str())
+                .font_size(13.0)
+                .line_height(LINE_HEIGHT)
+                .weight(600)
+                .alignment(self.label_text_alignment())
+                .color(appearance.foreground)
+                .paint(text_bounds, context);
+
+            return;
+        }
+
         let Some(content) = self.content.as_ref() else {
             return;
         };
@@ -457,6 +520,36 @@ impl View for Button {
         content.paint(content_bounds, context);
 
         context.display_list.push(DrawCommand::PopClip);
+    }
+
+    fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
+        if let Some(label) = self.label.as_ref() {
+            const HORIZONTAL_PADDING: f32 = 14.0;
+            const VERTICAL_PADDING: f32 = 6.0;
+            const MINIMUM_HEIGHT: f32 = 32.0;
+
+            let maximum = Size::new(
+                (constraints.maximum.width - HORIZONTAL_PADDING * 2.0).max(0.0),
+                (constraints.maximum.height - VERTICAL_PADDING * 2.0).max(0.0),
+            );
+
+            let label_size = Text::new(label.as_str())
+                .font_size(13.0)
+                .line_height(20.0)
+                .weight(600)
+                .measure(Constraints::loose(maximum), context);
+
+            return constraints.constrain(Size::new(
+                label_size.width + HORIZONTAL_PADDING * 2.0,
+                (label_size.height + VERTICAL_PADDING * 2.0).max(MINIMUM_HEIGHT),
+            ));
+        }
+
+        if let Some(content) = self.content.as_ref() {
+            return content.measure(constraints, context);
+        }
+
+        constraints.constrain(Size::new(0.0, 0.0))
     }
 
     fn handle_event(

@@ -90,6 +90,7 @@ impl FileManagerExample {
             } else {
                 ButtonStyle::Ghost
             })
+            .alignment(ZStackAlignment::Leading)
             .on_click(move || {
                 active_location.set(index);
                 selected_file.set(0);
