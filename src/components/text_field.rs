@@ -5,6 +5,7 @@ use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
 use crate::platform::PointerButton;
+use crate::state::Binding;
 use crate::theme::{Color, CornerRadius, ShadowStyle};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 use std::cell::RefCell;
@@ -479,6 +480,7 @@ struct TextFieldAppearance {
 
 pub struct TextField {
     interaction: TextFieldInteractionState,
+    binding: Option<Binding<String>>,
 
     placeholder: String,
 
@@ -490,9 +492,30 @@ pub struct TextField {
 }
 
 impl TextField {
-    pub fn new(interaction: TextFieldInteractionState) -> Self {
+    #[must_use]
+    pub fn new(binding: Binding<String>) -> Self {
+        let interaction = TextFieldInteractionState::new();
+
+        interaction.initialize_value(binding.get());
+
         Self {
             interaction,
+            binding: Some(binding),
+
+            placeholder: String::new(),
+            size: TextFieldSize::Medium,
+            radius: CornerRadius::Medium,
+
+            enabled: true,
+            invalid: false,
+        }
+    }
+
+    #[must_use]
+    pub fn with_interaction(interaction: TextFieldInteractionState) -> Self {
+        Self {
+            interaction,
+            binding: None,
 
             placeholder: String::new(),
             size: TextFieldSize::Medium,
@@ -579,6 +602,14 @@ impl TextField {
             border,
             foreground,
         }
+    }
+
+    fn synchronize_binding(&self) {
+        let Some(binding) = self.binding.as_ref() else {
+            return;
+        };
+
+        binding.set_without_notification(self.interaction.value());
     }
 
     fn cursor_at_x(&self, pointer_x: f32, bounds: Rect, context: &mut EventContext<'_>) -> usize {
@@ -1022,9 +1053,11 @@ impl View for TextField {
                     return EventResult::Ignored;
                 }
 
-                self.interaction.insert_text(text);
-                self.interaction.reset_caret_blink();
-                context.request_redraw();
+                if self.interaction.insert_text(text) {
+                    self.synchronize_binding();
+                    self.interaction.reset_caret_blink();
+                    context.request_redraw();
+                }
 
                 EventResult::Consumed
             }
@@ -1034,9 +1067,11 @@ impl View for TextField {
                     return EventResult::Ignored;
                 }
 
-                self.interaction.delete_backward();
-                self.interaction.reset_caret_blink();
-                context.request_redraw();
+                if self.interaction.delete_backward() {
+                    self.synchronize_binding();
+                    self.interaction.reset_caret_blink();
+                    context.request_redraw();
+                }
 
                 EventResult::Consumed
             }
@@ -1046,9 +1081,11 @@ impl View for TextField {
                     return EventResult::Ignored;
                 }
 
-                self.interaction.delete_forward();
-                self.interaction.reset_caret_blink();
-                context.request_redraw();
+                if self.interaction.delete_forward() {
+                    self.synchronize_binding();
+                    self.interaction.reset_caret_blink();
+                    context.request_redraw();
+                }
 
                 EventResult::Consumed
             }

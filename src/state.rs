@@ -102,6 +102,13 @@ impl<T> Binding<T> {
 
         result
     }
+
+    /// 状態変更通知を発生させずに値を置き換えます。
+    ///
+    /// View内部の操作状態を維持したままBindingへ値を同期するために使用します。
+    pub(crate) fn set_without_notification(&self, value: T) {
+        *self.value.borrow_mut() = value;
+    }
 }
 
 impl<T> Clone for Binding<T> {
