@@ -135,14 +135,38 @@ impl EventResult {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum RedrawRequest {
+    #[default]
+    None,
+
+    Full,
+
+    Region(Rect),
+}
+
+impl RedrawRequest {
+    pub fn merge(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Full, _) | (_, Self::Full) => Self::Full,
+
+            (Self::None, request) | (request, Self::None) => request,
+
+            (Self::Region(first), Self::Region(second)) => Self::Region(first.union(second)),
+        }
+    }
+
+    pub fn is_requested(self) -> bool {
+        !matches!(self, Self::None)
+    }
+}
+
 pub struct EventContext<'a> {
     pub(crate) theme: &'a Theme,
-
     pub(crate) typography: &'a Typography,
-
     pub(crate) text_measurer: &'a mut TextMeasurer,
 
-    redraw_requested: bool,
+    redraw_request: RedrawRequest,
 }
 
 impl<'a> EventContext<'a> {
@@ -155,7 +179,7 @@ impl<'a> EventContext<'a> {
             theme,
             typography,
             text_measurer,
-            redraw_requested: false,
+            redraw_request: RedrawRequest::None,
         }
     }
 
@@ -168,11 +192,19 @@ impl<'a> EventContext<'a> {
     }
 
     pub fn request_redraw(&mut self) {
-        self.redraw_requested = true;
+        self.redraw_request = RedrawRequest::Full;
     }
 
-    pub fn redraw_requested(&self) -> bool {
-        self.redraw_requested
+    pub fn request_redraw_in(&mut self, bounds: Rect) {
+        if bounds.is_empty() {
+            return;
+        }
+
+        self.redraw_request = self.redraw_request.merge(RedrawRequest::Region(bounds));
+    }
+
+    pub fn redraw_request(&self) -> RedrawRequest {
+        self.redraw_request
     }
 }
 

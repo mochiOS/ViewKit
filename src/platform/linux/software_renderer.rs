@@ -100,6 +100,7 @@ pub struct SoftwareRenderer {
     font_system: FontSystem,
     swash_cache: SwashCache,
     text_layout_cache: HashMap<TextLayoutKey, Buffer>,
+    present_pixels: Vec<u32>,
 }
 
 impl SoftwareRenderer {
@@ -117,6 +118,7 @@ impl SoftwareRenderer {
             font_system: FontSystem::new(),
             swash_cache: SwashCache::new(),
             text_layout_cache: HashMap::new(),
+            present_pixels: Vec::new(),
         };
 
         renderer.resize_surface(viewport)?;
@@ -153,6 +155,9 @@ impl SoftwareRenderer {
             )?,
         );
 
+        self.present_pixels =
+            vec![0; viewport.physical_width as usize * viewport.physical_height as usize];
+
         Ok(())
     }
 }
@@ -164,7 +169,11 @@ impl Renderer for SoftwareRenderer {
         self.resize_surface(viewport)
     }
 
-    fn render(&mut self, display_list: &DisplayList) -> Result<(), Self::Error> {
+    fn render(
+        &mut self,
+        display_list: &DisplayList,
+        dirty_bounds: Rect,
+    ) -> Result<(), Self::Error> {
         let Some(pixmap) = self.pixmap.as_mut() else {
             return Ok(());
         };
@@ -173,21 +182,41 @@ impl Renderer for SoftwareRenderer {
 
         let scale = valid_scale_factor(self.viewport.scale_factor);
 
+        let viewport_bounds = self.viewport.logical_bounds();
+
+        let Some(dirty_bounds) = dirty_bounds.intersection(viewport_bounds) else {
+            return Ok(());
+        };
+
         let transform = Transform::from_scale(scale, scale);
 
-        let mut clip_stack: Vec<Mask> = Vec::new();
+        let dirty_mask = create_clip_mask(
+            dirty_bounds,
+            None,
+            self.viewport.physical_width,
+            self.viewport.physical_height,
+            transform,
+        )?;
+
+        let mut clip_stack = vec![dirty_mask];
 
         for command in display_list.commands() {
             match command {
                 DrawCommand::Clear { color } => {
-                    /*
-                     * Clearはクリップの影響を受けず、
-                     * 描画先全体を初期化します。
-                     */
-                    pixmap.fill(to_skia_color(*color));
+                    let Some(rect) = to_skia_rect(dirty_bounds) else {
+                        continue;
+                    };
+
+                    let paint = solid_paint(*color);
+
+                    pixmap.fill_rect(rect, &paint, transform, None);
                 }
 
                 DrawCommand::FillRect { rect, color } => {
+                    if rect.intersection(dirty_bounds).is_none() {
+                        continue;
+                    }
+
                     let Some(rect) = to_skia_rect(*rect) else {
                         continue;
                     };
@@ -202,6 +231,10 @@ impl Renderer for SoftwareRenderer {
                     radius,
                     color,
                 } => {
+                    if rect.intersection(dirty_bounds).is_none() {
+                        continue;
+                    }
+
                     let Some(rect) = to_skia_rect(*rect) else {
                         continue;
                     };
@@ -220,6 +253,14 @@ impl Renderer for SoftwareRenderer {
                 }
 
                 DrawCommand::StrokeRect { rect, color, width } => {
+                    if rect
+                        .expanded(*width * 0.5 + 1.0)
+                        .intersection(dirty_bounds)
+                        .is_none()
+                    {
+                        continue;
+                    }
+
                     if !width.is_finite() || *width <= 0.0 {
                         continue;
                     }
@@ -247,6 +288,14 @@ impl Renderer for SoftwareRenderer {
                     color,
                     width,
                 } => {
+                    if rect
+                        .expanded(*width * 0.5 + 1.0)
+                        .intersection(dirty_bounds)
+                        .is_none()
+                    {
+                        continue;
+                    }
+
                     if !width.is_finite() || *width <= 0.0 {
                         continue;
                     }
@@ -281,12 +330,18 @@ impl Renderer for SoftwareRenderer {
                 }
 
                 DrawCommand::PopClip => {
-                    if clip_stack.pop().is_none() {
+                    if clip_stack.len() <= 1 {
                         return Err(SoftwareRendererError::ClipStackUnderflow);
                     }
+
+                    clip_stack.pop();
                 }
 
                 DrawCommand::DrawText { command } => {
+                    if command.bounds.intersection(dirty_bounds).is_none() {
+                        continue;
+                    }
+
                     draw_text_command(
                         pixmap,
                         &mut self.font_system,
@@ -300,13 +355,19 @@ impl Renderer for SoftwareRenderer {
             }
         }
 
-        if !clip_stack.is_empty() {
+        if clip_stack.len() != 1 {
             return Err(SoftwareRendererError::UnclosedClipStack {
-                depth: clip_stack.len(),
+                depth: clip_stack.len() - 1,
             });
         }
 
-        copy_pixmap_to_surface(pixmap, &mut self.surface)?;
+        copy_pixmap_to_surface(
+            pixmap,
+            &mut self.present_pixels,
+            &mut self.surface,
+            dirty_bounds,
+            scale,
+        )?;
 
         Ok(())
     }
@@ -361,20 +422,49 @@ fn create_clip_mask(
 
 fn copy_pixmap_to_surface(
     pixmap: &Pixmap,
+    present_pixels: &mut Vec<u32>,
     surface: &mut Surface<OwnedDisplayHandle, Rc<Window>>,
+    dirty_bounds: Rect,
+    scale: f32,
 ) -> Result<(), SoftBufferError> {
-    let mut buffer = surface.buffer_mut()?;
+    let physical_width = pixmap.width() as usize;
+    let physical_height = pixmap.height() as usize;
 
-    for (destination, rgba) in buffer.iter_mut().zip(pixmap.data().chunks_exact(4)) {
-        let red = u32::from(rgba[0]);
+    let left = (dirty_bounds.origin.x * scale).floor().max(0.0) as usize;
 
-        let green = u32::from(rgba[1]);
+    let top = (dirty_bounds.origin.y * scale).floor().max(0.0) as usize;
 
-        let blue = u32::from(rgba[2]);
+    let right = ((dirty_bounds.origin.x + dirty_bounds.size.width) * scale)
+        .ceil()
+        .max(0.0) as usize;
 
-        *destination = (red << 16) | (green << 8) | blue;
+    let bottom = ((dirty_bounds.origin.y + dirty_bounds.size.height) * scale)
+        .ceil()
+        .max(0.0) as usize;
+
+    let right = right.min(physical_width);
+    let bottom = bottom.min(physical_height);
+
+    let source = pixmap.data();
+
+    for y in top..bottom {
+        let row_start = y * physical_width;
+
+        for x in left..right {
+            let pixel_index = row_start + x;
+            let source_index = pixel_index * 4;
+
+            let red = u32::from(source[source_index]);
+            let green = u32::from(source[source_index + 1]);
+            let blue = u32::from(source[source_index + 2]);
+
+            present_pixels[pixel_index] = (red << 16) | (green << 8) | blue;
+        }
     }
 
+    let mut buffer = surface.buffer_mut()?;
+
+    buffer.copy_from_slice(present_pixels);
     buffer.present()?;
 
     Ok(())

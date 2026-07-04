@@ -534,7 +534,7 @@ impl View for Button {
         let enabled_changed = self.interaction.set_enabled(self.enabled);
 
         if enabled_changed {
-            context.request_redraw();
+            context.request_redraw_in(bounds.expanded(16.0));
         }
 
         if !self.enabled {
@@ -560,7 +560,7 @@ impl View for Button {
                 drop(inner);
 
                 if changed {
-                    context.request_redraw();
+                    context.request_redraw_in(bounds.expanded(16.0));
                 }
 
                 if armed {
@@ -586,7 +586,7 @@ impl View for Button {
 
                 drop(inner);
 
-                context.request_redraw();
+                context.request_redraw_in(bounds.expanded(16.0));
 
                 EventResult::Consumed
             }
@@ -622,7 +622,7 @@ impl View for Button {
                 }
 
                 if changed {
-                    context.request_redraw();
+                    context.request_redraw_in(bounds.expanded(16.0));
                 }
 
                 if was_armed {
@@ -644,7 +644,7 @@ impl View for Button {
                 drop(inner);
 
                 if changed {
-                    context.request_redraw();
+                    context.request_redraw_in(bounds.expanded(16.0));
                 }
 
                 EventResult::Ignored
@@ -661,7 +661,7 @@ impl View for Button {
                 drop(inner);
 
                 if changed {
-                    context.request_redraw();
+                    context.request_redraw_in(bounds.expanded(16.0));
                 }
 
                 EventResult::Ignored

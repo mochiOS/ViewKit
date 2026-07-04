@@ -36,5 +36,6 @@ pub trait Renderer {
 
     fn resize(&mut self, viewport: Viewport) -> Result<(), Self::Error>;
 
-    fn render(&mut self, display_list: &DisplayList) -> Result<(), Self::Error>;
+    fn render(&mut self, display_list: &DisplayList, dirty_bounds: Rect)
+    -> Result<(), Self::Error>;
 }

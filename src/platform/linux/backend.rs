@@ -154,7 +154,7 @@ where
 
         let mut display_list = DisplayList::new();
 
-        self.application.draw(viewport, &mut display_list);
+        let dirty_bounds = self.application.draw(viewport, &mut display_list);
 
         window.pre_present_notify();
 
@@ -162,7 +162,7 @@ where
             return;
         };
 
-        if let Err(error) = renderer.render(&display_list) {
+        if let Err(error) = renderer.render(&display_list, dirty_bounds) {
             self.runtime_error = Some(LinuxBackendError::Renderer(error));
 
             event_loop.exit();

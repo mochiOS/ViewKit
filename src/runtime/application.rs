@@ -4,7 +4,8 @@ use std::time::Instant;
 
 use crate::app::{App, ViewContext};
 use crate::draw_command::{DisplayList, DrawCommand};
-use crate::event::{EventContext, EventDispatcher};
+use crate::event::{EventContext, EventDispatcher, RedrawRequest};
+use crate::geometry::Rect;
 use crate::platform::{PlatformApplication, PlatformEvent, PlatformWindow, WindowConfig};
 use crate::renderer::Viewport;
 use crate::state::take_state_changed;
@@ -27,6 +28,7 @@ where
 
     event_dispatcher: EventDispatcher,
     redraw_schedule: RedrawSchedule,
+    pending_redraw: RedrawRequest,
 }
 
 impl<A> ApplicationRuntime<A>
@@ -45,6 +47,7 @@ where
 
             event_dispatcher: EventDispatcher::new(),
             redraw_schedule: RedrawSchedule::new(),
+            pending_redraw: RedrawRequest::None,
         }
     }
 
@@ -53,6 +56,7 @@ where
 
         self.root = Some(self.app.body(&context));
         self.viewport = Some(viewport);
+        self.pending_redraw = RedrawRequest::Full;
 
         let _ = take_state_changed();
     }
@@ -90,7 +94,7 @@ where
 
         self.ensure_root(viewport);
 
-        let redraw_requested = {
+        let redraw_request = {
             let root = self
                 .root
                 .as_ref()
@@ -102,22 +106,34 @@ where
             self.event_dispatcher
                 .dispatch(root, viewport.logical_bounds(), &event, &mut context);
 
-            context.redraw_requested()
+            context.redraw_request()
         };
 
         let state_changed = take_state_changed();
 
         if state_changed {
             self.rebuild_root(viewport);
+        } else {
+            self.pending_redraw = self.pending_redraw.merge(redraw_request);
         }
 
-        if redraw_requested || state_changed {
+        if state_changed || redraw_request.is_requested() {
             window.request_redraw();
         }
     }
 
-    fn draw(&mut self, viewport: Viewport, display_list: &mut DisplayList) {
+    fn draw(&mut self, viewport: Viewport, display_list: &mut DisplayList) -> Rect {
         self.ensure_root(viewport);
+
+        let viewport_bounds = viewport.logical_bounds();
+
+        let dirty_bounds = match std::mem::take(&mut self.pending_redraw) {
+            RedrawRequest::Region(bounds) => bounds
+                .intersection(viewport_bounds)
+                .unwrap_or(viewport_bounds),
+
+            RedrawRequest::None | RedrawRequest::Full => viewport_bounds,
+        };
 
         display_list.push(DrawCommand::Clear {
             color: self.theme.colors.background,
@@ -138,7 +154,9 @@ where
             .as_ref()
             .expect("root view must exist after ensure_root");
 
-        root.paint(viewport.logical_bounds(), &mut context);
+        root.paint(viewport_bounds, &mut context);
+
+        dirty_bounds
     }
 
     fn next_redraw_at(&self) -> Option<Instant> {
