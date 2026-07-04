@@ -67,6 +67,7 @@ pub enum StackAlignment {
     Stretch,
 }
 
+#[allow(unused)]
 impl StackAlignment {
     fn to_ui_alignment(self) -> AlignItems {
         match self {
@@ -89,6 +90,7 @@ pub enum StackDistribution {
     SpaceEvenly,
 }
 
+#[allow(unused)]
 impl StackDistribution {
     fn to_ui_justification(self) -> JustifyContent {
         match self {
@@ -363,6 +365,7 @@ impl StackChild {
         self.view.paint(bounds, context);
     }
 
+    #[allow(unused)]
     fn layout_node(
         &self,
         direction: StackDirection,
@@ -475,6 +478,7 @@ pub(crate) enum StackDirection {
     Horizontal,
 }
 
+#[allow(unused)]
 impl StackDirection {
     fn to_ui_flex_direction(self) -> FlexDirection {
         match self {
@@ -997,6 +1001,7 @@ fn sanitize_length(value: f32) -> f32 {
     }
 }
 
+#[allow(unused)]
 fn measured_ui_length(length: LayoutLength, measured: f32) -> Length {
     match length {
         LayoutLength::Fixed(value) => Length::Px(sanitize_length(value)),

@@ -12,6 +12,7 @@ pub struct ViewNodeContext {
     next_node_id: u64,
 }
 
+#[allow(unused)]
 impl ViewNodeContext {
     /// 指定されたコンポーネントインスタンス用の
     /// Viewツリー構築コンテキストを作成します。

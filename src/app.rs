@@ -104,6 +104,7 @@ pub struct AppContext {
     exit_requested: bool,
 }
 
+#[allow(unused)]
 impl AppContext {
     pub(crate) const fn new() -> Self {
         Self {
@@ -186,6 +187,7 @@ impl ViewContext {
     /// 現在のViewportを返します。
     ///
     /// ViewKit内部のレイアウト処理およびイベント配送で使用されます。
+    #[allow(unused)]
     pub(crate) const fn viewport(&self) -> Viewport {
         self.viewport
     }

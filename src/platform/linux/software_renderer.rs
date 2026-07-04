@@ -480,10 +480,6 @@ fn solid_paint(color: Color) -> Paint<'static> {
     paint
 }
 
-fn to_skia_color(color: Color) -> SkiaColor {
-    SkiaColor::from_rgba8(color.red, color.green, color.blue, color.alpha)
-}
-
 fn to_skia_rect(rect: Rect) -> Option<SkiaRect> {
     let x = rect.origin.x;
 
