@@ -14,3 +14,5 @@ pub mod state;
 pub mod theme;
 pub mod typography;
 pub mod view;
+
+pub use runtime::{ViewKitError, run};
