@@ -587,13 +587,9 @@ fn draw_text_command(
 
     let height = (command.bounds.size.height * scale).max(0.0);
 
-    /*
-     * 小さい文字が半端な物理ピクセル位置へ
-     * 配置されるのを避けます。
-     */
-    let origin_x = (command.bounds.origin.x * scale).round();
+    let origin_x = command.bounds.origin.x * scale;
 
-    let origin_y = (command.bounds.origin.y * scale).round();
+    let origin_y = command.bounds.origin.y * scale;
 
     let key = TextLayoutKey::new(command, scale);
 
@@ -639,40 +635,54 @@ fn draw_text_command(
         command.color.alpha,
     );
 
-    let text_clip = SkiaRect::from_xywh(origin_x, origin_y, width, height);
+    let Some(text_clip) = SkiaRect::from_xywh(origin_x, origin_y, width, height) else {
+        return;
+    };
 
-    buffer.draw(swash_cache, text_color, |x, y, width, height, color| {
-        let draw_x = origin_x + x as f32;
+    let mut physical_glyphs = Vec::new();
 
-        let draw_y = origin_y + y as f32;
-
-        let Some(glyph_rect) = SkiaRect::from_xywh(draw_x, draw_y, width as f32, height as f32)
-        else {
-            return;
-        };
-
-        let Some(text_clip) = text_clip else {
-            return;
-        };
-
-        let Some(rect) = intersect_rect(glyph_rect, text_clip) else {
-            return;
-        };
-
-        let (red, green, blue, alpha) = color.as_rgba_tuple();
-
-        if alpha == 0 {
-            return;
+    for run in buffer.layout_runs() {
+        for glyph in run.glyphs {
+            physical_glyphs.push(glyph.physical((origin_x, origin_y + run.line_y), 1.0));
         }
+    }
 
-        let mut paint = Paint::default();
+    drop(buffer);
 
-        paint.set_color_rgba8(red, green, blue, alpha);
+    for physical_glyph in physical_glyphs {
+        swash_cache.with_pixels(
+            font_system,
+            physical_glyph.cache_key,
+            text_color,
+            |x, y, color| {
+                let draw_x = physical_glyph.x + x;
 
-        paint.anti_alias = false;
+                let draw_y = physical_glyph.y + y;
 
-        pixmap.fill_rect(rect, &paint, Transform::identity(), clip);
-    });
+                let Some(pixel_rect) = SkiaRect::from_xywh(draw_x as f32, draw_y as f32, 1.0, 1.0)
+                else {
+                    return;
+                };
+
+                let Some(rect) = intersect_rect(pixel_rect, text_clip) else {
+                    return;
+                };
+
+                let (red, green, blue, alpha) = color.as_rgba_tuple();
+
+                if alpha == 0 {
+                    return;
+                }
+
+                let mut paint = Paint::default();
+
+                paint.set_color_rgba8(red, green, blue, alpha);
+                paint.anti_alias = false;
+
+                pixmap.fill_rect(rect, &paint, Transform::identity(), clip);
+            },
+        );
+    }
 }
 
 fn intersect_rect(first: SkiaRect, second: SkiaRect) -> Option<SkiaRect> {
