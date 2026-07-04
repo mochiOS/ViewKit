@@ -522,36 +522,6 @@ impl View for Button {
         context.display_list.push(DrawCommand::PopClip);
     }
 
-    fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
-        if let Some(label) = self.label.as_ref() {
-            const HORIZONTAL_PADDING: f32 = 14.0;
-            const VERTICAL_PADDING: f32 = 6.0;
-            const MINIMUM_HEIGHT: f32 = 32.0;
-
-            let maximum = Size::new(
-                (constraints.maximum.width - HORIZONTAL_PADDING * 2.0).max(0.0),
-                (constraints.maximum.height - VERTICAL_PADDING * 2.0).max(0.0),
-            );
-
-            let label_size = Text::new(label.as_str())
-                .font_size(13.0)
-                .line_height(20.0)
-                .weight(600)
-                .measure(Constraints::loose(maximum), context);
-
-            return constraints.constrain(Size::new(
-                label_size.width + HORIZONTAL_PADDING * 2.0,
-                (label_size.height + VERTICAL_PADDING * 2.0).max(MINIMUM_HEIGHT),
-            ));
-        }
-
-        if let Some(content) = self.content.as_ref() {
-            return content.measure(constraints, context);
-        }
-
-        constraints.constrain(Size::new(0.0, 0.0))
-    }
-
     fn handle_event(
         &self,
         bounds: Rect,
@@ -696,5 +666,57 @@ impl View for Button {
 
             _ => EventResult::Ignored,
         }
+    }
+
+    fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
+        const HORIZONTAL_PADDING: f32 = 14.0;
+        const INTRINSIC_HEIGHT: f32 = 32.0;
+
+        let width_is_fixed = constraints.minimum.width.is_finite()
+            && constraints.maximum.width.is_finite()
+            && (constraints.maximum.width - constraints.minimum.width).abs() <= 0.001;
+
+        let height_is_fixed = constraints.minimum.height.is_finite()
+            && constraints.maximum.height.is_finite()
+            && (constraints.maximum.height - constraints.minimum.height).abs() <= 0.001;
+
+        if width_is_fixed && height_is_fixed {
+            return constraints.minimum;
+        }
+
+        if let Some(content) = self.content.as_ref() {
+            return content.measure(constraints, context);
+        }
+
+        let width = if width_is_fixed {
+            constraints.minimum.width
+        } else if let Some(label) = self.label.as_ref() {
+            let maximum_text_width = if constraints.maximum.width.is_finite() {
+                (constraints.maximum.width - HORIZONTAL_PADDING * 2.0).max(0.0)
+            } else {
+                f32::INFINITY
+            };
+
+            let measured = Text::new(label.as_str())
+                .font_size(13.0)
+                .line_height(20.0)
+                .weight(600)
+                .measure(
+                    Constraints::loose(Size::new(maximum_text_width, f32::INFINITY)),
+                    context,
+                );
+
+            measured.width + HORIZONTAL_PADDING * 2.0
+        } else {
+            0.0
+        };
+
+        let height = if height_is_fixed {
+            constraints.minimum.height
+        } else {
+            INTRINSIC_HEIGHT
+        };
+
+        constraints.constrain(Size::new(width, height))
     }
 }
