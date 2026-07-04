@@ -1,19 +1,26 @@
 //! KomeからViewKit Runtimeを操作するためのC関数
 
-use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::ptr;
-use std::slice;
-use std::str;
-
 use crate::components::{BorderStyle, ButtonColor, RectangleColor, ZStackAlignment};
+use crate::draw_command::{DisplayList, DrawCommand};
+use crate::event::{EventContext, EventDispatcher};
+use crate::geometry::{Rect, Size};
 use crate::layout::{LayoutLength, StackAlignment, StackDistribution, StackGap};
+use crate::platform::linux::LinuxBackend;
+use crate::platform::{PlatformApplication, PlatformEvent, PlatformWindow, WindowConfig};
+use crate::renderer::Viewport;
 use crate::runtime::{
     ActionId, ButtonNode, ComponentInstanceId, FrameNode, HStackNode, NodeId, PaddingNode,
     RectangleNode, RuntimeEvent, TextNode, VStackNode, ViewNode, ViewNodeKind, ViewRuntime,
     ViewTreeBuilder, ZStackNode,
 };
-use crate::theme::{Color, CornerRadius};
-use crate::typography::TextAlignment;
+use crate::theme::{Color, CornerRadius, Theme};
+use crate::typography::{TextAlignment, TextMeasurer, Typography};
+use crate::view::{PaintContext, RedrawSchedule, View};
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::ptr;
+use std::slice;
+use std::str;
+use std::time::Instant;
 
 pub const VK_Z_ALIGNMENT_TOP_LEADING: u32 = 0;
 pub const VK_Z_ALIGNMENT_TOP: u32 = 1;
@@ -59,6 +66,9 @@ pub enum VkStatus {
 
     InvalidEnumValue = 9,
     UnsupportedEvent = 10,
+
+    PlatformError = 11,
+    UnsupportedPlatform = 12,
 
     Panic = 255,
 }
@@ -273,6 +283,120 @@ impl VkRuntime {
     }
 }
 
+struct VkWindowApplication<'a> {
+    runtime: &'a mut VkRuntime,
+
+    root: Option<Box<dyn View>>,
+
+    theme: Theme,
+    typography: Typography,
+    text_measurer: TextMeasurer,
+
+    event_dispatcher: EventDispatcher,
+    redraw_schedule: RedrawSchedule,
+}
+
+impl<'a> VkWindowApplication<'a> {
+    fn new(runtime: &'a mut VkRuntime) -> Self {
+        Self {
+            runtime,
+
+            root: None,
+
+            theme: Theme::DEFAULT,
+            typography: Typography::DEFAULT,
+            text_measurer: TextMeasurer::new(),
+
+            event_dispatcher: EventDispatcher::new(),
+            redraw_schedule: RedrawSchedule::new(),
+        }
+    }
+
+    fn rebuild_root(&mut self) {
+        self.root = self.runtime.runtime_mut().build_view();
+    }
+
+    fn ensure_root(&mut self) {
+        if self.root.is_none() {
+            self.rebuild_root();
+        }
+    }
+}
+
+impl PlatformApplication for VkWindowApplication<'_> {
+    fn handle_event(&mut self, event: PlatformEvent, window: &dyn PlatformWindow) {
+        match &event {
+            PlatformEvent::Resumed { .. }
+            | PlatformEvent::Resized { .. }
+            | PlatformEvent::ScaleFactorChanged { .. } => {
+                self.rebuild_root();
+                window.request_redraw();
+                return;
+            }
+
+            PlatformEvent::RedrawRequested | PlatformEvent::CloseRequested => {
+                return;
+            }
+
+            _ => {}
+        }
+
+        self.ensure_root();
+
+        let Some(root) = self.root.as_ref() else {
+            return;
+        };
+
+        let bounds = window.viewport().logical_bounds();
+
+        let redraw_request = {
+            let mut context =
+                EventContext::new(&self.theme, &self.typography, &mut self.text_measurer);
+
+            self.event_dispatcher
+                .dispatch(root.as_ref(), bounds, &event, &mut context);
+
+            context.redraw_request()
+        };
+
+        self.runtime.runtime_mut().collect_actions();
+
+        if redraw_request.is_requested() {
+            window.request_redraw();
+        }
+    }
+
+    fn draw(&mut self, viewport: Viewport, display_list: &mut DisplayList) -> Rect {
+        self.ensure_root();
+
+        let bounds = viewport.logical_bounds();
+
+        display_list.push(DrawCommand::Clear {
+            color: self.theme.colors.background,
+        });
+
+        self.redraw_schedule.clear();
+
+        if let Some(root) = self.root.as_ref() {
+            let mut context = PaintContext::new(
+                display_list,
+                &self.theme,
+                &self.typography,
+                &mut self.text_measurer,
+            )
+            .with_redraw_schedule(&mut self.redraw_schedule);
+
+            root.paint(bounds, &mut context);
+        }
+
+        bounds
+    }
+
+    fn next_redraw_at(&self) -> Option<Instant> {
+        self.redraw_schedule.deadline()
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn vk_runtime_create(component_instance_id: u64) -> *mut VkRuntime {
     catch_unwind(AssertUnwindSafe(|| {
@@ -316,6 +440,10 @@ fn status_name(status: i32) -> &'static str {
         value if value == VkStatus::UnsupportedEvent as i32 => "unsupported_event",
 
         value if value == VkStatus::Panic as i32 => "panic",
+
+        value if value == VkStatus::PlatformError as i32 => "platform_error",
+
+        value if value == VkStatus::UnsupportedPlatform as i32 => "unsupported_platform",
 
         _ => "unknown_status",
     }
@@ -994,4 +1122,58 @@ fn decode_border_style(kind: u32, color: VkColor, width: f32) -> Result<BorderSt
 
 fn decode_color(color: VkColor) -> Color {
     Color::rgba(color.red, color.green, color.blue, color.alpha)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vk_runtime_run_window(
+    runtime: *mut VkRuntime,
+    title: VkString,
+    width: f32,
+    height: f32,
+    resizable: u8,
+) -> i32 {
+    ffi_status(|| {
+        let title = copy_string(title)?;
+
+        let width = finite_or_default(width, 800.0).max(1.0);
+        let height = finite_or_default(height, 600.0).max(1.0);
+
+        let runtime = runtime_mut(runtime)?;
+
+        if runtime.builder.is_some() {
+            return Err(VkStatus::BuilderAlreadyActive);
+        }
+
+        if runtime.runtime_mut().tree().is_none() {
+            return Err(VkStatus::MissingRoot);
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            let application = VkWindowApplication::new(runtime);
+
+            let backend = LinuxBackend::new(
+                application,
+                WindowConfig {
+                    title,
+                    size: Size::new(width, height),
+                    resizable: resizable != 0,
+                },
+            );
+
+            backend.run().map_err(|_| VkStatus::PlatformError)?;
+
+            Ok(())
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = title;
+            let _ = width;
+            let _ = height;
+            let _ = resizable;
+
+            Err(VkStatus::UnsupportedPlatform)
+        }
+    })
 }

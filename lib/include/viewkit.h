@@ -26,6 +26,8 @@ typedef enum VkStatus {
     VK_STATUS_MISSING_ROOT = 8,
     VK_STATUS_INVALID_ENUM_VALUE = 9,
     VK_STATUS_UNSUPPORTED_EVENT = 10,
+    VK_STATUS_PLATFORM_ERROR = 11,
+    VK_STATUS_UNSUPPORTED_PLATFORM = 12,
     VK_STATUS_PANIC = 255
 } VkStatus;
 typedef struct VkRuntime VkRuntime;
@@ -254,6 +256,13 @@ int32_t vk_poll_action(
     VkRuntime *runtime,
     VkActionEvent *output,
     uint8_t *has_action
+);
+int32_t vk_runtime_run_window(
+    VkRuntime *runtime,
+    VkString title,
+    float width,
+    float height,
+    uint8_t resizable
 );
 
 #ifdef __cplusplus
