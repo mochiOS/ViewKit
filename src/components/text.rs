@@ -3,6 +3,7 @@
 use cosmic_text::{Attrs, Buffer, Family, Metrics, Shaping, Weight};
 
 use crate::draw_command::{DrawCommand, TextCommand};
+use crate::font::DEFAULT_UI_FONT_FAMILY;
 use crate::geometry::{Rect, Size};
 use crate::runtime::{IntoViewNode, TextNode, ViewNode, ViewNodeContext, ViewNodeKind};
 use crate::theme::Color;
@@ -27,7 +28,7 @@ impl Text {
         Self {
             value: value.into(),
 
-            font_family: String::from("Noto Sans JP"),
+            font_family: DEFAULT_UI_FONT_FAMILY.to_owned(),
 
             font_size: 16.0,
             line_height: 24.0,

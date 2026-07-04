@@ -1,5 +1,6 @@
 //! 文字スタイルを定義
 
+use crate::font::create_font_system;
 use cosmic_text::{Align, FontSystem};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -39,7 +40,7 @@ impl Default for TextMeasurer {
 impl TextMeasurer {
     pub fn new() -> Self {
         Self {
-            font_system: FontSystem::new(),
+            font_system: create_font_system(),
         }
     }
 

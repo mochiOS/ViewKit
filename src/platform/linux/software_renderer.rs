@@ -13,6 +13,7 @@ use winit::event_loop::OwnedDisplayHandle;
 use winit::window::Window;
 
 use crate::draw_command::{DisplayList, DrawCommand, TextCommand};
+use crate::font::create_font_system;
 use crate::geometry::Rect;
 use crate::renderer::{Renderer, Viewport};
 use crate::theme::Color;
@@ -115,7 +116,7 @@ impl SoftwareRenderer {
             surface,
             viewport,
             pixmap: None,
-            font_system: FontSystem::new(),
+            font_system: create_font_system(),
             swash_cache: SwashCache::new(),
             text_layout_cache: HashMap::new(),
             present_pixels: Vec::new(),
@@ -586,9 +587,13 @@ fn draw_text_command(
 
     let height = (command.bounds.size.height * scale).max(0.0);
 
-    let origin_x = command.bounds.origin.x * scale;
+    /*
+     * 小さい文字が半端な物理ピクセル位置へ
+     * 配置されるのを避けます。
+     */
+    let origin_x = (command.bounds.origin.x * scale).round();
 
-    let origin_y = command.bounds.origin.y * scale;
+    let origin_y = (command.bounds.origin.y * scale).round();
 
     let key = TextLayoutKey::new(command, scale);
 
@@ -634,12 +639,7 @@ fn draw_text_command(
         command.color.alpha,
     );
 
-    let text_clip = SkiaRect::from_xywh(
-        command.bounds.origin.x * scale,
-        command.bounds.origin.y * scale,
-        command.bounds.size.width * scale,
-        command.bounds.size.height * scale,
-    );
+    let text_clip = SkiaRect::from_xywh(origin_x, origin_y, width, height);
 
     buffer.draw(swash_cache, text_color, |x, y, width, height, color| {
         let draw_x = origin_x + x as f32;

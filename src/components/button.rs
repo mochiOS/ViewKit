@@ -458,6 +458,11 @@ impl View for Button {
             return;
         }
 
+        const HORIZONTAL_PADDING: f32 = 12.0;
+        const FONT_SIZE: f32 = 14.0;
+        const LINE_HEIGHT: f32 = 22.0;
+        const FONT_WEIGHT: u16 = 500;
+
         self.interaction.set_enabled(self.enabled);
 
         let visual_state = self.interaction.visual_state();
@@ -482,9 +487,6 @@ impl View for Button {
             .paint(bounds, context);
 
         if let Some(label) = self.label.as_ref() {
-            const HORIZONTAL_PADDING: f32 = 12.0;
-            const LINE_HEIGHT: f32 = 20.0;
-
             let text_height = LINE_HEIGHT.min(bounds.size.height);
 
             let text_y =
@@ -498,9 +500,9 @@ impl View for Button {
             );
 
             Text::new(label.as_str())
-                .font_size(13.0)
+                .font_size(FONT_SIZE)
                 .line_height(LINE_HEIGHT)
-                .weight(600)
+                .weight(FONT_WEIGHT)
                 .alignment(self.label_text_alignment())
                 .color(appearance.foreground)
                 .paint(text_bounds, context);
@@ -672,51 +674,49 @@ impl View for Button {
     }
 
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
-        const HORIZONTAL_PADDING: f32 = 14.0;
+        const HORIZONTAL_PADDING: f32 = 12.0;
         const INTRINSIC_HEIGHT: f32 = 32.0;
-        const EPSILON: f32 = 0.001;
+        const FONT_SIZE: f32 = 14.0;
+        const LINE_HEIGHT: f32 = 22.0;
+        const FONT_WEIGHT: u16 = 500;
 
         let width_is_fixed = constraints.minimum.width.is_finite()
             && constraints.maximum.width.is_finite()
-            && (constraints.maximum.width - constraints.minimum.width).abs() <= EPSILON;
+            && (constraints.maximum.width - constraints.minimum.width).abs() <= 0.001;
 
         let height_is_fixed = constraints.minimum.height.is_finite()
             && constraints.maximum.height.is_finite()
-            && (constraints.maximum.height - constraints.minimum.height).abs() <= EPSILON;
+            && (constraints.maximum.height - constraints.minimum.height).abs() <= 0.001;
 
         if width_is_fixed && height_is_fixed {
             return constraints.minimum;
         }
 
-        let Some(label) = self.label.as_deref() else {
-            return constraints.constrain(Size::new(
-                constraints.minimum.width,
-                constraints.minimum.height,
-            ));
-        };
+        if let Some(content) = self.content.as_ref() {
+            return content.measure(constraints, context);
+        }
 
         let width = if width_is_fixed {
             constraints.minimum.width
-        } else {
-            let cached = *self.intrinsic_label_size.borrow();
-
-            let label_size = match cached {
-                Some(size) => size,
-
-                None => {
-                    let size = Text::new(label)
-                        .font_size(13.0)
-                        .line_height(20.0)
-                        .weight(600)
-                        .measure_unbounded(context.text_measurer);
-
-                    *self.intrinsic_label_size.borrow_mut() = Some(size);
-
-                    size
-                }
+        } else if let Some(label) = self.label.as_ref() {
+            let maximum_text_width = if constraints.maximum.width.is_finite() {
+                (constraints.maximum.width - HORIZONTAL_PADDING * 2.0).max(0.0)
+            } else {
+                f32::INFINITY
             };
 
-            label_size.width + HORIZONTAL_PADDING * 2.0
+            let measured = Text::new(label.as_str())
+                .font_size(FONT_SIZE)
+                .line_height(LINE_HEIGHT)
+                .weight(FONT_WEIGHT)
+                .measure(
+                    Constraints::loose(Size::new(maximum_text_width, f32::INFINITY)),
+                    context,
+                );
+
+            measured.width + HORIZONTAL_PADDING * 2.0
+        } else {
+            0.0
         };
 
         let height = if height_is_fixed {
