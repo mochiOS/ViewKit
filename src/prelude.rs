@@ -17,6 +17,7 @@ pub use crate::layout::{
     StackGap, ViewExt,
 };
 pub use crate::runtime::{ViewKitError, run};
+pub use crate::state::{Binding, State};
 pub use crate::theme::{Color, CornerRadius, ShadowStyle, Theme};
 pub use crate::typography::TextAlignment;
 pub use crate::view::View;
