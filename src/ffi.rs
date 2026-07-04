@@ -255,6 +255,7 @@ pub extern "C" fn vk_push_text(
             NodeId(node_id),
             ViewNodeKind::Text(TextNode {
                 content,
+                font_family: String::from("Noto Sans JP"),
                 font_size: finite_or_default(font_size, 16.0),
                 line_height: finite_or_default(line_height, 24.0),
                 weight,
