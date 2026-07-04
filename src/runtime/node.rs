@@ -64,6 +64,7 @@ pub struct TextNode {
     pub weight: u16,
     pub alignment: TextAlignment,
     pub color: Color,
+    pub font_family: String,
 }
 
 #[derive(Clone, Debug)]

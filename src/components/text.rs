@@ -4,6 +4,7 @@ use cosmic_text::{Attrs, Buffer, Family, Metrics, Shaping, Weight};
 
 use crate::draw_command::{DrawCommand, TextCommand};
 use crate::geometry::{Rect, Size};
+use crate::runtime::{IntoViewNode, TextNode, ViewNode, ViewNodeContext, ViewNodeKind};
 use crate::theme::Color;
 use crate::typography::{TextAlignment, TextMeasurer};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
@@ -139,6 +140,23 @@ impl Text {
         Attrs::new()
             .family(Family::Name(self.font_family.as_str()))
             .weight(Weight(self.weight.clamp(1, 1000)))
+    }
+}
+
+impl IntoViewNode for Text {
+    fn into_view_node(self, context: &mut ViewNodeContext) -> ViewNode {
+        ViewNode::new(
+            context.allocate_node_id(),
+            ViewNodeKind::Text(TextNode {
+                content: self.value,
+                font_family: self.font_family,
+                font_size: self.font_size,
+                line_height: self.line_height,
+                weight: self.weight,
+                alignment: self.alignment,
+                color: self.color,
+            }),
+        )
     }
 }
 

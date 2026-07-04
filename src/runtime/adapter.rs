@@ -31,6 +31,7 @@ impl<'a> ViewAdapter<'a> {
 
             ViewNodeKind::Text(properties) => Box::new(
                 Text::new(properties.content.clone())
+                    .font_family(properties.font_family.clone())
                     .font_size(properties.font_size)
                     .line_height(properties.line_height)
                     .weight(properties.weight)
