@@ -56,7 +56,7 @@ impl IntoViewNode for ViewNode {
 
 impl<T> IntoViewNode for Box<T>
 where
-    T: IntoViewNode + ?Sized,
+    T: IntoViewNode,
 {
     fn into_view_node(self, context: &mut ViewNodeContext) -> ViewNode {
         (*self).into_view_node(context)
