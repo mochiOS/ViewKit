@@ -34,7 +34,7 @@
 
 use crate::geometry::Size;
 use crate::renderer::Viewport;
-use crate::runtime::{IntoViewNode, RuntimeAction};
+use crate::view::View;
 
 /// アプリケーションウィンドウの初期設定
 ///
@@ -176,37 +176,20 @@ impl ViewContext {
 /// アプリケーションは[`new`](App::new)で初期状態を作成し、
 /// [`body`](App::body)で表示するViewツリーを宣言します。
 ///
-/// Viewから発生したActionは
-/// [`handle_action`](App::handle_action)へ配送されます。
-///
-/// プラットフォーム固有のイベント処理、Viewツリーの保持、
-/// レイアウト、描画、Actionの収集はViewKitランタイムが管理します。
+/// プラットフォーム固有のイベントループ、レイアウト、描画処理は
+/// ViewKitによって管理されます。
 pub trait App: Sized + 'static {
     /// アプリケーションが構築するルートViewの型です。
-    ///
-    /// ViewKitランタイムは、この値を内部のViewツリーへ変換します。
-    type Body: IntoViewNode + 'static;
+    type Body: View + 'static;
 
     /// アプリケーションの初期状態を作成します。
     fn new() -> Self;
 
     /// アプリケーションウィンドウの初期設定を返します。
-    ///
-    /// 実装を省略した場合は、タイトルが`ViewKit`、初期サイズが
-    /// 800×600論理ピクセルのウィンドウが作成されます。
     fn window(&self) -> WindowOptions {
         WindowOptions::default()
     }
 
-    /// 現在のアプリケーション状態からViewツリーを構築します。
-    ///
-    /// この関数は初回表示時や、Viewツリーの再構築が
-    /// 要求されたときに呼び出されます。
+    /// 現在のアプリケーション状態からルートViewを構築します。
     fn body(&self, context: &ViewContext) -> Self::Body;
-
-    /// Viewから発生したActionを処理します。
-    ///
-    /// アプリケーション状態を変更した場合は、
-    /// [`AppContext::request_rebuild`]を呼び出してください。
-    fn handle_action(&mut self, _action: RuntimeAction, _context: &mut AppContext) {}
 }
