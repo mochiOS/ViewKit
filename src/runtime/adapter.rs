@@ -1,4 +1,5 @@
-use crate::components::{Button, HStack, Padding, Text, VStack, ZStack};
+use crate::components::{Button, Divider, HStack, Padding, Spacer, Text, VStack, ZStack};
+use crate::layout::{IntoStackChild, StackChild};
 use crate::theme::CornerRadius;
 use crate::view::View;
 
@@ -24,7 +25,7 @@ impl<'a> ViewAdapter<'a> {
                     .distribution(properties.distribution);
 
                 for child in &node.children {
-                    stack = stack.child(self.build(child));
+                    stack = stack.child(self.build_stack_child(child));
                 }
 
                 Box::new(stack)
@@ -37,7 +38,7 @@ impl<'a> ViewAdapter<'a> {
                     .distribution(properties.distribution);
 
                 for child in &node.children {
-                    stack = stack.child(self.build(child));
+                    stack = stack.child(self.build_stack_child(child));
                 }
 
                 Box::new(stack)
@@ -47,7 +48,7 @@ impl<'a> ViewAdapter<'a> {
                 let mut stack = ZStack::new().alignment(properties.alignment);
 
                 for child in &node.children {
-                    stack = stack.child(self.build(child));
+                    stack = stack.child(self.build_stack_child(child));
                 }
 
                 Box::new(stack)
@@ -91,6 +92,18 @@ impl<'a> ViewAdapter<'a> {
                     .content(content),
                 )
             }
+
+            ViewNodeKind::Spacer | ViewNodeKind::Divider => Box::new(VStack::new()),
+        }
+    }
+
+    fn build_stack_child(&mut self, node: &ViewNode) -> StackChild {
+        match &node.kind {
+            ViewNodeKind::Spacer => Spacer::new().into_stack_child(),
+
+            ViewNodeKind::Divider => Divider::new().into_stack_child(),
+
+            _ => StackChild::new(self.build(node)),
         }
     }
 
@@ -98,7 +111,7 @@ impl<'a> ViewAdapter<'a> {
         let mut root = VStack::new();
 
         for child in &node.children {
-            root = root.child(self.build(child));
+            root = root.child(self.build_stack_child(child));
         }
 
         Box::new(root)

@@ -37,6 +37,9 @@ pub enum ViewNodeKind {
     Text(TextNode),
     Button(ButtonNode),
 
+    Spacer,
+    Divider,
+
     Padding(PaddingNode),
 }
 

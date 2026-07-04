@@ -669,3 +669,29 @@ fn decode_zstack_alignment(value: u32) -> Result<ZStackAlignment, VkStatus> {
         _ => Err(VkStatus::InvalidEnumValue),
     }
 }
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vk_push_spacer(runtime: *mut VkRuntime, node_id: u64) -> i32 {
+    ffi_status(|| {
+        let runtime = runtime_mut(runtime)?;
+
+        let builder = active_builder(runtime)?;
+
+        builder.leaf(ViewNode::new(NodeId(node_id), ViewNodeKind::Spacer));
+
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vk_push_divider(runtime: *mut VkRuntime, node_id: u64) -> i32 {
+    ffi_status(|| {
+        let runtime = runtime_mut(runtime)?;
+
+        let builder = active_builder(runtime)?;
+
+        builder.leaf(ViewNode::new(NodeId(node_id), ViewNodeKind::Divider));
+
+        Ok(())
+    })
+}

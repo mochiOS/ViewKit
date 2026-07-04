@@ -1,7 +1,8 @@
 use viewkit::ffi::{
-    VK_ALIGNMENT_CENTER, VK_BUTTON_COLOR_ACCENT, VK_DISTRIBUTION_CENTER, VK_STACK_GAP_LARGE,
-    VK_TEXT_ALIGNMENT_START, VK_TEXT_COLOR_BLACK, VkActionEvent, VkStatus, VkString,
-    vk_begin_padding, vk_begin_vstack, vk_end_node, vk_poll_action, vk_push_button, vk_push_text,
+    VK_ALIGNMENT_CENTER, VK_BUTTON_COLOR_ACCENT, VK_DISTRIBUTION_CENTER, VK_DISTRIBUTION_START,
+    VK_STACK_GAP_LARGE, VK_STACK_GAP_SMALL, VK_TEXT_ALIGNMENT_START, VK_TEXT_COLOR_BLACK,
+    VkActionEvent, VkStatus, VkString, vk_begin_hstack, vk_begin_padding, vk_begin_vstack,
+    vk_end_node, vk_poll_action, vk_push_button, vk_push_divider, vk_push_spacer, vk_push_text,
     vk_runtime_collect_actions, vk_runtime_create, vk_runtime_destroy, vk_tree_begin,
     vk_tree_commit,
 };
@@ -127,4 +128,66 @@ fn ffi_rejects_node_without_tree() {
     );
 
     assert_eq!(vk_runtime_destroy(runtime,), VkStatus::Ok as i32,);
+}
+
+#[test]
+fn ffi_builds_stack_with_spacer_and_divider() {
+    let runtime = vk_runtime_create(1);
+
+    assert!(!runtime.is_null(),);
+
+    assert_eq!(vk_tree_begin(runtime, 100,), VkStatus::Ok as i32,);
+
+    assert_eq!(
+        vk_begin_hstack(
+            runtime,
+            101,
+            VK_STACK_GAP_SMALL,
+            VK_ALIGNMENT_CENTER,
+            VK_DISTRIBUTION_START,
+        ),
+        VkStatus::Ok as i32,
+    );
+
+    let left = String::from("Left");
+
+    assert_eq!(
+        vk_push_text(
+            runtime,
+            102,
+            VkString::from_str(&left),
+            14.0,
+            22.0,
+            400,
+            VK_TEXT_ALIGNMENT_START,
+            VK_TEXT_COLOR_BLACK,
+        ),
+        VkStatus::Ok as i32,
+    );
+
+    assert_eq!(vk_push_spacer(runtime, 103,), VkStatus::Ok as i32,);
+
+    assert_eq!(vk_push_divider(runtime, 104,), VkStatus::Ok as i32,);
+
+    let right = String::from("Right");
+
+    assert_eq!(
+        vk_push_text(
+            runtime,
+            105,
+            VkString::from_str(&right),
+            14.0,
+            22.0,
+            400,
+            VK_TEXT_ALIGNMENT_START,
+            VK_TEXT_COLOR_BLACK,
+        ),
+        VkStatus::Ok as i32,
+    );
+
+    assert_eq!(vk_end_node(runtime), VkStatus::Ok as i32,);
+
+    assert_eq!(vk_tree_commit(runtime), VkStatus::Ok as i32,);
+
+    assert_eq!(vk_runtime_destroy(runtime), VkStatus::Ok as i32,);
 }
