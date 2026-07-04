@@ -326,6 +326,7 @@ enum ButtonVisualState {
     Disabled,
 }
 
+#[allow(unused)]
 pub struct Button {
     interaction: ButtonInteractionState,
     label: Option<String>,
