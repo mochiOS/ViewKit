@@ -34,7 +34,7 @@
 
 use crate::geometry::Size;
 use crate::renderer::Viewport;
-use crate::runtime::RuntimeAction;
+use crate::runtime::{IntoViewNode, RuntimeAction};
 
 /// アプリケーションウィンドウの初期設定
 ///
@@ -72,6 +72,53 @@ impl WindowOptions {
     pub fn resizable(mut self, resizable: bool) -> Self {
         self.resizable = resizable;
         self
+    }
+}
+
+/// Actionの処理中にアプリケーションから
+/// ViewKitランタイムへ要求を送るためのコンテキストです。
+#[derive(Debug, Default)]
+pub struct AppContext {
+    rebuild_requested: bool,
+    redraw_requested: bool,
+    exit_requested: bool,
+}
+
+impl AppContext {
+    pub(crate) const fn new() -> Self {
+        Self {
+            rebuild_requested: false,
+            redraw_requested: false,
+            exit_requested: false,
+        }
+    }
+
+    /// Viewツリーの再構築を要求します。
+    pub fn request_rebuild(&mut self) {
+        self.rebuild_requested = true;
+        self.redraw_requested = true;
+    }
+
+    /// 現在のViewツリーの再描画を要求します。
+    pub fn request_redraw(&mut self) {
+        self.redraw_requested = true;
+    }
+
+    /// アプリケーションの終了を要求します。
+    pub fn exit(&mut self) {
+        self.exit_requested = true;
+    }
+
+    pub(crate) fn take_rebuild_requested(&mut self) -> bool {
+        std::mem::take(&mut self.rebuild_requested)
+    }
+
+    pub(crate) fn take_redraw_requested(&mut self) -> bool {
+        std::mem::take(&mut self.redraw_requested)
+    }
+
+    pub(crate) fn take_exit_requested(&mut self) -> bool {
+        std::mem::take(&mut self.exit_requested)
     }
 }
 
