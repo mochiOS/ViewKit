@@ -7,6 +7,7 @@ pub mod ffi;
 pub mod geometry;
 pub mod layout;
 pub mod platform;
+pub mod prelude;
 pub mod renderer;
 pub mod runtime;
 pub mod theme;
