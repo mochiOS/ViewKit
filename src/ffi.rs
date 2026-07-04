@@ -5,14 +5,24 @@ use std::ptr;
 use std::slice;
 use std::str;
 
-use crate::components::ButtonColor;
+use crate::components::{ButtonColor, ZStackAlignment};
 use crate::layout::{StackAlignment, StackDistribution, StackGap};
 use crate::runtime::{
-    ActionId, ButtonNode, ComponentInstanceId, NodeId, PaddingNode, RuntimeEvent, TextNode,
-    VStackNode, ViewNode, ViewNodeKind, ViewRuntime, ViewTreeBuilder,
+    ActionId, ButtonNode, ComponentInstanceId, HStackNode, NodeId, PaddingNode, RuntimeEvent,
+    TextNode, VStackNode, ViewNode, ViewNodeKind, ViewRuntime, ViewTreeBuilder, ZStackNode,
 };
 use crate::theme::Color;
 use crate::typography::TextAlignment;
+
+pub const VK_Z_ALIGNMENT_TOP_LEADING: u32 = 0;
+pub const VK_Z_ALIGNMENT_TOP: u32 = 1;
+pub const VK_Z_ALIGNMENT_TOP_TRAILING: u32 = 2;
+pub const VK_Z_ALIGNMENT_LEADING: u32 = 3;
+pub const VK_Z_ALIGNMENT_CENTER: u32 = 4;
+pub const VK_Z_ALIGNMENT_TRAILING: u32 = 5;
+pub const VK_Z_ALIGNMENT_BOTTOM_LEADING: u32 = 6;
+pub const VK_Z_ALIGNMENT_BOTTOM: u32 = 7;
+pub const VK_Z_ALIGNMENT_BOTTOM_TRAILING: u32 = 8;
 
 #[repr(i32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -298,7 +308,7 @@ pub extern "C" fn vk_push_button(
                 title,
                 color,
 
-                radius: finite_or_default(radius, 0.0).clamp(0.0, 1.0),
+                radius: sanitize_length(radius),
 
                 action,
             }),
@@ -583,5 +593,79 @@ where
         Ok(Err(status)) => status as i32,
 
         Err(_) => VkStatus::Panic as i32,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vk_begin_hstack(
+    runtime: *mut VkRuntime,
+    node_id: u64,
+    gap: u32,
+    alignment: u32,
+    distribution: u32,
+) -> i32 {
+    ffi_status(|| {
+        let gap = decode_stack_gap(gap)?;
+
+        let alignment = decode_stack_alignment(alignment)?;
+
+        let distribution = decode_stack_distribution(distribution)?;
+
+        let runtime = runtime_mut(runtime)?;
+
+        let builder = active_builder(runtime)?;
+
+        builder.begin(ViewNode::new(
+            NodeId(node_id),
+            ViewNodeKind::HStack(HStackNode {
+                gap,
+                alignment,
+                distribution,
+            }),
+        ));
+
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vk_begin_zstack(runtime: *mut VkRuntime, node_id: u64, alignment: u32) -> i32 {
+    ffi_status(|| {
+        let alignment = decode_zstack_alignment(alignment)?;
+
+        let runtime = runtime_mut(runtime)?;
+
+        let builder = active_builder(runtime)?;
+
+        builder.begin(ViewNode::new(
+            NodeId(node_id),
+            ViewNodeKind::ZStack(ZStackNode { alignment }),
+        ));
+
+        Ok(())
+    })
+}
+
+fn decode_zstack_alignment(value: u32) -> Result<ZStackAlignment, VkStatus> {
+    match value {
+        VK_Z_ALIGNMENT_TOP_LEADING => Ok(ZStackAlignment::TopLeading),
+
+        VK_Z_ALIGNMENT_TOP => Ok(ZStackAlignment::Top),
+
+        VK_Z_ALIGNMENT_TOP_TRAILING => Ok(ZStackAlignment::TopTrailing),
+
+        VK_Z_ALIGNMENT_LEADING => Ok(ZStackAlignment::Leading),
+
+        VK_Z_ALIGNMENT_CENTER => Ok(ZStackAlignment::Center),
+
+        VK_Z_ALIGNMENT_TRAILING => Ok(ZStackAlignment::Trailing),
+
+        VK_Z_ALIGNMENT_BOTTOM_LEADING => Ok(ZStackAlignment::BottomLeading),
+
+        VK_Z_ALIGNMENT_BOTTOM => Ok(ZStackAlignment::Bottom),
+
+        VK_Z_ALIGNMENT_BOTTOM_TRAILING => Ok(ZStackAlignment::BottomTrailing),
+
+        _ => Err(VkStatus::InvalidEnumValue),
     }
 }

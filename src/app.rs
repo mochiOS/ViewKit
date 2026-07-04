@@ -1,13 +1,18 @@
 //! # ViewKit
 //!
 //! ```no_run
-//! use viewkit::app::{App, ViewContext, WindowOptions};
+//! use viewkit::app::{
+//!     App,
+//!     ViewContext,
+//!     WindowOptions,
+//! };
 //! use viewkit::components::Text;
-//! use viewkit::view::View;
 //!
 //! struct HelloApp;
 //!
 //! impl App for HelloApp {
+//!     type Body = Text;
+//!
 //!     fn new() -> Self {
 //!         Self
 //!     }
@@ -18,8 +23,11 @@
 //!             .resizable(true)
 //!     }
 //!
-//!     fn body(&self, _context: &ViewContext) -> Box<dyn View + 'static> {
-//!         Box::new(Text::new("Hello, ViewKit!"))
+//!     fn body(
+//!         &self,
+//!         _context: &ViewContext,
+//!     ) -> Self::Body {
+//!         Text::new("Hello, ViewKit!")
 //!     }
 //! }
 //!

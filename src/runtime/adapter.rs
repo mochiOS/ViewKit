@@ -1,4 +1,5 @@
-use crate::components::{Button, Padding, Text, VStack};
+use crate::components::{Button, HStack, Padding, Text, VStack, ZStack};
+use crate::theme::CornerRadius;
 use crate::view::View;
 
 use super::{RuntimeStateStore, ViewNode, ViewNodeKind};
@@ -29,6 +30,29 @@ impl<'a> ViewAdapter<'a> {
                 Box::new(stack)
             }
 
+            ViewNodeKind::HStack(properties) => {
+                let mut stack = HStack::new()
+                    .gap(properties.gap)
+                    .alignment(properties.alignment)
+                    .distribution(properties.distribution);
+
+                for child in &node.children {
+                    stack = stack.child(self.build(child));
+                }
+
+                Box::new(stack)
+            }
+
+            ViewNodeKind::ZStack(properties) => {
+                let mut stack = ZStack::new().alignment(properties.alignment);
+
+                for child in &node.children {
+                    stack = stack.child(self.build(child));
+                }
+
+                Box::new(stack)
+            }
+
             ViewNodeKind::Text(properties) => Box::new(
                 Text::new(properties.content.clone())
                     .font_family(properties.font_family.clone())
@@ -45,6 +69,7 @@ impl<'a> ViewAdapter<'a> {
                 Box::new(
                     Button::with_interaction(state)
                         .color(properties.color)
+                        .radius(CornerRadius::Custom(properties.radius.max(0.0)))
                         .content(Text::new(properties.title.clone())),
                 )
             }

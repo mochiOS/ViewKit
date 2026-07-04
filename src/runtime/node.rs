@@ -1,4 +1,4 @@
-use crate::components::ButtonColor;
+use crate::components::{ButtonColor, ZStackAlignment};
 use crate::layout::{StackAlignment, StackDistribution, StackGap};
 use crate::theme::Color;
 use crate::typography::TextAlignment;
@@ -31,9 +31,10 @@ pub enum ViewNodeKind {
     Root,
 
     VStack(VStackNode),
+    HStack(HStackNode),
+    ZStack(ZStackNode),
 
     Text(TextNode),
-
     Button(ButtonNode),
 
     Padding(PaddingNode),
@@ -57,14 +58,44 @@ impl Default for VStackNode {
 }
 
 #[derive(Clone, Debug)]
+pub struct HStackNode {
+    pub gap: StackGap,
+    pub alignment: StackAlignment,
+    pub distribution: StackDistribution,
+}
+
+impl Default for HStackNode {
+    fn default() -> Self {
+        Self {
+            gap: StackGap::Medium,
+            alignment: StackAlignment::Center,
+            distribution: StackDistribution::Start,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ZStackNode {
+    pub alignment: ZStackAlignment,
+}
+
+impl Default for ZStackNode {
+    fn default() -> Self {
+        Self {
+            alignment: ZStackAlignment::Center,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct TextNode {
     pub content: String,
+    pub font_family: String,
     pub font_size: f32,
     pub line_height: f32,
     pub weight: u16,
     pub alignment: TextAlignment,
     pub color: Color,
-    pub font_family: String,
 }
 
 #[derive(Clone, Debug)]
