@@ -1,3 +1,4 @@
+pub mod app;
 pub mod components;
 pub mod draw_command;
 pub mod edge_insets;
