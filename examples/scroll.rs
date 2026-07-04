@@ -81,6 +81,8 @@ impl ScrollExample {
 }
 
 impl App for ScrollExample {
+    type Body = Box<dyn View + 'static>;
+
     fn new() -> Self {
         Self
     }

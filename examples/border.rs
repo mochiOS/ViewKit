@@ -20,6 +20,8 @@ impl BorderExample {
 }
 
 impl App for BorderExample {
+    type Body = Box<dyn View + 'static>;
+
     fn new() -> Self {
         Self
     }

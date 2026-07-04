@@ -3,6 +3,8 @@ use viewkit::prelude::*;
 struct TextExample;
 
 impl App for TextExample {
+    type Body = Box<dyn View + 'static>;
+
     fn new() -> Self {
         Self
     }

@@ -393,6 +393,8 @@ impl FileManagerExample {
 }
 
 impl App for FileManagerExample {
+    type Body = Box<dyn View + 'static>;
+
     fn new() -> Self {
         Self {
             active_location: State::new(0),

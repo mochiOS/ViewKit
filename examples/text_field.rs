@@ -8,6 +8,8 @@ struct TextFieldExample {
 }
 
 impl App for TextFieldExample {
+    type Body = Box<dyn View + 'static>;
+
     fn new() -> Self {
         Self {
             name: State::new(String::new()),

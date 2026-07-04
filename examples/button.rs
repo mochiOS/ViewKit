@@ -18,6 +18,8 @@ impl ButtonExample {
 }
 
 impl App for ButtonExample {
+    type Body = Box<dyn View + 'static>;
+
     fn new() -> Self {
         Self {
             message: State::new(String::from("ボタンを選択してください")),
