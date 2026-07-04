@@ -223,6 +223,36 @@ impl Scroll {
             );
         }
     }
+
+    #[must_use]
+    pub fn vertical<C>(content: C) -> Self
+    where
+        C: IntoStackChild,
+    {
+        Self::new(ScrollState::new())
+            .axis(ScrollAxis::Vertical)
+            .content(content)
+    }
+
+    #[must_use]
+    pub fn horizontal<C>(content: C) -> Self
+    where
+        C: IntoStackChild,
+    {
+        Self::new(ScrollState::new())
+            .axis(ScrollAxis::Horizontal)
+            .content(content)
+    }
+
+    #[must_use]
+    pub fn both<C>(content: C) -> Self
+    where
+        C: IntoStackChild,
+    {
+        Self::new(ScrollState::new())
+            .axis(ScrollAxis::Both)
+            .content(content)
+    }
 }
 
 impl View for Scroll {
