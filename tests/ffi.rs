@@ -1,10 +1,11 @@
 use viewkit::ffi::{
-    VK_ALIGNMENT_CENTER, VK_BUTTON_COLOR_ACCENT, VK_DISTRIBUTION_CENTER, VK_DISTRIBUTION_START,
-    VK_STACK_GAP_LARGE, VK_STACK_GAP_SMALL, VK_TEXT_ALIGNMENT_START, VK_TEXT_COLOR_BLACK,
-    VkActionEvent, VkLength, VkStatus, VkString, vk_begin_frame, vk_begin_hstack, vk_begin_padding,
-    vk_begin_vstack, vk_end_node, vk_poll_action, vk_push_button, vk_push_divider, vk_push_spacer,
-    vk_push_text, vk_runtime_collect_actions, vk_runtime_create, vk_runtime_destroy, vk_tree_begin,
-    vk_tree_commit,
+    VK_ALIGNMENT_CENTER, VK_BORDER_STANDARD, VK_BUTTON_COLOR_ACCENT, VK_CORNER_RADIUS_CARD,
+    VK_DISTRIBUTION_CENTER, VK_DISTRIBUTION_START, VK_RECTANGLE_COLOR_SURFACE, VK_STACK_GAP_LARGE,
+    VK_STACK_GAP_SMALL, VK_TEXT_ALIGNMENT_START, VK_TEXT_COLOR_BLACK, VkActionEvent, VkLength,
+    VkRectangleStyle, VkStatus, VkString, vk_begin_background, vk_begin_frame, vk_begin_hstack,
+    vk_begin_padding, vk_begin_vstack, vk_end_node, vk_poll_action, vk_push_button,
+    vk_push_divider, vk_push_rectangle, vk_push_spacer, vk_push_text, vk_runtime_collect_actions,
+    vk_runtime_create, vk_runtime_destroy, vk_tree_begin, vk_tree_commit,
 };
 
 #[test]
@@ -248,6 +249,67 @@ fn ffi_rejects_invalid_frame_length() {
         ),
         VkStatus::InvalidEnumValue as i32,
     );
+
+    assert_eq!(vk_runtime_destroy(runtime), VkStatus::Ok as i32,);
+}
+
+#[test]
+fn ffi_builds_rectangle_and_background() {
+    let runtime = vk_runtime_create(1);
+
+    assert!(!runtime.is_null());
+
+    assert_eq!(vk_tree_begin(runtime, 100), VkStatus::Ok as i32,);
+
+    let style = VkRectangleStyle {
+        color_kind: VK_RECTANGLE_COLOR_SURFACE,
+        radius_kind: VK_CORNER_RADIUS_CARD,
+        border_kind: VK_BORDER_STANDARD,
+        border_width: 1.0,
+
+        ..VkRectangleStyle::default()
+    };
+
+    assert_eq!(
+        vk_begin_frame(runtime, 101, VkLength::fixed(320.0), VkLength::fixed(120.0),),
+        VkStatus::Ok as i32,
+    );
+
+    assert_eq!(
+        vk_begin_background(runtime, 102, style),
+        VkStatus::Ok as i32,
+    );
+
+    let content = String::from("Background content");
+
+    assert_eq!(
+        vk_push_text(
+            runtime,
+            103,
+            VkString::from_str(&content),
+            14.0,
+            22.0,
+            400,
+            VK_TEXT_ALIGNMENT_START,
+            VK_TEXT_COLOR_BLACK,
+        ),
+        VkStatus::Ok as i32,
+    );
+
+    assert_eq!(vk_end_node(runtime), VkStatus::Ok as i32,);
+
+    assert_eq!(vk_end_node(runtime), VkStatus::Ok as i32,);
+
+    assert_eq!(
+        vk_begin_frame(runtime, 104, VkLength::fixed(200.0), VkLength::fixed(48.0),),
+        VkStatus::Ok as i32,
+    );
+
+    assert_eq!(vk_push_rectangle(runtime, 105, style), VkStatus::Ok as i32,);
+
+    assert_eq!(vk_end_node(runtime), VkStatus::Ok as i32,);
+
+    assert_eq!(vk_tree_commit(runtime), VkStatus::Ok as i32,);
 
     assert_eq!(vk_runtime_destroy(runtime), VkStatus::Ok as i32,);
 }

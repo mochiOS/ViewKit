@@ -5,14 +5,14 @@ use std::ptr;
 use std::slice;
 use std::str;
 
-use crate::components::{ButtonColor, ZStackAlignment};
+use crate::components::{BorderStyle, ButtonColor, RectangleColor, ZStackAlignment};
 use crate::layout::{LayoutLength, StackAlignment, StackDistribution, StackGap};
 use crate::runtime::{
     ActionId, ButtonNode, ComponentInstanceId, FrameNode, HStackNode, NodeId, PaddingNode,
-    RuntimeEvent, TextNode, VStackNode, ViewNode, ViewNodeKind, ViewRuntime, ViewTreeBuilder,
-    ZStackNode,
+    RectangleNode, RuntimeEvent, TextNode, VStackNode, ViewNode, ViewNodeKind, ViewRuntime,
+    ViewTreeBuilder, ZStackNode,
 };
-use crate::theme::Color;
+use crate::theme::{Color, CornerRadius};
 use crate::typography::TextAlignment;
 
 pub const VK_Z_ALIGNMENT_TOP_LEADING: u32 = 0;
@@ -67,6 +67,81 @@ impl VkString {
 pub const VK_LENGTH_AUTO: u32 = 0;
 
 pub const VK_LENGTH_FIXED: u32 = 1;
+
+pub const VK_RECTANGLE_COLOR_BACKGROUND: u32 = 0;
+pub const VK_RECTANGLE_COLOR_SURFACE: u32 = 1;
+pub const VK_RECTANGLE_COLOR_ELEVATED_SURFACE: u32 = 2;
+pub const VK_RECTANGLE_COLOR_ACCENT: u32 = 3;
+pub const VK_RECTANGLE_COLOR_DESTRUCTIVE: u32 = 4;
+pub const VK_RECTANGLE_COLOR_CUSTOM: u32 = 5;
+
+pub const VK_CORNER_RADIUS_NONE: u32 = 0;
+pub const VK_CORNER_RADIUS_SMALL: u32 = 1;
+pub const VK_CORNER_RADIUS_MEDIUM: u32 = 2;
+pub const VK_CORNER_RADIUS_LARGE: u32 = 3;
+pub const VK_CORNER_RADIUS_EXTRA_LARGE: u32 = 4;
+pub const VK_CORNER_RADIUS_CARD: u32 = 5;
+pub const VK_CORNER_RADIUS_FULL: u32 = 6;
+pub const VK_CORNER_RADIUS_CUSTOM: u32 = 7;
+
+pub const VK_BORDER_NONE: u32 = 0;
+pub const VK_BORDER_STANDARD: u32 = 1;
+pub const VK_BORDER_STRONG: u32 = 2;
+pub const VK_BORDER_CUSTOM: u32 = 3;
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct VkColor {
+    pub red: u8,
+    pub green: u8,
+    pub blue: u8,
+    pub alpha: u8,
+}
+
+impl VkColor {
+    pub const fn rgba(red: u8, green: u8, blue: u8, alpha: u8) -> Self {
+        Self {
+            red,
+            green,
+            blue,
+            alpha,
+        }
+    }
+
+    pub const fn transparent() -> Self {
+        Self::rgba(0, 0, 0, 0)
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct VkRectangleStyle {
+    pub color_kind: u32,
+    pub custom_color: VkColor,
+
+    pub radius_kind: u32,
+    pub radius: f32,
+
+    pub border_kind: u32,
+    pub border_color: VkColor,
+    pub border_width: f32,
+}
+
+impl Default for VkRectangleStyle {
+    fn default() -> Self {
+        Self {
+            color_kind: VK_RECTANGLE_COLOR_SURFACE,
+            custom_color: VkColor::transparent(),
+
+            radius_kind: VK_CORNER_RADIUS_NONE,
+            radius: 0.0,
+
+            border_kind: VK_BORDER_NONE,
+            border_color: VkColor::transparent(),
+            border_width: 0.0,
+        }
+    }
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -757,4 +832,110 @@ fn decode_layout_length(value: VkLength) -> Result<LayoutLength, VkStatus> {
 
         _ => Err(VkStatus::InvalidEnumValue),
     }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vk_push_rectangle(
+    runtime: *mut VkRuntime,
+    node_id: u64,
+    style: VkRectangleStyle,
+) -> i32 {
+    ffi_status(|| {
+        let properties = decode_rectangle_style(style)?;
+
+        let runtime = runtime_mut(runtime)?;
+        let builder = active_builder(runtime)?;
+
+        builder.leaf(ViewNode::new(
+            NodeId(node_id),
+            ViewNodeKind::Rectangle(properties),
+        ));
+
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vk_begin_background(
+    runtime: *mut VkRuntime,
+    node_id: u64,
+    style: VkRectangleStyle,
+) -> i32 {
+    ffi_status(|| {
+        let properties = decode_rectangle_style(style)?;
+
+        let runtime = runtime_mut(runtime)?;
+        let builder = active_builder(runtime)?;
+
+        builder.begin(ViewNode::new(
+            NodeId(node_id),
+            ViewNodeKind::Background(properties),
+        ));
+
+        Ok(())
+    })
+}
+
+fn decode_rectangle_style(style: VkRectangleStyle) -> Result<RectangleNode, VkStatus> {
+    Ok(RectangleNode {
+        color: decode_rectangle_color(style.color_kind, style.custom_color)?,
+
+        radius: decode_corner_radius(style.radius_kind, style.radius)?,
+
+        border: decode_border_style(style.border_kind, style.border_color, style.border_width)?,
+    })
+}
+
+fn decode_rectangle_color(kind: u32, custom_color: VkColor) -> Result<RectangleColor, VkStatus> {
+    match kind {
+        VK_RECTANGLE_COLOR_BACKGROUND => Ok(RectangleColor::Background),
+
+        VK_RECTANGLE_COLOR_SURFACE => Ok(RectangleColor::Surface),
+
+        VK_RECTANGLE_COLOR_ELEVATED_SURFACE => Ok(RectangleColor::ElevatedSurface),
+
+        VK_RECTANGLE_COLOR_ACCENT => Ok(RectangleColor::Accent),
+
+        VK_RECTANGLE_COLOR_DESTRUCTIVE => Ok(RectangleColor::Destructive),
+
+        VK_RECTANGLE_COLOR_CUSTOM => Ok(RectangleColor::Custom(decode_color(custom_color))),
+
+        _ => Err(VkStatus::InvalidEnumValue),
+    }
+}
+
+fn decode_corner_radius(kind: u32, value: f32) -> Result<CornerRadius, VkStatus> {
+    match kind {
+        VK_CORNER_RADIUS_NONE => Ok(CornerRadius::None),
+        VK_CORNER_RADIUS_SMALL => Ok(CornerRadius::Small),
+        VK_CORNER_RADIUS_MEDIUM => Ok(CornerRadius::Medium),
+        VK_CORNER_RADIUS_LARGE => Ok(CornerRadius::Large),
+        VK_CORNER_RADIUS_EXTRA_LARGE => Ok(CornerRadius::ExtraLarge),
+        VK_CORNER_RADIUS_CARD => Ok(CornerRadius::Card),
+        VK_CORNER_RADIUS_FULL => Ok(CornerRadius::Full),
+
+        VK_CORNER_RADIUS_CUSTOM => Ok(CornerRadius::Custom(sanitize_length(value))),
+
+        _ => Err(VkStatus::InvalidEnumValue),
+    }
+}
+
+fn decode_border_style(kind: u32, color: VkColor, width: f32) -> Result<BorderStyle, VkStatus> {
+    let width = sanitize_length(width);
+
+    match kind {
+        VK_BORDER_NONE => Ok(BorderStyle::None),
+
+        VK_BORDER_STANDARD => Ok(BorderStyle::standard(width)),
+
+        VK_BORDER_STRONG => Ok(BorderStyle::strong(width)),
+
+        VK_BORDER_CUSTOM => Ok(BorderStyle::custom(decode_color(color), width)),
+
+        _ => Err(VkStatus::InvalidEnumValue),
+    }
+}
+
+fn decode_color(color: VkColor) -> Color {
+    Color::rgba(color.red, color.green, color.blue, color.alpha)
 }

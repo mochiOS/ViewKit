@@ -1,6 +1,6 @@
-use crate::components::{ButtonColor, ZStackAlignment};
+use crate::components::{BorderStyle, ButtonColor, RectangleColor, ZStackAlignment};
 use crate::layout::{LayoutLength, StackAlignment, StackDistribution, StackGap};
-use crate::theme::Color;
+use crate::theme::{Color, CornerRadius};
 use crate::typography::TextAlignment;
 
 use super::{ActionId, NodeId};
@@ -36,6 +36,9 @@ pub enum ViewNodeKind {
 
     Text(TextNode),
     Button(ButtonNode),
+
+    Rectangle(RectangleNode),
+    Background(RectangleNode),
 
     Spacer,
     Divider,
@@ -110,6 +113,23 @@ pub struct ButtonNode {
     pub color: ButtonColor,
     pub radius: f32,
     pub action: Option<ActionId>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct RectangleNode {
+    pub color: RectangleColor,
+    pub radius: CornerRadius,
+    pub border: BorderStyle,
+}
+
+impl Default for RectangleNode {
+    fn default() -> Self {
+        Self {
+            color: RectangleColor::Surface,
+            radius: CornerRadius::None,
+            border: BorderStyle::None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]

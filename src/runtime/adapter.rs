@@ -1,9 +1,11 @@
-use crate::components::{Button, Divider, HStack, Padding, Spacer, Text, VStack, ZStack};
+use crate::components::{
+    Background, Button, Divider, HStack, Padding, Rectangle, Spacer, Text, VStack, ZStack,
+};
 use crate::layout::{IntoStackChild, LayoutLength, StackAlignment, StackChild, StackGap};
 use crate::theme::CornerRadius;
 use crate::view::View;
 
-use super::{FrameNode, RuntimeStateStore, ViewNode, ViewNodeKind};
+use super::{FrameNode, RectangleNode, RuntimeStateStore, ViewNode, ViewNodeKind};
 
 pub struct ViewAdapter<'a> {
     states: &'a mut RuntimeStateStore,
@@ -75,6 +77,22 @@ impl<'a> ViewAdapter<'a> {
                 )
             }
 
+            ViewNodeKind::Rectangle(properties) => Box::new(build_rectangle(properties)),
+
+            ViewNodeKind::Background(properties) => {
+                let content = node
+                    .children
+                    .first()
+                    .map(|child| self.build_embedded_child(child))
+                    .unwrap_or_else(|| Box::new(VStack::new()));
+
+                Box::new(
+                    Background::new()
+                        .background(build_rectangle(properties))
+                        .content(content),
+                )
+            }
+
             ViewNodeKind::Padding(properties) => {
                 let content = node
                     .children
@@ -95,13 +113,7 @@ impl<'a> ViewAdapter<'a> {
 
             ViewNodeKind::Frame(properties) => self.build_frame_view(node, properties),
 
-            ViewNodeKind::Spacer | ViewNodeKind::Divider => {
-                /*
-                 * これらは通常のViewではなく、
-                 * StackChildとして構築します。
-                 */
-                Box::new(VStack::new())
-            }
+            ViewNodeKind::Spacer | ViewNodeKind::Divider => Box::new(VStack::new()),
         }
     }
 
@@ -158,6 +170,13 @@ impl<'a> ViewAdapter<'a> {
 
         Box::new(root)
     }
+}
+
+fn build_rectangle(properties: &RectangleNode) -> Rectangle {
+    Rectangle::new()
+        .color(properties.color)
+        .radius(properties.radius)
+        .border(properties.border)
 }
 
 fn apply_frame(mut child: StackChild, properties: &FrameNode) -> StackChild {
