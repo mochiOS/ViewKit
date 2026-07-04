@@ -32,6 +32,8 @@
 //!
 //! 主にKome言語からの利用を想定していますが、Rustから直接利用することもできます。
 
+mod runtime;
+
 use crate::geometry::Size;
 use crate::renderer::Viewport;
 use crate::view::View;

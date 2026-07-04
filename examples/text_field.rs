@@ -1,134 +1,58 @@
-use std::time::Instant;
-use viewkit::components::{TextField, TextFieldInteractionState, TextFieldSize, VStack};
-use viewkit::draw_command::{DisplayList, DrawCommand};
-use viewkit::event::{EventContext, EventDispatcher};
-use viewkit::geometry::Size;
-use viewkit::layout::{StackAlignment, StackDistribution, StackGap, ViewExt};
-use viewkit::platform::linux::LinuxBackend;
-use viewkit::platform::{PlatformApplication, PlatformEvent, PlatformWindow, WindowConfig};
-use viewkit::renderer::Viewport;
-use viewkit::theme::Theme;
-use viewkit::typography::{TextMeasurer, Typography};
-use viewkit::view::{PaintContext, RedrawSchedule, View};
+use viewkit::prelude::*;
 
-struct ExampleApplication {
-    theme: Theme,
-    typography: Typography,
-    text_measurer: TextMeasurer,
-    event_dispatcher: EventDispatcher,
-
-    redraw_schedule: RedrawSchedule,
-    empty_state: TextFieldInteractionState,
-    value_state: TextFieldInteractionState,
-    invalid_state: TextFieldInteractionState,
-    disabled_state: TextFieldInteractionState,
+struct TextFieldExample {
+    name: State<String>,
+    project: State<String>,
+    email: State<String>,
+    disabled: State<String>,
 }
 
-impl ExampleApplication {
+impl App for TextFieldExample {
     fn new() -> Self {
         Self {
-            theme: Theme::DEFAULT,
-            typography: Typography::DEFAULT,
-
-            text_measurer: TextMeasurer::new(),
-
-            event_dispatcher: EventDispatcher::new(),
-
-            redraw_schedule: RedrawSchedule::new(),
-            empty_state: TextFieldInteractionState::new(),
-            value_state: TextFieldInteractionState::new(),
-            invalid_state: TextFieldInteractionState::new(),
-            disabled_state: TextFieldInteractionState::new(),
+            name: State::new(String::new()),
+            project: State::new(String::from("mochiOS")),
+            email: State::new(String::from("invalid@example")),
+            disabled: State::new(String::from("使用できません")),
         }
     }
 
-    fn build_root(&self) -> VStack {
-        let empty = TextField::new(self.empty_state.clone()).placeholder("名前を入力");
-
-        let value = TextField::new(self.value_state.clone()).value("mochiOS");
-
-        let invalid = TextField::new(self.invalid_state.clone())
-            .value("invalid@example")
-            .invalid(true);
-
-        let disabled = TextField::new(self.disabled_state.clone())
-            .placeholder("使用できません")
-            .size(TextFieldSize::Large)
-            .enabled(false);
-
-        VStack::new()
-            .gap(StackGap::Large)
-            .alignment(StackAlignment::Center)
-            .distribution(StackDistribution::Center)
-            .child(empty.frame(320.0, 36.0))
-            .child(value.frame(320.0, 36.0))
-            .child(invalid.frame(320.0, 36.0))
-            .child(disabled.frame(320.0, 44.0))
-    }
-}
-
-impl PlatformApplication for ExampleApplication {
-    fn handle_event(&mut self, event: PlatformEvent, window: &dyn PlatformWindow) {
-        let root = self.build_root();
-
-        let redraw_requested = {
-            let mut context =
-                EventContext::new(&self.theme, &self.typography, &mut self.text_measurer);
-
-            self.event_dispatcher.dispatch(
-                &root,
-                window.viewport().logical_bounds(),
-                &event,
-                &mut context,
-            );
-
-            context.redraw_requested()
-        };
-
-        if redraw_requested {
-            window.request_redraw();
-        }
+    fn window(&self) -> WindowOptions {
+        WindowOptions::new("ViewKit TextField Example")
+            .size(720.0, 520.0)
+            .resizable(true)
     }
 
-    fn next_redraw_at(&self) -> Option<Instant> {
-        self.redraw_schedule.deadline()
-    }
+    fn body(&self, _context: &ViewContext) -> Box<dyn View + 'static> {
+        let email = self.email.get();
+        let email_is_invalid = !email.is_empty() && !email.contains('.');
 
-    fn draw(&mut self, viewport: Viewport, display_list: &mut DisplayList) {
-        display_list.push(DrawCommand::Clear {
-            color: self.theme.colors.background,
-        });
-
-        self.redraw_schedule.clear();
-        let root = self.build_root();
-
-        let mut context = PaintContext::new(
-            display_list,
-            &self.theme,
-            &self.typography,
-            &mut self.text_measurer,
+        Box::new(
+            VStack::new()
+                .gap(StackGap::Large)
+                .alignment(StackAlignment::Center)
+                .distribution(StackDistribution::Center)
+                .child(
+                    TextField::new(self.name.binding())
+                        .placeholder("名前を入力")
+                        .frame(320.0, 36.0),
+                )
+                .child(TextField::new(self.project.binding()).frame(320.0, 36.0))
+                .child(
+                    TextField::new(self.email.binding())
+                        .invalid(email_is_invalid)
+                        .frame(320.0, 36.0),
+                )
+                .child(
+                    TextField::new(self.disabled.binding())
+                        .size(TextFieldSize::Large)
+                        .enabled(false)
+                        .frame(320.0, 44.0),
+                ),
         )
-        .with_redraw_schedule(&mut self.redraw_schedule);
-
-        root.paint(viewport.logical_bounds(), &mut context);
     }
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let application = ExampleApplication::new();
-
-    let backend = LinuxBackend::new(
-        application,
-        WindowConfig {
-            title: String::from("ViewKit TextField Example"),
-
-            size: Size::new(720.0, 520.0),
-
-            resizable: true,
-        },
-    );
-
-    backend.run()?;
-
-    Ok(())
+fn main() -> Result<(), ViewKitError> {
+    viewkit::run::<TextFieldExample>()
 }
