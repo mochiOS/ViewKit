@@ -8,7 +8,7 @@ use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Point, Rect, Size};
 use crate::layout::{IntoStackChild, StackChild};
 use crate::theme::ScrollBarTokens;
-use crate::view::{PaintContext, View};
+use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ScrollAxis {
@@ -54,6 +54,11 @@ impl ScrollBarVisibility {
 struct ScrollStateInner {
     offset_x: f32,
     offset_y: f32,
+
+    has_cached_layout: bool,
+    cached_axis: ScrollAxis,
+    cached_viewport_size: Size,
+    cached_content_size: Size,
 }
 
 #[derive(Clone, Default)]
@@ -84,7 +89,6 @@ impl ScrollState {
         let mut inner = self.inner.borrow_mut();
 
         inner.offset_x = finite_non_negative(offset_x);
-
         inner.offset_y = finite_non_negative(offset_y);
     }
 
@@ -102,6 +106,28 @@ impl ScrollState {
 
     pub fn reset(&self) {
         self.set_offset(0.0, 0.0);
+    }
+
+    fn remember_layout(&self, axis: ScrollAxis, viewport_size: Size, content_size: Size) {
+        let mut inner = self.inner.borrow_mut();
+
+        inner.has_cached_layout = true;
+        inner.cached_axis = axis;
+        inner.cached_viewport_size = viewport_size;
+        inner.cached_content_size = content_size;
+    }
+
+    fn cached_content_size(&self, axis: ScrollAxis, viewport_size: Size) -> Option<Size> {
+        let inner = self.inner.borrow();
+
+        if !inner.has_cached_layout
+            || inner.cached_axis != axis
+            || inner.cached_viewport_size != viewport_size
+        {
+            return None;
+        }
+
+        Some(inner.cached_content_size)
     }
 
     fn clamp_offset(&self, axis: ScrollAxis, viewport_size: Size, content_size: Size) -> Point {
@@ -147,15 +173,14 @@ impl Scroll {
         Self {
             state,
             axis: ScrollAxis::Vertical,
-
             scrollbar_visibility: ScrollBarVisibility::Automatic,
-
             content: None,
         }
     }
 
     pub fn axis(mut self, axis: ScrollAxis) -> Self {
         self.axis = axis;
+
         self
     }
 
@@ -176,6 +201,130 @@ impl Scroll {
 
     pub fn state(&self) -> &ScrollState {
         &self.state
+    }
+
+    #[must_use]
+    pub fn vertical<C>(content: C) -> Self
+    where
+        C: IntoStackChild,
+    {
+        Self::new(ScrollState::new())
+            .axis(ScrollAxis::Vertical)
+            .content(content)
+    }
+
+    #[must_use]
+    pub fn horizontal<C>(content: C) -> Self
+    where
+        C: IntoStackChild,
+    {
+        Self::new(ScrollState::new())
+            .axis(ScrollAxis::Horizontal)
+            .content(content)
+    }
+
+    #[must_use]
+    pub fn both<C>(content: C) -> Self
+    where
+        C: IntoStackChild,
+    {
+        Self::new(ScrollState::new())
+            .axis(ScrollAxis::Both)
+            .content(content)
+    }
+
+    fn content_constraints(&self, viewport_size: Size) -> Constraints {
+        let viewport_width = finite_non_negative(viewport_size.width);
+
+        let viewport_height = finite_non_negative(viewport_size.height);
+
+        let minimum_width = if self.axis.allows_horizontal() {
+            0.0
+        } else {
+            viewport_width
+        };
+
+        let maximum_width = if self.axis.allows_horizontal() {
+            f32::INFINITY
+        } else {
+            viewport_width
+        };
+
+        let minimum_height = if self.axis.allows_vertical() {
+            0.0
+        } else {
+            viewport_height
+        };
+
+        let maximum_height = if self.axis.allows_vertical() {
+            f32::INFINITY
+        } else {
+            viewport_height
+        };
+
+        Constraints::new(
+            Size::new(minimum_width, minimum_height),
+            Size::new(maximum_width, maximum_height),
+        )
+    }
+
+    fn measure_content_size(
+        &self,
+        content: &StackChild,
+        viewport_size: Size,
+        context: &mut MeasureContext<'_>,
+    ) -> Size {
+        let viewport_width = finite_non_negative(viewport_size.width);
+
+        let viewport_height = finite_non_negative(viewport_size.height);
+
+        let measured = content.measure(self.content_constraints(viewport_size), context);
+
+        let measured_width = finite_or(measured.width, viewport_width);
+
+        let measured_height = finite_or(measured.height, viewport_height);
+
+        let width = if self.axis.allows_horizontal() {
+            measured_width.max(viewport_width)
+        } else {
+            viewport_width
+        };
+
+        let height = if self.axis.allows_vertical() {
+            measured_height.max(viewport_height)
+        } else {
+            viewport_height
+        };
+
+        Size::new(width, height)
+    }
+
+    fn content_size_for_event(
+        &self,
+        content: &StackChild,
+        bounds: Rect,
+        context: &mut EventContext<'_>,
+    ) -> Size {
+        if let Some(content_size) = self.state.cached_content_size(self.axis, bounds.size) {
+            return content_size;
+        }
+
+        let theme = context.theme;
+        let typography = context.typography;
+        let text_measurer = &mut *context.text_measurer;
+
+        let mut measure_context = MeasureContext {
+            theme,
+            typography,
+            text_measurer,
+        };
+
+        let content_size = self.measure_content_size(content, bounds.size, &mut measure_context);
+
+        self.state
+            .remember_layout(self.axis, bounds.size, content_size);
+
+        content_size
     }
 
     fn paint_scrollbars(
@@ -223,36 +372,6 @@ impl Scroll {
             );
         }
     }
-
-    #[must_use]
-    pub fn vertical<C>(content: C) -> Self
-    where
-        C: IntoStackChild,
-    {
-        Self::new(ScrollState::new())
-            .axis(ScrollAxis::Vertical)
-            .content(content)
-    }
-
-    #[must_use]
-    pub fn horizontal<C>(content: C) -> Self
-    where
-        C: IntoStackChild,
-    {
-        Self::new(ScrollState::new())
-            .axis(ScrollAxis::Horizontal)
-            .content(content)
-    }
-
-    #[must_use]
-    pub fn both<C>(content: C) -> Self
-    where
-        C: IntoStackChild,
-    {
-        Self::new(ScrollState::new())
-            .axis(ScrollAxis::Both)
-            .content(content)
-    }
 }
 
 impl View for Scroll {
@@ -265,7 +384,18 @@ impl View for Scroll {
             return;
         };
 
-        let content_size = content.overlay_size(bounds.size);
+        let content_size = {
+            let mut measure_context = MeasureContext {
+                theme: context.theme,
+                typography: context.typography,
+                text_measurer: &mut *context.text_measurer,
+            };
+
+            self.measure_content_size(content, bounds.size, &mut measure_context)
+        };
+
+        self.state
+            .remember_layout(self.axis, bounds.size, content_size);
 
         let offset = self
             .state
@@ -295,11 +425,15 @@ impl View for Scroll {
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
+        if bounds.size.width <= 0.0 || bounds.size.height <= 0.0 {
+            return EventResult::Ignored;
+        }
+
         let Some(content) = self.content.as_ref() else {
             return EventResult::Ignored;
         };
 
-        let content_size = content.overlay_size(bounds.size);
+        let content_size = self.content_size_for_event(content, bounds, context);
 
         let offset = self
             .state
@@ -365,7 +499,11 @@ impl View for Scroll {
             return EventResult::Ignored;
         }
 
-        context.request_redraw();
+        /*
+         * スクロールするとviewport内のすべての内容が
+         * 移動するため、Scroll全体をdirty領域にします。
+         */
+        context.request_redraw_in(bounds);
 
         EventResult::Consumed
     }
@@ -432,9 +570,7 @@ fn paint_vertical_scrollbar(
 
     context.display_list.push(DrawCommand::FillRoundedRect {
         rect: Rect::new(track_x, thumb_y, thickness, thumb_length),
-
         radius: thickness / 2.0,
-
         color: tokens.thumb_color,
     });
 }
@@ -496,9 +632,7 @@ fn paint_horizontal_scrollbar(
 
     context.display_list.push(DrawCommand::FillRoundedRect {
         rect: Rect::new(thumb_x, track_y, thumb_length, thickness),
-
         radius: thickness / 2.0,
-
         color: tokens.thumb_color,
     });
 }
@@ -530,6 +664,14 @@ fn calculate_progress(offset: f32, maximum_offset: f32) -> f32 {
     }
 
     (offset / maximum_offset).clamp(0.0, 1.0)
+}
+
+fn finite_or(value: f32, fallback: f32) -> f32 {
+    if value.is_finite() {
+        value.max(0.0)
+    } else {
+        fallback.max(0.0)
+    }
 }
 
 fn finite_non_negative(value: f32) -> f32 {
