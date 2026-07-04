@@ -3,7 +3,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::components::BorderStyle;
+use crate::components::{BorderStyle, Text};
 use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::Rect;
@@ -333,18 +333,19 @@ pub struct Button {
     shadow: ShadowStyle,
     alignment: ZStackAlignment,
     enabled: bool,
+    on_click: Option<RefCell<Box<dyn FnMut()>>>,
 }
-
 impl Button {
-    pub fn new(interaction: ButtonInteractionState) -> Self {
+    pub fn new(label: impl Into<String>) -> Self {
         Self {
-            interaction,
-            content: None,
+            interaction: ButtonInteractionState::new(),
+            content: Some(Text::new(label).into_stack_child()),
             style: ButtonStyle::Standard,
             radius: CornerRadius::Medium,
             shadow: ShadowStyle::None,
             alignment: ZStackAlignment::Center,
             enabled: true,
+            on_click: None,
         }
     }
 
@@ -390,6 +391,25 @@ impl Button {
 
     pub fn interaction(&self) -> &ButtonInteractionState {
         &self.interaction
+    }
+
+    pub fn with_interaction(interaction: ButtonInteractionState) -> Self {
+        Self {
+            interaction,
+            content: None,
+            style: ButtonStyle::Standard,
+            radius: CornerRadius::Medium,
+            shadow: ShadowStyle::None,
+            alignment: ZStackAlignment::Center,
+            enabled: true,
+            on_click: None,
+        }
+    }
+
+    #[must_use]
+    pub fn on_click(mut self, callback: impl FnMut() + 'static) -> Self {
+        self.on_click = Some(RefCell::new(Box::new(callback)));
+        self
     }
 }
 
@@ -509,7 +529,37 @@ impl View for Button {
                 position,
                 button: PointerButton::Primary,
             } => {
-                if bounds.contains(*position) {
+                let inside = bounds.contains(*position);
+
+                let (was_armed, clicked, changed) = {
+                    let mut inner = self.interaction.inner.borrow_mut();
+                    let was_armed = inner.armed;
+                    let clicked = was_armed && inside;
+                    let changed =
+                        inner.hovered != inside || inner.armed || inner.pressed || clicked;
+
+                    inner.hovered = inside;
+                    inner.armed = false;
+                    inner.pressed = false;
+
+                    if clicked {
+                        inner.clicked = true;
+                    }
+
+                    (was_armed, clicked, changed)
+                };
+
+                if clicked {
+                    if let Some(callback) = self.on_click.as_ref() {
+                        (callback.borrow_mut())();
+                    }
+                }
+
+                if changed {
+                    context.request_redraw();
+                }
+
+                if was_armed {
                     EventResult::Consumed
                 } else {
                     EventResult::Ignored

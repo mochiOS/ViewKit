@@ -43,7 +43,7 @@ impl<'a> ViewAdapter<'a> {
                 let state = self.states.button(node.id);
 
                 Box::new(
-                    Button::new(state)
+                    Button::with_interaction(state)
                         .color(properties.color)
                         .content(Text::new(properties.title.clone())),
                 )
