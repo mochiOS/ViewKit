@@ -5,5 +5,13 @@ edition = "2024"
 publish = false
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-toml = "0.8"
+proc-macro2 = "1"
+quote = "1"
+syn = {
+    version = "2",
+    features = [
+        "full",
+        "parsing",
+        "extra-traits",
+    ],
+}

@@ -11,7 +11,7 @@ cargo run \
     --quiet \
     --manifest-path "$ROOT/tools/ffi-gen/Cargo.toml" \
     -- \
-    "$ROOT/src/ffi/components.toml" \
+    "$ROOT/src/components/mod.rs" \
     "$ROOT/src/ffi/generated_components.rs"
 
 rustfmt \

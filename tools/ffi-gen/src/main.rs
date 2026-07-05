@@ -1,43 +1,132 @@
-use serde::Deserialize;
+use std::collections::HashSet;
 use std::env;
 use std::error::Error;
-use std::fmt::Write as _;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Deserialize)]
-struct Manifest {
-    component: Vec<Component>,
-}
+use proc_macro2::TokenStream;
+use quote::quote;
+use syn::parse::{Parse, ParseStream};
+use syn::punctuated::Punctuated;
+use syn::{Expr, File, Ident, Item, Result as SynResult, Token, Type, parenthesized};
 
-#[derive(Clone, Copy, Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ComponentKind {
     Container,
     Leaf,
 }
 
-#[derive(Debug, Deserialize)]
-struct Component {
-    name: String,
-    kind: ComponentKind,
+impl Parse for ComponentKind {
+    fn parse(input: ParseStream<'_>) -> SynResult<Self> {
+        let kind: Ident = input.parse()?;
 
-    #[serde(default)]
-    arguments: Vec<Argument>,
+        match kind.to_string().as_str() {
+            "container" => Ok(Self::Container),
+            "leaf" => Ok(Self::Leaf),
 
-    node: String,
+            _ => Err(syn::Error::new(
+                kind.span(),
+                "component kind must be `container` or `leaf`",
+            )),
+        }
+    }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug)]
 struct Argument {
-    name: String,
+    name: Ident,
+    ty: Type,
 
-    #[serde(rename = "type")]
-    ty: String,
+    binding: Option<Ident>,
+    conversion: Option<Expr>,
+}
 
-    bind: Option<String>,
-    convert: Option<String>,
+impl Parse for Argument {
+    fn parse(input: ParseStream<'_>) -> SynResult<Self> {
+        let name: Ident = input.parse()?;
+
+        input.parse::<Token![:]>()?;
+
+        let ty: Type = input.parse()?;
+
+        let (binding, conversion) = if input.peek(Token![=>]) {
+            input.parse::<Token![=>]>()?;
+
+            let binding: Ident = input.parse()?;
+
+            input.parse::<Token![=]>()?;
+
+            let conversion: Expr = input.parse()?;
+
+            (Some(binding), Some(conversion))
+        } else {
+            (None, None)
+        };
+
+        Ok(Self {
+            name,
+            ty,
+            binding,
+            conversion,
+        })
+    }
+}
+
+#[derive(Debug)]
+struct Component {
+    kind: ComponentKind,
+    name: Ident,
+
+    arguments: Vec<Argument>,
+
+    node: Expr,
+}
+
+impl Parse for Component {
+    fn parse(input: ParseStream<'_>) -> SynResult<Self> {
+        let kind: ComponentKind = input.parse()?;
+
+        let name: Ident = input.parse()?;
+
+        let arguments_content;
+
+        parenthesized!(arguments_content in input);
+
+        let arguments = Punctuated::<Argument, Token![,]>::parse_terminated(&arguments_content)?
+            .into_iter()
+            .collect();
+
+        input.parse::<Token![=>]>()?;
+
+        let node: Expr = input.parse()?;
+
+        input.parse::<Token![;]>()?;
+
+        Ok(Self {
+            kind,
+            name,
+            arguments,
+            node,
+        })
+    }
+}
+
+#[derive(Debug)]
+struct ComponentManifest {
+    components: Vec<Component>,
+}
+
+impl Parse for ComponentManifest {
+    fn parse(input: ParseStream<'_>) -> SynResult<Self> {
+        let mut components = Vec::new();
+
+        while !input.is_empty() {
+            components.push(input.parse()?);
+        }
+
+        Ok(Self { components })
+    }
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -46,23 +135,28 @@ fn main() -> Result<(), Box<dyn Error>> {
     let input = arguments
         .next()
         .map(PathBuf::from)
-        .ok_or_else(|| invalid_input("入力ファイルが指定されていません"))?;
+        .ok_or_else(|| invalid_input("components/mod.rsが指定されていません"))?;
 
     let output = arguments
         .next()
         .map(PathBuf::from)
-        .ok_or_else(|| invalid_input("出力ファイルが指定されていません"))?;
+        .ok_or_else(|| invalid_input("生成先が指定されていません"))?;
 
     if arguments.next().is_some() {
         return Err(invalid_input("引数が多すぎます").into());
     }
 
-    let manifest_source = fs::read_to_string(&input)?;
-    let manifest: Manifest = toml::from_str(&manifest_source)?;
+    let source = fs::read_to_string(&input)?;
+
+    let file: File = syn::parse_file(&source)?;
+
+    let tokens = find_ffi_components_macro(&file)?;
+
+    let manifest: ComponentManifest = syn::parse2(tokens)?;
 
     validate_manifest(&manifest)?;
 
-    let generated = generate(&manifest)?;
+    let generated = generate(&manifest);
 
     if let Some(parent) = output.parent() {
         fs::create_dir_all(parent)?;
@@ -73,152 +167,137 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn generate(manifest: &Manifest) -> Result<String, std::fmt::Error> {
-    let mut output = String::new();
+fn find_ffi_components_macro(file: &File) -> Result<TokenStream, Box<dyn Error>> {
+    for item in &file.items {
+        let Item::Macro(item_macro) = item else {
+            continue;
+        };
 
-    writeln!(
-        output,
-        "// @generated by tools/ffi-gen. Do not edit manually."
-    )?;
-    writeln!(output)?;
-    writeln!(output, "use super::*;")?;
-    writeln!(
-        output,
-        "use crate::runtime::{{\
-        ActionId, \
-        ButtonNode, \
-        FrameNode, \
-        HStackNode, \
-        NodeId, \
-        PaddingNode, \
-        TextNode, \
-        VStackNode, \
-        ViewNode, \
-        ViewNodeKind, \
-        ZStackNode, \
-    }};"
-    )?;
-    writeln!(output)?;
+        let Some(last_segment) = item_macro.mac.path.segments.last() else {
+            continue;
+        };
 
-    for component in &manifest.component {
-        generate_component(&mut output, component)?;
-    }
-
-    Ok(output)
-}
-
-fn generate_component(output: &mut String, component: &Component) -> Result<(), std::fmt::Error> {
-    writeln!(output, "#[unsafe(no_mangle)]")?;
-    writeln!(output, "#[allow(clippy::too_many_arguments)]")?;
-    writeln!(output, "pub extern \"C\" fn {}(", component.name)?;
-    writeln!(output, "    runtime: *mut VkRuntime,")?;
-    writeln!(output, "    node_id: u64,")?;
-
-    for argument in &component.arguments {
-        writeln!(output, "    {}: {},", argument.name, argument.ty,)?;
-    }
-
-    writeln!(output, ") -> i32 {{")?;
-    writeln!(output, "    ffi_status(|| {{")?;
-
-    for argument in &component.arguments {
-        match (&argument.bind, &argument.convert) {
-            (bind, Some(convert)) => {
-                let binding = bind.as_deref().unwrap_or(argument.name.as_str());
-
-                writeln!(output, "        let {binding} = {convert};",)?;
-            }
-
-            (Some(bind), None) if bind != &argument.name => {
-                writeln!(output, "        let {bind} = {};", argument.name,)?;
-            }
-
-            _ => {}
+        if last_segment.ident == "ffi_components" {
+            return Ok(item_macro.mac.tokens.clone());
         }
     }
 
-    if !component.arguments.is_empty() {
-        writeln!(output)?;
-    }
-
-    writeln!(output, "        let runtime = runtime_mut(runtime)?;",)?;
-    writeln!(output, "        let builder = active_builder(runtime)?;",)?;
-    writeln!(output)?;
-    writeln!(output, "        let node = {};", component.node.trim(),)?;
-    writeln!(output)?;
-
-    let builder_method = match component.kind {
-        ComponentKind::Container => "begin",
-        ComponentKind::Leaf => "leaf",
-    };
-
-    writeln!(
-        output,
-        "        builder.{builder_method}(ViewNode::new(NodeId(node_id), node));",
-    )?;
-    writeln!(output)?;
-    writeln!(output, "        Ok(())")?;
-    writeln!(output, "    }})")?;
-    writeln!(output, "}}")?;
-    writeln!(output)?;
-
-    Ok(())
+    Err(invalid_input("ffi_components!が見つかりません").into())
 }
 
-fn validate_manifest(manifest: &Manifest) -> Result<(), Box<dyn Error>> {
-    for component in &manifest.component {
-        if !component.name.starts_with("vk_") || !is_identifier(&component.name) {
-            return Err(invalid_input(format!("不正なFFI関数名です: {}", component.name,)).into());
+fn validate_manifest(manifest: &ComponentManifest) -> Result<(), Box<dyn Error>> {
+    let mut names = HashSet::new();
+
+    for component in &manifest.components {
+        let name = component.name.to_string();
+
+        if !name.starts_with("vk_") {
+            return Err(invalid_input(format!("FFI関数名はvk_で始めてください: {name}",)).into());
         }
+
+        if !names.insert(name.clone()) {
+            return Err(invalid_input(format!("FFI関数が重複しています: {name}",)).into());
+        }
+
+        let mut argument_names = HashSet::new();
 
         for argument in &component.arguments {
-            if !is_identifier(&argument.name) {
+            let argument_name = argument.name.to_string();
+
+            if !argument_names.insert(argument_name.clone()) {
                 return Err(invalid_input(format!(
-                    "{}の引数名が不正です: {}",
-                    component.name, argument.name,
+                    "{name}の引数が重複しています: {argument_name}",
                 ))
                 .into());
             }
 
-            if let Some(bind) = argument.bind.as_deref()
-                && !is_identifier(bind)
-            {
+            if argument.binding.is_some() != argument.conversion.is_some() {
                 return Err(invalid_input(format!(
-                    "{}のbinding名が不正です: {}",
-                    component.name, bind,
+                    "{name}::{argument_name}の変換定義が不完全です",
                 ))
                 .into());
             }
-
-            if argument.ty.trim().is_empty() {
-                return Err(invalid_input(format!(
-                    "{}::{}の型が空です",
-                    component.name, argument.name,
-                ))
-                .into());
-            }
-        }
-
-        if component.node.trim().is_empty() {
-            return Err(invalid_input(format!("{}のnode式が空です", component.name,)).into());
         }
     }
 
     Ok(())
 }
 
-fn is_identifier(value: &str) -> bool {
-    let mut characters = value.chars();
+fn generate(manifest: &ComponentManifest) -> String {
+    let functions = manifest.components.iter().map(generate_component);
 
-    let Some(first) = characters.next() else {
-        return false;
+    let output = quote! {
+        // @generated by tools/ffi-gen.
+        // Do not edit manually.
+
+        use super::*;
+
+        #(#functions)*
     };
 
-    if first != '_' && !first.is_ascii_alphabetic() {
-        return false;
-    }
+    output.to_string()
+}
 
-    characters.all(|character| character == '_' || character.is_ascii_alphanumeric())
+fn generate_component(component: &Component) -> TokenStream {
+    let name = &component.name;
+
+    let argument_names = component.arguments.iter().map(|argument| &argument.name);
+
+    let argument_types = component.arguments.iter().map(|argument| &argument.ty);
+
+    let conversions = component.arguments.iter().filter_map(|argument| {
+        let binding = argument.binding.as_ref()?;
+
+        let conversion = argument.conversion.as_ref()?;
+
+        Some(quote! {
+            let #binding = #conversion;
+        })
+    });
+
+    let node = &component.node;
+
+    let builder_method = match component.kind {
+        ComponentKind::Container => Ident::new("begin", component.name.span()),
+
+        ComponentKind::Leaf => Ident::new("leaf", component.name.span()),
+    };
+
+    quote! {
+        #[unsafe(no_mangle)]
+        #[allow(clippy::too_many_arguments)]
+        pub extern "C" fn #name(
+            runtime: *mut VkRuntime,
+            node_id: u64,
+            #(
+                #argument_names:
+                    #argument_types,
+            )*
+        ) -> i32 {
+            ffi_status(|| {
+                #(#conversions)*
+
+                let runtime =
+                    runtime_mut(runtime)?;
+
+                let builder =
+                    active_builder(runtime)?;
+
+                let node = #node;
+
+                builder.#builder_method(
+                    crate::runtime::ViewNode::new(
+                        crate::runtime::NodeId(
+                            node_id,
+                        ),
+                        node,
+                    ),
+                );
+
+                Ok(())
+            })
+        }
+    }
 }
 
 fn write_if_changed(path: &Path, content: &str) -> io::Result<()> {
