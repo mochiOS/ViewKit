@@ -11,7 +11,6 @@ const CONTROL_INSET: f32 = 2.0;
 const SEGMENT_HEIGHT: f32 = 30.0;
 const SEGMENT_MIN_WIDTH: f32 = 64.0;
 const ANIM_DURATION: Duration = Duration::from_millis(180);
-const ANIM_FRAME: Duration = Duration::from_millis(16);
 
 struct SegmentedItem {
     value: usize,
