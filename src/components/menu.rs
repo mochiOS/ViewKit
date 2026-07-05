@@ -3,13 +3,13 @@ use std::rc::Rc;
 
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
-use crate::layout::{StackAlignment, StackGap, ViewExt};
+use crate::layout::{IntoStackChild, StackAlignment, StackGap, ViewExt};
 use crate::theme::{Color, CornerRadius, ShadowStyle, Theme};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 use super::{
-    BorderStyle, Button, ButtonInteractionState, ButtonStyle, Card, Divider, HStack, Padding, Text,
-    VStack, ZStackAlignment,
+    BorderStyle, Button, ButtonInteractionState, ButtonStyle, Card, Divider, HStack, Padding,
+    Spacer, Text, VStack, ZStackAlignment,
 };
 
 struct ViewRef<'a, V>
@@ -213,7 +213,11 @@ impl Menu {
     }
 
     pub fn separator(mut self) -> Self {
-        self.content = std::mem::take(&mut self.content).child(Divider::new());
+        self.content = std::mem::take(&mut self.content)
+            .child(Spacer::new().into_stack_child().height(4.0))
+            .child(Divider::new())
+            .child(Spacer::new().into_stack_child().height(4.0));
+
         self
     }
 
