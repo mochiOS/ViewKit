@@ -350,6 +350,27 @@ impl FileManagerExample {
                 ),
         )
     }
+
+    fn menu(&self) -> StackChild {
+        Menu::new()
+            .item(MenuItem::new("開く").shortcut("Enter").on_select(|| {
+                println!("open");
+            }))
+            .item(MenuItem::new("名前を変更").shortcut("F2").on_select(|| {
+                println!("rename");
+            }))
+            .item(MenuItem::new("複製").enabled(false))
+            .separator()
+            .item(
+                MenuItem::new("削除")
+                    .shortcut("Delete")
+                    .danger(true)
+                    .on_select(|| {
+                        println!("delete");
+                    }),
+            )
+            .width(220.0)
+    }
 }
 
 impl App for FileManagerExample {
@@ -378,7 +399,8 @@ impl App for FileManagerExample {
         let show_metadata = width >= 900.0;
         let show_details = width >= 1040.0;
 
-        let list = self.file_list(show_metadata);
+        let list =
+            viewkit::components::ContextMenu::new(self.file_list(show_metadata), self.menu());
 
         let mut content = HStack::new()
             .alignment(StackAlignment::Stretch)
@@ -417,26 +439,6 @@ impl App for FileManagerExample {
                             ),
                     )
                     .height(34.0),
-            )
-            .child(
-                Menu::new()
-                    .item(MenuItem::new("開く").shortcut("Enter").on_select(|| {
-                        println!("open");
-                    }))
-                    .item(MenuItem::new("名前を変更").shortcut("F2").on_select(|| {
-                        println!("rename");
-                    }))
-                    .item(MenuItem::new("複製").enabled(false))
-                    .separator()
-                    .item(
-                        MenuItem::new("削除")
-                            .shortcut("Delete")
-                            .danger(true)
-                            .on_select(|| {
-                                println!("delete");
-                            }),
-                    )
-                    .width(220.0),
             );
 
         let mut shell = HStack::new()

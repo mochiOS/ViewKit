@@ -1,12 +1,12 @@
 mod background;
 mod button;
 mod card;
+pub mod context_menu;
 mod divider;
 mod group;
 mod hstack;
 mod list;
 mod menu;
-mod menu_item;
 mod overlay;
 mod padding;
 mod rectangle;
@@ -30,6 +30,7 @@ pub use zstack::{ZStack, ZStackAlignment};
 
 pub use button::{Button, ButtonColor, ButtonInteractionState, ButtonStyle};
 pub use card::Card;
+pub use context_menu::ContextMenu;
 pub use list::ListRow;
 pub use menu::{Menu, MenuItem};
 pub use rectangle::{BorderStyle, Rectangle, RectangleColor};
