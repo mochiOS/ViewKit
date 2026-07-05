@@ -75,6 +75,7 @@ struct FileManagerExample {
     status: State<String>,
     show_hidden: State<bool>,
     view_mode: State<usize>,
+    volume: State<f32>,
 }
 
 impl FileManagerExample {
@@ -171,6 +172,14 @@ impl FileManagerExample {
                                     ),
                                 )
                                 .height(74.0),
+                        )
+                        .child(
+                            Slider::new(self.volume.binding())
+                                .range(0.0..=100.0)
+                                .step(1.0)
+                                .label("音量")
+                                .layout()
+                                .height(32.0),
                         ),
                 ),
             )
@@ -403,6 +412,7 @@ impl App for FileManagerExample {
             status: State::new(String::from("ホームを表示中")),
             show_hidden: State::new(false),
             view_mode: State::new(0),
+            volume: State::new(80.0),
         }
     }
 

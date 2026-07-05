@@ -21,6 +21,17 @@ pub enum DrawCommand {
         color: Color,
     },
 
+    FillEllipse {
+        rect: Rect,
+        color: Color,
+    },
+
+    StrokeEllipse {
+        rect: Rect,
+        color: Color,
+        width: f32,
+    },
+
     StrokeRect {
         rect: Rect,
         color: Color,

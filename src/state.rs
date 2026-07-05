@@ -147,6 +147,10 @@ impl<T> Binding<T> {
 
         Some(Transition::new(from, to, started_at))
     }
+
+    pub(crate) fn commit(&self) {
+        mark_changed();
+    }
 }
 
 impl<T> Clone for Binding<T> {

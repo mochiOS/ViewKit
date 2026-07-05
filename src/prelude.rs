@@ -10,10 +10,10 @@ pub use crate::animation::{
 pub use crate::app::{App, ViewContext, WindowOptions};
 pub use crate::components::{
     Background, BorderStyle, Button, ButtonColor, ButtonInteractionState, ButtonStyle, Card,
-    Checkbox, ContextMenu, Divider, Group, HStack, ListRow, Menu, MenuItem, Overlay, Padding,
-    RadioButton, Rectangle, RectangleColor, Scroll, ScrollAxis, ScrollState, SegmentedControl,
-    Spacer, Switch, Text, TextField, TextFieldInteractionState, TextFieldSize, VStack, ZStack,
-    ZStackAlignment,
+    Checkbox, ContextMenu, Divider, Ellipse, EllipseColor, Group, HStack, ListRow, Menu, MenuItem,
+    Overlay, Padding, RadioButton, Rectangle, RectangleColor, Scroll, ScrollAxis, ScrollState,
+    SegmentedControl, Slider, SliderInteractionState, Spacer, Switch, Text, TextField,
+    TextFieldInteractionState, TextFieldSize, VStack, ZStack, ZStackAlignment,
 };
 pub use crate::geometry::{Point, Rect, Size};
 pub use crate::layout::{

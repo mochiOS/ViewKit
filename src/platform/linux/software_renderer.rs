@@ -317,6 +317,55 @@ impl Renderer for SoftwareRenderer {
                     pixmap.stroke_path(&path, &paint, &stroke, transform, clip_stack.last());
                 }
 
+                DrawCommand::FillEllipse { rect, color } => {
+                    if rect.intersection(dirty_bounds).is_none() {
+                        continue;
+                    }
+
+                    let Some(rect) = to_skia_rect(*rect) else {
+                        continue;
+                    };
+
+                    let path = ellipse_path(rect);
+                    let paint = solid_paint(*color);
+
+                    pixmap.fill_path(
+                        &path,
+                        &paint,
+                        FillRule::Winding,
+                        transform,
+                        clip_stack.last(),
+                    );
+                }
+
+                DrawCommand::StrokeEllipse { rect, color, width } => {
+                    if rect
+                        .expanded(*width * 0.5 + 1.0)
+                        .intersection(dirty_bounds)
+                        .is_none()
+                    {
+                        continue;
+                    }
+
+                    if !width.is_finite() || *width <= 0.0 {
+                        continue;
+                    }
+
+                    let Some(rect) = to_skia_rect(*rect) else {
+                        continue;
+                    };
+
+                    let path = ellipse_path(rect);
+                    let paint = solid_paint(*color);
+
+                    let stroke = Stroke {
+                        width: *width,
+                        ..Stroke::default()
+                    };
+
+                    pixmap.stroke_path(&path, &paint, &stroke, transform, clip_stack.last());
+                }
+
                 DrawCommand::PushClip { rect } => {
                     let mask = create_clip_mask(
                         *rect,
@@ -540,6 +589,65 @@ fn rounded_rect_path(rect: SkiaRect, radius: f32) -> Path {
     builder.line_to(left, top + radius);
 
     builder.quad_to(left, top, left + radius, top);
+
+    builder.close();
+
+    builder
+        .finish()
+        .unwrap_or_else(|| PathBuilder::from_rect(rect))
+}
+
+fn ellipse_path(rect: SkiaRect) -> Path {
+    const KAPPA: f32 = 0.552_284_8;
+
+    let center_x = (rect.left() + rect.right()) / 2.0;
+    let center_y = (rect.top() + rect.bottom()) / 2.0;
+
+    let radius_x = rect.width() / 2.0;
+    let radius_y = rect.height() / 2.0;
+
+    let control_x = radius_x * KAPPA;
+    let control_y = radius_y * KAPPA;
+
+    let mut builder = PathBuilder::new();
+
+    builder.move_to(center_x + radius_x, center_y);
+
+    builder.cubic_to(
+        center_x + radius_x,
+        center_y + control_y,
+        center_x + control_x,
+        center_y + radius_y,
+        center_x,
+        center_y + radius_y,
+    );
+
+    builder.cubic_to(
+        center_x - control_x,
+        center_y + radius_y,
+        center_x - radius_x,
+        center_y + control_y,
+        center_x - radius_x,
+        center_y,
+    );
+
+    builder.cubic_to(
+        center_x - radius_x,
+        center_y - control_y,
+        center_x - control_x,
+        center_y - radius_y,
+        center_x,
+        center_y - radius_y,
+    );
+
+    builder.cubic_to(
+        center_x + control_x,
+        center_y - radius_y,
+        center_x + radius_x,
+        center_y - control_y,
+        center_x + radius_x,
+        center_y,
+    );
 
     builder.close();
 

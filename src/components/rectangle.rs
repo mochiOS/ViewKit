@@ -16,7 +16,7 @@ pub enum RectangleColor {
 }
 
 impl RectangleColor {
-    fn resolve(self, context: &PaintContext<'_>) -> Color {
+    pub(crate) fn resolve(self, context: &PaintContext<'_>) -> Color {
         match self {
             Self::Background => context.theme.colors.background,
             Self::Surface => context.theme.colors.surface,
@@ -60,7 +60,7 @@ impl BorderStyle {
         Self::Custom { color, width }
     }
 
-    fn resolve(self, context: &PaintContext<'_>) -> Option<(Color, f32)> {
+    pub(crate) fn resolve(self, context: &PaintContext<'_>) -> Option<(Color, f32)> {
         let (color, width) = match self {
             Self::None => {
                 return None;
