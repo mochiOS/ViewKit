@@ -200,7 +200,7 @@ impl FileManagerExample {
                     })
                     .frame(36.0, 32.0),
             )
-            .child(self.view_mode_selector().layout().flex_shrink(0.0))
+            .child(self.view_mode_selector())
             .child(
                 TextField::new(self.path.binding())
                     .size(TextFieldSize::Small)
@@ -376,13 +376,13 @@ impl FileManagerExample {
             .width(220.0)
     }
 
-    fn view_mode_selector(&self) -> impl View + 'static {
-        HStack::new()
-            .alignment(StackAlignment::Center)
-            .gap(StackGap::Small)
-            .child(RadioButton::new(self.view_mode.binding(), 0).label("リスト"))
-            .child(RadioButton::new(self.view_mode.binding(), 1).label("グリッド"))
-            .child(RadioButton::new(self.view_mode.binding(), 2).label("カラム"))
+    fn view_mode_selector(&self) -> StackChild {
+        SegmentedControl::new(self.view_mode.binding())
+            .item(0, "リスト")
+            .item(1, "グリッド")
+            .item(2, "カラム")
+            .height(34.0)
+            .flex_shrink(0.0)
     }
 }
 

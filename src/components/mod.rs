@@ -39,5 +39,6 @@ pub use list::ListRow;
 pub use menu::{Menu, MenuItem};
 pub use radio::RadioButton;
 pub use rectangle::{BorderStyle, Rectangle, RectangleColor};
+pub use segment_control::SegmentedControl;
 pub use text::Text;
 pub use text_field::{TextField, TextFieldInteractionState, TextFieldSize};

@@ -416,6 +416,15 @@ impl Button {
         }
     }
 
+    pub(crate) fn with_interaction_and_label(
+        interaction: ButtonInteractionState,
+        label: impl Into<String>,
+    ) -> Self {
+        let mut button = Self::with_interaction(interaction);
+        button.label = Some(label.into());
+        button
+    }
+
     #[must_use]
     pub fn on_click(mut self, callback: impl FnMut() + 'static) -> Self {
         self.on_click = Some(RefCell::new(Box::new(callback)));
