@@ -82,6 +82,22 @@ fn generate(manifest: &Manifest) -> Result<String, std::fmt::Error> {
     )?;
     writeln!(output)?;
     writeln!(output, "use super::*;")?;
+    writeln!(
+        output,
+        "use crate::runtime::{{\
+        ActionId, \
+        ButtonNode, \
+        FrameNode, \
+        HStackNode, \
+        NodeId, \
+        PaddingNode, \
+        TextNode, \
+        VStackNode, \
+        ViewNode, \
+        ViewNodeKind, \
+        ZStackNode, \
+    }};"
+    )?;
     writeln!(output)?;
 
     for component in &manifest.component {
