@@ -742,3 +742,38 @@ pub extern "C" fn vk_push_text_field(
         Ok(())
     })
 }
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn vk_push_image(
+    runtime: *mut VkRuntime,
+    node_id: u64,
+    data: VkBytes,
+    content_mode: u32,
+    radius_kind: u32,
+    radius: f32,
+    opacity: f32,
+    sampling: u32,
+) -> i32 {
+    ffi_status(|| {
+        let image = decode_image_data(data)?;
+        let content_mode = decode_image_content_mode(content_mode)?;
+        let radius = decode_corner_radius(radius_kind, radius)?;
+        let opacity = sanitize_opacity(opacity);
+        let sampling = decode_image_sampling(sampling)?;
+        let factory: FfiViewFactory = Box::new(move |_node_id, children, _context| {
+            expect_no_children(children)?;
+            Ok(FfiBuiltView::View(Box::new(
+                crate::components::Image::new(image)
+                    .content_mode(content_mode)
+                    .radius(radius)
+                    .opacity(opacity)
+                    .sampling(sampling),
+            )))
+        });
+        let runtime = runtime_mut(runtime)?;
+        let builder = active_builder(runtime)?;
+        let node = FfiNode::component(node_id, factory);
+        builder.leaf(node);
+        Ok(())
+    })
+}

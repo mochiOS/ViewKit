@@ -33,6 +33,18 @@
 
 #define VK_ABI_VERSION_PATCH 0
 
+#define VK_IMAGE_CONTENT_MODE_FIT 0
+
+#define VK_IMAGE_CONTENT_MODE_FILL 1
+
+#define VK_IMAGE_CONTENT_MODE_STRETCH 2
+
+#define VK_IMAGE_SAMPLING_NEAREST 0
+
+#define VK_IMAGE_SAMPLING_BILINEAR 1
+
+#define VK_IMAGE_SAMPLING_BICUBIC 2
+
 #define VK_ABI_VERSION (((VK_ABI_VERSION_MAJOR << 16) | (VK_ABI_VERSION_MINOR << 8)) | VK_ABI_VERSION_PATCH)
 
 #define VK_LENGTH_AUTO 0
@@ -227,6 +239,11 @@ typedef struct VkSegmentedItems {
   const struct VkSegmentedItem *pointer;
   size_t length;
 } VkSegmentedItems;
+
+typedef struct VkBytes {
+  const uint8_t *pointer;
+  size_t length;
+} VkBytes;
 
 
 
@@ -445,5 +462,14 @@ int32_t vk_push_text_field(struct VkRuntime *runtime,
                            float radius,
                            uint8_t enabled,
                            uint8_t invalid);
+
+int32_t vk_push_image(struct VkRuntime *runtime,
+                      uint64_t node_id,
+                      struct VkBytes data,
+                      uint32_t content_mode,
+                      uint32_t radius_kind,
+                      float radius,
+                      float opacity,
+                      uint32_t sampling);
 
 #endif  /* VIEWKIT_ABI_H */
