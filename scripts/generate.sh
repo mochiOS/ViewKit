@@ -13,7 +13,6 @@ cargo run \
         "$ROOT/tools/ffi-gen/Cargo.toml" \
     -- \
     "$ROOT/src/components/mod.rs" \
-    "$ROOT/src/runtime/node.rs" \
     "$ROOT/src/ffi/generated_components.rs"
 
 rustfmt \

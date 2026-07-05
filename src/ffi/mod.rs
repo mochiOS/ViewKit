@@ -8,21 +8,22 @@ use crate::layout::{LayoutLength, StackAlignment, StackDistribution, StackGap};
 use crate::platform::linux::LinuxBackend;
 use crate::platform::{PlatformApplication, PlatformEvent, PlatformWindow, WindowConfig};
 use crate::renderer::Viewport;
-use crate::runtime::{
-    ComponentInstanceId, NodeId, RectangleNode, RuntimeEvent, ViewNode, ViewNodeKind, ViewRuntime,
-    ViewTreeBuilder,
-};
 use crate::theme::{Color, CornerRadius, Theme};
 use crate::typography::{TextAlignment, TextMeasurer, Typography};
 use crate::view::{PaintContext, RedrawSchedule, View};
+use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
+use std::rc::Rc;
 use std::slice;
 use std::str;
 use std::time::Instant;
 
 mod generated_components;
+mod tree;
 
+use crate::ffi::tree::{FfiBuildContext, FfiTreeBuilder, FfiTreeBuilderError, SharedActionQueue};
 pub use generated_components::*;
 
 pub const VK_Z_ALIGNMENT_TOP_LEADING: u32 = 0;
@@ -72,6 +73,9 @@ pub enum VkStatus {
 
     PlatformError = 11,
     UnsupportedPlatform = 12,
+
+    InvalidChildCount = 13,
+    InvalidTreeNode = 14,
 
     Panic = 255,
 }
@@ -204,6 +208,13 @@ pub struct VkActionEvent {
     pub event_kind: u32,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct DecodedRectangleStyle {
+    color: RectangleColor,
+    radius: CornerRadius,
+    border: BorderStyle,
+}
+
 pub const VK_EVENT_BUTTON_CLICKED: u32 = 1;
 
 pub const VK_STACK_GAP_NONE: u32 = 0;
@@ -257,39 +268,31 @@ pub const VK_BUTTON_COLOR_ACCENT: u32 = 0;
 pub const VK_BUTTON_COLOR_DESTRUCTIVE: u32 = 1;
 
 pub struct VkRuntime {
-    component_instance: ComponentInstanceId,
+    component_instance_id: u64,
 
-    runtime: ViewRuntime,
+    root: Option<Box<dyn View>>,
 
-    builder: Option<ViewTreeBuilder>,
+    builder: Option<FfiTreeBuilder>,
+
+    actions: SharedActionQueue,
 }
 
 impl VkRuntime {
     fn new(component_instance_id: u64) -> Self {
-        let component_instance = ComponentInstanceId(component_instance_id);
-
         Self {
-            component_instance,
+            component_instance_id,
 
-            runtime: ViewRuntime::new(component_instance),
+            root: None,
 
             builder: None,
+
+            actions: Rc::new(RefCell::new(VecDeque::new())),
         }
-    }
-
-    pub fn runtime(&self) -> &ViewRuntime {
-        &self.runtime
-    }
-
-    pub fn runtime_mut(&mut self) -> &mut ViewRuntime {
-        &mut self.runtime
     }
 }
 
 struct VkWindowApplication<'a> {
     runtime: &'a mut VkRuntime,
-
-    root: Option<Box<dyn View>>,
 
     theme: Theme,
     typography: Typography,
@@ -304,24 +307,13 @@ impl<'a> VkWindowApplication<'a> {
         Self {
             runtime,
 
-            root: None,
-
             theme: Theme::DEFAULT,
             typography: Typography::DEFAULT,
             text_measurer: TextMeasurer::new(),
 
             event_dispatcher: EventDispatcher::new(),
+
             redraw_schedule: RedrawSchedule::new(),
-        }
-    }
-
-    fn rebuild_root(&mut self) {
-        self.root = self.runtime.runtime_mut().build_view();
-    }
-
-    fn ensure_root(&mut self) {
-        if self.root.is_none() {
-            self.rebuild_root();
         }
     }
 }
@@ -332,7 +324,6 @@ impl PlatformApplication for VkWindowApplication<'_> {
             PlatformEvent::Resumed { .. }
             | PlatformEvent::Resized { .. }
             | PlatformEvent::ScaleFactorChanged { .. } => {
-                self.rebuild_root();
                 window.request_redraw();
                 return;
             }
@@ -344,9 +335,7 @@ impl PlatformApplication for VkWindowApplication<'_> {
             _ => {}
         }
 
-        self.ensure_root();
-
-        let Some(root) = self.root.as_ref() else {
+        let Some(root) = self.runtime.root.as_ref() else {
             return;
         };
 
@@ -362,16 +351,12 @@ impl PlatformApplication for VkWindowApplication<'_> {
             context.redraw_request()
         };
 
-        self.runtime.runtime_mut().collect_actions();
-
         if redraw_request.is_requested() {
             window.request_redraw();
         }
     }
 
     fn draw(&mut self, viewport: Viewport, display_list: &mut DisplayList) -> Rect {
-        self.ensure_root();
-
         let bounds = viewport.logical_bounds();
 
         display_list.push(DrawCommand::Clear {
@@ -380,7 +365,7 @@ impl PlatformApplication for VkWindowApplication<'_> {
 
         self.redraw_schedule.clear();
 
-        if let Some(root) = self.root.as_ref() {
+        if let Some(root) = self.runtime.root.as_ref() {
             let mut context = PaintContext::new(
                 display_list,
                 &self.theme,
@@ -444,6 +429,10 @@ fn status_name(status: i32) -> &'static str {
 
         value if value == VkStatus::Panic as i32 => "panic",
 
+        value if value == VkStatus::InvalidChildCount as i32 => "invalid_child_count",
+
+        value if value == VkStatus::InvalidTreeNode as i32 => "invalid_tree_node",
+
         value if value == VkStatus::PlatformError as i32 => "platform_error",
 
         value if value == VkStatus::UnsupportedPlatform as i32 => "unsupported_platform",
@@ -476,11 +465,7 @@ pub extern "C" fn vk_tree_begin(runtime: *mut VkRuntime, root_node_id: u64) -> i
             return Err(VkStatus::BuilderAlreadyActive);
         }
 
-        let mut builder = ViewTreeBuilder::new(runtime.component_instance);
-
-        builder.begin(ViewNode::new(NodeId(root_node_id), ViewNodeKind::Root));
-
-        runtime.builder = Some(builder);
+        runtime.builder = Some(FfiTreeBuilder::new(root_node_id));
 
         Ok(())
     })
@@ -515,17 +500,16 @@ pub extern "C" fn vk_tree_commit(runtime: *mut VkRuntime) -> i32 {
 
         let mut builder = runtime.builder.take().ok_or(VkStatus::NoActiveBuilder)?;
 
-        /*
-         * vk_tree_begin()が作成したRootを閉じる。
-         *
-         * 子Nodeが閉じられていない場合は、
-         * finish()がUnclosedNodesを返す。
-         */
         builder.end().map_err(map_builder_error)?;
 
         let tree = builder.finish().map_err(map_builder_error)?;
 
-        runtime.runtime.commit(tree);
+        runtime.actions.borrow_mut().clear();
+
+        let mut context =
+            FfiBuildContext::new(runtime.component_instance_id, Rc::clone(&runtime.actions));
+
+        runtime.root = Some(tree.build(&mut context)?);
 
         Ok(())
     })
@@ -534,9 +518,7 @@ pub extern "C" fn vk_tree_commit(runtime: *mut VkRuntime) -> i32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn vk_runtime_collect_actions(runtime: *mut VkRuntime) -> i32 {
     ffi_status(|| {
-        let runtime = runtime_mut(runtime)?;
-
-        runtime.runtime.collect_actions();
+        runtime_mut(runtime)?;
 
         Ok(())
     })
@@ -559,29 +541,14 @@ pub extern "C" fn vk_poll_action(
 
         let runtime = runtime_mut(runtime)?;
 
-        let Some(action) = runtime.runtime.poll_action() else {
+        let action = runtime.actions.borrow_mut().pop_front();
+
+        let Some(action) = action else {
             return Ok(());
         };
 
-        let event_kind = match action.event {
-            RuntimeEvent::ButtonClicked => VK_EVENT_BUTTON_CLICKED,
-
-            _ => {
-                return Err(VkStatus::UnsupportedEvent);
-            }
-        };
-
         unsafe {
-            *output = VkActionEvent {
-                component_instance_id: action.component_instance.0,
-
-                node_id: action.node_id.0,
-
-                action_id: action.action_id.0,
-
-                event_kind,
-            };
-
+            *output = action;
             *has_action = 1;
         }
 
@@ -597,7 +564,7 @@ fn runtime_mut<'a>(runtime: *mut VkRuntime) -> Result<&'a mut VkRuntime, VkStatu
     Ok(unsafe { &mut *runtime })
 }
 
-fn active_builder(runtime: &mut VkRuntime) -> Result<&mut ViewTreeBuilder, VkStatus> {
+fn active_builder(runtime: &mut VkRuntime) -> Result<&mut FfiTreeBuilder, VkStatus> {
     runtime.builder.as_mut().ok_or(VkStatus::NoActiveBuilder)
 }
 
@@ -703,15 +670,15 @@ fn decode_button_color(value: u32) -> Result<ButtonColor, VkStatus> {
     }
 }
 
-fn map_builder_error(error: crate::runtime::TreeBuilderError) -> VkStatus {
+fn map_builder_error(error: FfiTreeBuilderError) -> VkStatus {
     match error {
-        crate::runtime::TreeBuilderError::NoOpenNode => VkStatus::NoOpenNode,
+        FfiTreeBuilderError::NoOpenNode => VkStatus::NoOpenNode,
 
-        crate::runtime::TreeBuilderError::UnclosedNodes => VkStatus::UnclosedNodes,
+        FfiTreeBuilderError::UnclosedNodes => VkStatus::UnclosedNodes,
 
-        crate::runtime::TreeBuilderError::MultipleRoots => VkStatus::MultipleRoots,
+        FfiTreeBuilderError::MultipleRoots => VkStatus::MultipleRoots,
 
-        crate::runtime::TreeBuilderError::MissingRoot => VkStatus::MissingRoot,
+        FfiTreeBuilderError::MissingRoot => VkStatus::MissingRoot,
     }
 }
 
@@ -778,14 +745,21 @@ fn decode_layout_length(value: VkLength) -> Result<LayoutLength, VkStatus> {
     }
 }
 
-fn decode_rectangle_style(style: VkRectangleStyle) -> Result<RectangleNode, VkStatus> {
-    Ok(RectangleNode {
+fn decode_rectangle_style(style: VkRectangleStyle) -> Result<DecodedRectangleStyle, VkStatus> {
+    Ok(DecodedRectangleStyle {
         color: decode_rectangle_color(style.color_kind, style.custom_color)?,
 
         radius: decode_corner_radius(style.radius_kind, style.radius)?,
 
         border: decode_border_style(style.border_kind, style.border_color, style.border_width)?,
     })
+}
+
+fn build_rectangle(style: DecodedRectangleStyle) -> crate::components::Rectangle {
+    crate::components::Rectangle::new()
+        .color(style.color)
+        .radius(style.radius)
+        .border(style.border)
 }
 
 fn decode_rectangle_color(kind: u32, custom_color: VkColor) -> Result<RectangleColor, VkStatus> {
@@ -862,7 +836,7 @@ pub extern "C" fn vk_runtime_run_window(
             return Err(VkStatus::BuilderAlreadyActive);
         }
 
-        if runtime.runtime_mut().tree().is_none() {
+        if runtime.root.is_none() {
             return Err(VkStatus::MissingRoot);
         }
 
