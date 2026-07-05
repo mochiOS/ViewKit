@@ -375,6 +375,22 @@ impl Scroll {
 }
 
 impl View for Scroll {
+    fn measure(&self, constraints: Constraints, _context: &mut MeasureContext<'_>) -> Size {
+        let width = if constraints.maximum.width.is_finite() {
+            constraints.maximum.width
+        } else {
+            constraints.minimum.width
+        };
+
+        let height = if constraints.maximum.height.is_finite() {
+            constraints.maximum.height
+        } else {
+            constraints.minimum.height
+        };
+
+        constraints.constrain(Size::new(width.max(0.0), height.max(0.0)))
+    }
+
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
         if bounds.size.width <= 0.0 || bounds.size.height <= 0.0 {
             return;

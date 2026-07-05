@@ -280,6 +280,28 @@ int32_t vk_poll_action(struct VkRuntime *runtime,
                        struct VkActionEvent *output,
                        uint8_t *has_action);
 
+int32_t vk_state_get_bool(struct VkRuntime *runtime, uint64_t state_id, uint8_t *output);
+
+int32_t vk_state_set_bool(struct VkRuntime *runtime, uint64_t state_id, uint8_t value);
+
+int32_t vk_state_get_f32(struct VkRuntime *runtime, uint64_t state_id, float *output);
+
+int32_t vk_state_set_f32(struct VkRuntime *runtime, uint64_t state_id, float value);
+
+int32_t vk_state_get_u64(struct VkRuntime *runtime, uint64_t state_id, uint64_t *output);
+
+int32_t vk_state_set_u64(struct VkRuntime *runtime, uint64_t state_id, uint64_t value);
+
+int32_t vk_state_string_length(struct VkRuntime *runtime, uint64_t state_id, size_t *output);
+
+int32_t vk_state_copy_string(struct VkRuntime *runtime,
+                             uint64_t state_id,
+                             uint8_t *buffer,
+                             size_t buffer_length,
+                             size_t *output_length);
+
+int32_t vk_state_set_string(struct VkRuntime *runtime, uint64_t state_id, struct VkString value);
+
 int32_t vk_runtime_run_window(struct VkRuntime *runtime,
                               struct VkString title,
                               float width,

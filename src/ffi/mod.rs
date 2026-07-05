@@ -670,6 +670,187 @@ pub extern "C" fn vk_poll_action(
     })
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn vk_state_get_bool(
+    runtime: *mut VkRuntime,
+    state_id: u64,
+    output: *mut u8,
+) -> i32 {
+    ffi_status(|| {
+        if output.is_null() {
+            return Err(VkStatus::NullPointer);
+        }
+
+        let runtime = runtime_mut(runtime)?;
+
+        let value = runtime.states.borrow().get_bool(state_id)?;
+
+        unsafe {
+            *output = u8::from(value);
+        }
+
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vk_state_set_bool(runtime: *mut VkRuntime, state_id: u64, value: u8) -> i32 {
+    ffi_status(|| {
+        let runtime = runtime_mut(runtime)?;
+
+        runtime.states.borrow_mut().set_bool(state_id, value != 0)
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vk_state_get_f32(
+    runtime: *mut VkRuntime,
+    state_id: u64,
+    output: *mut f32,
+) -> i32 {
+    ffi_status(|| {
+        if output.is_null() {
+            return Err(VkStatus::NullPointer);
+        }
+
+        let runtime = runtime_mut(runtime)?;
+
+        let value = runtime.states.borrow().get_float(state_id)?;
+
+        unsafe {
+            *output = value;
+        }
+
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vk_state_set_f32(runtime: *mut VkRuntime, state_id: u64, value: f32) -> i32 {
+    ffi_status(|| {
+        let runtime = runtime_mut(runtime)?;
+
+        runtime.states.borrow_mut().set_float(state_id, value)
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vk_state_get_u64(
+    runtime: *mut VkRuntime,
+    state_id: u64,
+    output: *mut u64,
+) -> i32 {
+    ffi_status(|| {
+        if output.is_null() {
+            return Err(VkStatus::NullPointer);
+        }
+
+        let runtime = runtime_mut(runtime)?;
+
+        let value = runtime.states.borrow().get_usize(state_id)?;
+
+        let value = u64::try_from(value).map_err(|_| VkStatus::InvalidValue)?;
+
+        unsafe {
+            *output = value;
+        }
+
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vk_state_set_u64(runtime: *mut VkRuntime, state_id: u64, value: u64) -> i32 {
+    ffi_status(|| {
+        let runtime = runtime_mut(runtime)?;
+
+        let value = usize::try_from(value).map_err(|_| VkStatus::InvalidValue)?;
+
+        runtime.states.borrow_mut().set_usize(state_id, value)
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vk_state_string_length(
+    runtime: *mut VkRuntime,
+    state_id: u64,
+    output: *mut usize,
+) -> i32 {
+    ffi_status(|| {
+        if output.is_null() {
+            return Err(VkStatus::NullPointer);
+        }
+
+        let runtime = runtime_mut(runtime)?;
+
+        let value = runtime.states.borrow().get_string(state_id)?;
+
+        unsafe {
+            *output = value.len();
+        }
+
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vk_state_copy_string(
+    runtime: *mut VkRuntime,
+    state_id: u64,
+    buffer: *mut u8,
+    buffer_length: usize,
+    output_length: *mut usize,
+) -> i32 {
+    ffi_status(|| {
+        if output_length.is_null() {
+            return Err(VkStatus::NullPointer);
+        }
+
+        let runtime = runtime_mut(runtime)?;
+
+        let value = runtime.states.borrow().get_string(state_id)?;
+
+        let bytes = value.as_bytes();
+        let required_length = bytes.len();
+
+        unsafe {
+            *output_length = required_length;
+        }
+
+        if required_length == 0 {
+            return Ok(());
+        }
+
+        if buffer.is_null() {
+            return Err(VkStatus::NullPointer);
+        }
+
+        if buffer_length < required_length {
+            return Err(VkStatus::BufferTooSmall);
+        }
+
+        unsafe {
+            ptr::copy_nonoverlapping(bytes.as_ptr(), buffer, required_length);
+        }
+
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vk_state_set_string(
+    runtime: *mut VkRuntime,
+    state_id: u64,
+    value: VkString,
+) -> i32 {
+    ffi_status(|| {
+        let value = copy_string(value)?;
+        let runtime = runtime_mut(runtime)?;
+
+        runtime.states.borrow_mut().set_string(state_id, value)
+    })
+}
+
 fn runtime_mut<'a>(runtime: *mut VkRuntime) -> Result<&'a mut VkRuntime, VkStatus> {
     if runtime.is_null() {
         return Err(VkStatus::NullPointer);
