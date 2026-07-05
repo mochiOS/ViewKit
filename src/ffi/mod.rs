@@ -23,7 +23,10 @@ use std::time::Instant;
 mod generated_components;
 mod tree;
 
-use crate::ffi::tree::{FfiBuildContext, FfiTreeBuilder, FfiTreeBuilderError, SharedActionQueue};
+use crate::ffi::tree::{
+    FfiBuildContext, FfiStateStore, FfiTreeBuilder, FfiTreeBuilderError, SharedActionQueue,
+    SharedStateStore,
+};
 pub use generated_components::*;
 
 pub const VK_Z_ALIGNMENT_TOP_LEADING: u32 = 0;
@@ -275,18 +278,17 @@ pub struct VkRuntime {
     builder: Option<FfiTreeBuilder>,
 
     actions: SharedActionQueue,
+    states: SharedStateStore,
 }
 
 impl VkRuntime {
     fn new(component_instance_id: u64) -> Self {
         Self {
             component_instance_id,
-
             root: None,
-
             builder: None,
-
             actions: Rc::new(RefCell::new(VecDeque::new())),
+            states: Rc::new(RefCell::new(FfiStateStore::default())),
         }
     }
 }
@@ -506,10 +508,17 @@ pub extern "C" fn vk_tree_commit(runtime: *mut VkRuntime) -> i32 {
 
         runtime.actions.borrow_mut().clear();
 
-        let mut context =
-            FfiBuildContext::new(runtime.component_instance_id, Rc::clone(&runtime.actions));
+        let mut context = FfiBuildContext::new(
+            runtime.component_instance_id,
+            Rc::clone(&runtime.actions),
+            Rc::clone(&runtime.states),
+        );
 
-        runtime.root = Some(tree.build(&mut context)?);
+        let root = tree.build(&mut context)?;
+
+        context.retain_active_states();
+
+        runtime.root = Some(root);
 
         Ok(())
     })
