@@ -204,13 +204,12 @@ impl Renderer for SoftwareRenderer {
         for command in display_list.commands() {
             match command {
                 DrawCommand::Clear { color } => {
-                    let Some(rect) = to_skia_rect(dirty_bounds) else {
-                        continue;
-                    };
-
-                    let paint = solid_paint(*color);
-
-                    pixmap.fill_rect(rect, &paint, transform, None);
+                    pixmap.fill(SkiaColor::from_rgba8(
+                        color.red,
+                        color.green,
+                        color.blue,
+                        color.alpha,
+                    ));
                 }
 
                 DrawCommand::FillRect { rect, color } => {
