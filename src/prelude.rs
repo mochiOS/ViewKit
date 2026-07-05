@@ -10,6 +10,7 @@ pub use crate::animation::{
 pub use crate::app::{App, ViewContext, WindowOptions};
 pub use crate::components::*;
 pub use crate::geometry::{Point, Rect, Size};
+pub use crate::image::{ImageData, ImageError};
 pub use crate::layout::{
     IntoStackChild, IntoStackChildren, LayoutLength, StackAlignment, StackChild, StackDistribution,
     StackGap, ViewExt,

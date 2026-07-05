@@ -7,6 +7,7 @@ pub mod event;
 pub mod ffi;
 pub mod font;
 pub mod geometry;
+pub mod image;
 pub mod layout;
 pub mod platform;
 pub mod prelude;
