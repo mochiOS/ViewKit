@@ -75,6 +75,28 @@
 
 #define VK_BORDER_CUSTOM 3
 
+#define VK_SCROLL_AXIS_HORIZONTAL 0
+
+#define VK_SCROLL_AXIS_VERTICAL 1
+
+#define VK_SCROLL_AXIS_BOTH 2
+
+#define VK_SCROLLBAR_HIDDEN 0
+
+#define VK_SCROLLBAR_AUTOMATIC 1
+
+#define VK_SCROLLBAR_ALWAYS 2
+
+#define VK_TEXT_FIELD_SIZE_SMALL 0
+
+#define VK_TEXT_FIELD_SIZE_MEDIUM 1
+
+#define VK_TEXT_FIELD_SIZE_LARGE 2
+
+#define VK_MENU_ENTRY_ITEM 0
+
+#define VK_MENU_ENTRY_SEPARATOR 1
+
 #define VK_EVENT_BUTTON_CLICKED 1
 
 #define VK_STACK_GAP_NONE 0
@@ -180,6 +202,31 @@ typedef struct VkRectangleStyle {
   struct VkColor border_color;
   float border_width;
 } VkRectangleStyle;
+
+typedef struct VkMenuEntry {
+  uint32_t kind;
+  struct VkString label;
+  struct VkString shortcut;
+  uint8_t enabled;
+  uint8_t danger;
+  uint64_t action_id;
+} VkMenuEntry;
+
+typedef struct VkMenuEntries {
+  const struct VkMenuEntry *pointer;
+  size_t length;
+} VkMenuEntries;
+
+typedef struct VkSegmentedItem {
+  uint64_t value;
+  struct VkString label;
+  uint8_t enabled;
+} VkSegmentedItem;
+
+typedef struct VkSegmentedItems {
+  const struct VkSegmentedItem *pointer;
+  size_t length;
+} VkSegmentedItems;
 
 
 
@@ -325,7 +372,7 @@ int32_t vk_push_menu_item(struct VkRuntime *runtime,
                           uint8_t danger,
                           uint64_t action_id);
 
-int32_t vk_push_menu(struct VkRuntime *runtime, uint64_t node_id, VkMenuEntries entries);
+int32_t vk_push_menu(struct VkRuntime *runtime, uint64_t node_id, struct VkMenuEntries entries);
 
 int32_t vk_begin_overlay(struct VkRuntime *runtime, uint64_t node_id, uint32_t alignment);
 
@@ -347,7 +394,7 @@ int32_t vk_push_segmented_control(struct VkRuntime *runtime,
                                   uint64_t node_id,
                                   uint64_t state_id,
                                   uint64_t selection,
-                                  VkSegmentedItems items,
+                                  struct VkSegmentedItems items,
                                   uint8_t enabled);
 
 int32_t vk_push_slider(struct VkRuntime *runtime,

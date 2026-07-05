@@ -1,6 +1,9 @@
 //! KomeからViewKit Runtimeを操作するためのC関数
 
-use crate::components::{BorderStyle, ButtonColor, RectangleColor, ZStackAlignment};
+use crate::components::{
+    BorderStyle, ButtonColor, RectangleColor, ScrollAxis, ScrollBarVisibility, TextFieldSize,
+    ZStackAlignment,
+};
 use crate::draw_command::{DisplayList, DrawCommand};
 use crate::event::{EventContext, EventDispatcher};
 use crate::geometry::{Rect, Size};
@@ -124,6 +127,95 @@ pub const VK_BORDER_NONE: u32 = 0;
 pub const VK_BORDER_STANDARD: u32 = 1;
 pub const VK_BORDER_STRONG: u32 = 2;
 pub const VK_BORDER_CUSTOM: u32 = 3;
+
+pub const VK_SCROLL_AXIS_HORIZONTAL: u32 = 0;
+pub const VK_SCROLL_AXIS_VERTICAL: u32 = 1;
+pub const VK_SCROLL_AXIS_BOTH: u32 = 2;
+
+pub const VK_SCROLLBAR_HIDDEN: u32 = 0;
+pub const VK_SCROLLBAR_AUTOMATIC: u32 = 1;
+pub const VK_SCROLLBAR_ALWAYS: u32 = 2;
+
+pub const VK_TEXT_FIELD_SIZE_SMALL: u32 = 0;
+pub const VK_TEXT_FIELD_SIZE_MEDIUM: u32 = 1;
+pub const VK_TEXT_FIELD_SIZE_LARGE: u32 = 2;
+
+pub const VK_MENU_ENTRY_ITEM: u32 = 0;
+pub const VK_MENU_ENTRY_SEPARATOR: u32 = 1;
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct VkSegmentedItem {
+    pub value: u64,
+    pub label: VkString,
+    pub enabled: u8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct VkSegmentedItems {
+    pub pointer: *const VkSegmentedItem,
+    pub length: usize,
+}
+
+impl Default for VkSegmentedItems {
+    fn default() -> Self {
+        Self {
+            pointer: ptr::null(),
+            length: 0,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct VkMenuEntry {
+    pub kind: u32,
+
+    pub label: VkString,
+    pub shortcut: VkString,
+
+    pub enabled: u8,
+    pub danger: u8,
+
+    pub action_id: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct VkMenuEntries {
+    pub pointer: *const VkMenuEntry,
+    pub length: usize,
+}
+
+impl Default for VkMenuEntries {
+    fn default() -> Self {
+        Self {
+            pointer: ptr::null(),
+            length: 0,
+        }
+    }
+}
+
+pub(crate) struct DecodedSegmentedItem {
+    value: usize,
+    label: String,
+    enabled: bool,
+}
+
+pub(crate) enum DecodedMenuEntry {
+    Item {
+        label: String,
+        shortcut: Option<String>,
+
+        enabled: bool,
+        danger: bool,
+
+        action_id: u64,
+    },
+
+    Separator,
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -679,6 +771,46 @@ fn decode_button_color(value: u32) -> Result<ButtonColor, VkStatus> {
     }
 }
 
+fn decode_usize(value: u64) -> Result<usize, VkStatus> {
+    usize::try_from(value).map_err(|_| VkStatus::InvalidEnumValue)
+}
+
+fn decode_scroll_axis(value: u32) -> Result<ScrollAxis, VkStatus> {
+    match value {
+        VK_SCROLL_AXIS_HORIZONTAL => Ok(ScrollAxis::Horizontal),
+
+        VK_SCROLL_AXIS_VERTICAL => Ok(ScrollAxis::Vertical),
+
+        VK_SCROLL_AXIS_BOTH => Ok(ScrollAxis::Both),
+
+        _ => Err(VkStatus::InvalidEnumValue),
+    }
+}
+
+fn decode_scrollbar_visibility(value: u32) -> Result<ScrollBarVisibility, VkStatus> {
+    match value {
+        VK_SCROLLBAR_HIDDEN => Ok(ScrollBarVisibility::Hidden),
+
+        VK_SCROLLBAR_AUTOMATIC => Ok(ScrollBarVisibility::Automatic),
+
+        VK_SCROLLBAR_ALWAYS => Ok(ScrollBarVisibility::Always),
+
+        _ => Err(VkStatus::InvalidEnumValue),
+    }
+}
+
+fn decode_text_field_size(value: u32) -> Result<TextFieldSize, VkStatus> {
+    match value {
+        VK_TEXT_FIELD_SIZE_SMALL => Ok(TextFieldSize::Small),
+
+        VK_TEXT_FIELD_SIZE_MEDIUM => Ok(TextFieldSize::Medium),
+
+        VK_TEXT_FIELD_SIZE_LARGE => Ok(TextFieldSize::Large),
+
+        _ => Err(VkStatus::InvalidEnumValue),
+    }
+}
+
 fn map_builder_error(error: FfiTreeBuilderError) -> VkStatus {
     match error {
         FfiTreeBuilderError::NoOpenNode => VkStatus::NoOpenNode,
@@ -697,6 +829,74 @@ fn sanitize_length(value: f32) -> f32 {
     } else {
         0.0
     }
+}
+
+fn copy_segmented_items(items: VkSegmentedItems) -> Result<Vec<DecodedSegmentedItem>, VkStatus> {
+    if items.length == 0 {
+        return Ok(Vec::new());
+    }
+
+    if items.pointer.is_null() {
+        return Err(VkStatus::NullPointer);
+    }
+
+    let items = unsafe { slice::from_raw_parts(items.pointer, items.length) };
+
+    items
+        .iter()
+        .map(|item| {
+            Ok(DecodedSegmentedItem {
+                value: decode_usize(item.value)?,
+
+                label: copy_string(item.label)?,
+
+                enabled: item.enabled != 0,
+            })
+        })
+        .collect()
+}
+
+fn copy_menu_entries(entries: VkMenuEntries) -> Result<Vec<DecodedMenuEntry>, VkStatus> {
+    if entries.length == 0 {
+        return Ok(Vec::new());
+    }
+
+    if entries.pointer.is_null() {
+        return Err(VkStatus::NullPointer);
+    }
+
+    let entries = unsafe { slice::from_raw_parts(entries.pointer, entries.length) };
+
+    entries
+        .iter()
+        .map(|entry| match entry.kind {
+            VK_MENU_ENTRY_ITEM => {
+                let label = copy_string(entry.label)?;
+
+                let shortcut = copy_string(entry.shortcut)?;
+
+                Ok(DecodedMenuEntry::Item {
+                    label,
+
+                    shortcut: if shortcut.is_empty() {
+                        None
+                    } else {
+                        Some(shortcut)
+                    },
+
+                    enabled: entry.enabled != 0,
+
+                    danger: entry.danger != 0,
+
+                    action_id: entry.action_id,
+                })
+            }
+
+            VK_MENU_ENTRY_SEPARATOR => Ok(DecodedMenuEntry::Separator),
+
+            _ => Err(VkStatus::InvalidEnumValue),
+        })
+        .collect()
 }
 
 fn finite_or_default(value: f32, default: f32) -> f32 {

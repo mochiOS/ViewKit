@@ -2,8 +2,8 @@
 // Do not edit manually.
 
 use super::tree::{
-    FfiBuiltView, FfiNode, FfiViewFactory, expect_no_children, into_stack_children,
-    zero_or_one_stack_child, zero_or_one_view,
+    FfiBuiltView, FfiNode, FfiViewFactory, exactly_two_stack_children, expect_no_children,
+    into_stack_children, zero_or_one_stack_child, zero_or_one_view,
 };
 use super::*;
 #[unsafe(no_mangle)]

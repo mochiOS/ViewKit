@@ -211,6 +211,7 @@ fn generate(manifest: &Manifest) -> String {
             FfiBuiltView,
             FfiNode,
             FfiViewFactory,
+            exactly_two_stack_children,
             expect_no_children,
             into_stack_children,
             zero_or_one_stack_child,
