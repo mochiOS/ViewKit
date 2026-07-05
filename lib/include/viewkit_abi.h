@@ -45,6 +45,12 @@
 
 #define VK_IMAGE_SAMPLING_BICUBIC 2
 
+#define VK_SVG_CONTENT_MODE_FIT 0
+
+#define VK_SVG_CONTENT_MODE_FILL 1
+
+#define VK_SVG_CONTENT_MODE_STRETCH 2
+
 #define VK_ABI_VERSION (((VK_ABI_VERSION_MAJOR << 16) | (VK_ABI_VERSION_MINOR << 8)) | VK_ABI_VERSION_PATCH)
 
 #define VK_LENGTH_AUTO 0
@@ -471,5 +477,15 @@ int32_t vk_push_image(struct VkRuntime *runtime,
                       float radius,
                       float opacity,
                       uint32_t sampling);
+
+int32_t vk_push_svg(struct VkRuntime *runtime,
+                    uint64_t node_id,
+                    struct VkBytes data,
+                    uint32_t content_mode,
+                    uint32_t radius_kind,
+                    float radius,
+                    float opacity,
+                    uint8_t tint_enabled,
+                    struct VkColor tint);
 
 #endif  /* VIEWKIT_ABI_H */

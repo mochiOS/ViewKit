@@ -1095,4 +1095,74 @@ ffi_components! {
             ),
         ))
     };
+
+    leaf vk_push_svg(
+    data: VkBytes
+        => svg =
+            decode_svg_data(data)?,
+
+    content_mode: u32
+        => content_mode =
+            decode_svg_content_mode(
+                content_mode,
+            )?,
+
+    radius_kind: u32,
+
+    radius: f32
+        => radius =
+            decode_corner_radius(
+                radius_kind,
+                radius,
+            )?,
+
+    opacity: f32
+        => opacity =
+            sanitize_opacity(
+                opacity,
+            ),
+
+    tint_enabled: u8
+        => tint_enabled =
+            tint_enabled != 0,
+
+    tint: VkColor
+        => tint =
+            decode_optional_color(
+                tint_enabled,
+                tint,
+            ),
+    ) build move |
+        _node_id,
+        children,
+        _context
+    | {
+        expect_no_children(
+            children,
+        )?;
+
+        let mut view =
+            crate::components::Svg::new(
+                svg,
+            )
+            .content_mode(
+                content_mode,
+            )
+            .radius(
+                radius,
+            )
+            .opacity(
+                opacity,
+            );
+
+        if let Some(tint) = tint {
+            view = view.tint(
+                tint,
+            );
+        }
+
+        Ok(FfiBuiltView::View(
+            Box::new(view),
+        ))
+    };
 }

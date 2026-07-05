@@ -2,7 +2,7 @@
 
 use crate::components::{
     BorderStyle, ButtonColor, ImageContentMode, RectangleColor, ScrollAxis, ScrollBarVisibility,
-    TextFieldSize, ZStackAlignment,
+    SvgContentMode, TextFieldSize, ZStackAlignment,
 };
 use crate::draw_command::{DisplayList, DrawCommand, ImageSampling};
 use crate::event::{EventContext, EventDispatcher};
@@ -31,6 +31,7 @@ use crate::ffi::tree::{
     SharedStateStore,
 };
 use crate::image::ImageData;
+use crate::svg::SvgData;
 pub use generated_components::*;
 
 pub const VK_Z_ALIGNMENT_TOP_LEADING: u32 = 0;
@@ -54,6 +55,10 @@ pub const VK_IMAGE_CONTENT_MODE_STRETCH: u32 = 2;
 pub const VK_IMAGE_SAMPLING_NEAREST: u32 = 0;
 pub const VK_IMAGE_SAMPLING_BILINEAR: u32 = 1;
 pub const VK_IMAGE_SAMPLING_BICUBIC: u32 = 2;
+
+pub const VK_SVG_CONTENT_MODE_FIT: u32 = 0;
+pub const VK_SVG_CONTENT_MODE_FILL: u32 = 1;
+pub const VK_SVG_CONTENT_MODE_STRETCH: u32 = 2;
 
 /*
  * 0x00MMmmpp
@@ -1310,6 +1315,36 @@ fn decode_image_data(value: VkBytes) -> Result<ImageData, VkStatus> {
     let bytes = unsafe { slice::from_raw_parts(value.pointer, value.length) };
 
     ImageData::decode(bytes).map_err(|_| VkStatus::InvalidValue)
+}
+
+fn decode_svg_data(value: VkBytes) -> Result<SvgData, VkStatus> {
+    if value.length == 0 {
+        return Err(VkStatus::InvalidValue);
+    }
+
+    if value.pointer.is_null() {
+        return Err(VkStatus::NullPointer);
+    }
+
+    let bytes = unsafe { slice::from_raw_parts(value.pointer, value.length) };
+
+    SvgData::decode(bytes).map_err(|_| VkStatus::InvalidValue)
+}
+
+fn decode_svg_content_mode(value: u32) -> Result<SvgContentMode, VkStatus> {
+    match value {
+        VK_SVG_CONTENT_MODE_FIT => Ok(SvgContentMode::Fit),
+
+        VK_SVG_CONTENT_MODE_FILL => Ok(SvgContentMode::Fill),
+
+        VK_SVG_CONTENT_MODE_STRETCH => Ok(SvgContentMode::Stretch),
+
+        _ => Err(VkStatus::InvalidEnumValue),
+    }
+}
+
+fn decode_optional_color(enabled: bool, color: VkColor) -> Option<Color> {
+    enabled.then(|| decode_color(color))
 }
 
 fn decode_image_content_mode(value: u32) -> Result<ImageContentMode, VkStatus> {

@@ -777,3 +777,41 @@ pub extern "C" fn vk_push_image(
         Ok(())
     })
 }
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn vk_push_svg(
+    runtime: *mut VkRuntime,
+    node_id: u64,
+    data: VkBytes,
+    content_mode: u32,
+    radius_kind: u32,
+    radius: f32,
+    opacity: f32,
+    tint_enabled: u8,
+    tint: VkColor,
+) -> i32 {
+    ffi_status(|| {
+        let svg = decode_svg_data(data)?;
+        let content_mode = decode_svg_content_mode(content_mode)?;
+        let radius = decode_corner_radius(radius_kind, radius)?;
+        let opacity = sanitize_opacity(opacity);
+        let tint_enabled = tint_enabled != 0;
+        let tint = decode_optional_color(tint_enabled, tint);
+        let factory: FfiViewFactory = Box::new(move |_node_id, children, _context| {
+            expect_no_children(children)?;
+            let mut view = crate::components::Svg::new(svg)
+                .content_mode(content_mode)
+                .radius(radius)
+                .opacity(opacity);
+            if let Some(tint) = tint {
+                view = view.tint(tint);
+            }
+            Ok(FfiBuiltView::View(Box::new(view)))
+        });
+        let runtime = runtime_mut(runtime)?;
+        let builder = active_builder(runtime)?;
+        let node = FfiNode::component(node_id, factory);
+        builder.leaf(node);
+        Ok(())
+    })
+}
