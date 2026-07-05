@@ -12,7 +12,9 @@ use tiny_skia::{
 use winit::event_loop::OwnedDisplayHandle;
 use winit::window::Window;
 
-use crate::draw_command::{DisplayList, DrawCommand, ImageCommand, ImageSampling, TextCommand};
+use crate::draw_command::{
+    DisplayList, DrawCommand, ImageCommand, ImageSampling, SvgCommand, TextCommand,
+};
 use crate::font::create_font_system;
 use crate::geometry::Rect;
 use crate::renderer::{Renderer, Viewport};
@@ -38,6 +40,9 @@ pub enum SoftwareRendererError {
 
     #[error("閉じられていないクリップが残っています: depth={depth}")]
     UnclosedClipStack { depth: usize },
+
+    #[error("SVG描画バッファを確保できませんでした: {width}x{height}")]
+    SvgPixmapAllocation { width: u32, height: u32 },
 }
 
 const TEXT_LAYOUT_CACHE_CAPACITY: usize = 1024;
@@ -422,6 +427,14 @@ impl Renderer for SoftwareRenderer {
 
                     draw_image_command(pixmap, command, scale, clip_stack.last());
                 }
+
+                DrawCommand::DrawSvg { command } => {
+                    if command.bounds.intersection(dirty_bounds).is_none() {
+                        continue;
+                    }
+
+                    draw_svg_command(pixmap, command, scale, clip_stack.last())?;
+                }
             }
         }
 
@@ -503,6 +516,93 @@ fn draw_image_command(
     };
 
     target.draw_pixmap(0, 0, source, &paint, transform, clip);
+}
+
+fn draw_svg_command(
+    target: &mut Pixmap,
+    command: &SvgCommand,
+    display_scale: f32,
+    clip: Option<&Mask>,
+) -> Result<(), SoftwareRendererError> {
+    let bounds = command.bounds;
+
+    if !is_valid_image_bounds(bounds) {
+        return Ok(());
+    }
+
+    let svg_width = command.svg.width();
+    let svg_height = command.svg.height();
+
+    if !svg_width.is_finite() || !svg_height.is_finite() || svg_width <= 0.0 || svg_height <= 0.0 {
+        return Ok(());
+    }
+
+    let destination_width = bounds.size.width * display_scale;
+
+    let destination_height = bounds.size.height * display_scale;
+
+    if !destination_width.is_finite()
+        || !destination_height.is_finite()
+        || destination_width <= 0.0
+        || destination_height <= 0.0
+    {
+        return Ok(());
+    }
+
+    let raster_width = destination_width.ceil() as u32;
+
+    let raster_height = destination_height.ceil() as u32;
+
+    if raster_width == 0 || raster_height == 0 {
+        return Ok(());
+    }
+
+    let mut raster = Pixmap::new(raster_width, raster_height).ok_or(
+        SoftwareRendererError::SvgPixmapAllocation {
+            width: raster_width,
+            height: raster_height,
+        },
+    )?;
+
+    let render_transform = Transform::from_scale(
+        raster_width as f32 / svg_width,
+        raster_height as f32 / svg_height,
+    );
+
+    resvg::render(command.svg.tree(), render_transform, &mut raster.as_mut());
+
+    if let Some(tint) = command.tint {
+        tint_svg_pixmap(&mut raster, tint);
+    }
+
+    let translate_x = bounds.origin.x * display_scale;
+
+    let translate_y = bounds.origin.y * display_scale;
+
+    if !translate_x.is_finite() || !translate_y.is_finite() {
+        return Ok(());
+    }
+
+    let composite_transform = Transform::from_row(
+        destination_width / raster_width as f32,
+        0.0,
+        0.0,
+        destination_height / raster_height as f32,
+        translate_x,
+        translate_y,
+    );
+
+    let paint = PixmapPaint {
+        opacity: sanitize_image_opacity(command.opacity),
+
+        quality: FilterQuality::Bilinear,
+
+        ..PixmapPaint::default()
+    };
+
+    target.draw_pixmap(0, 0, raster.as_ref(), &paint, composite_transform, clip);
+
+    Ok(())
 }
 
 fn is_valid_image_bounds(bounds: Rect) -> bool {
@@ -920,4 +1020,24 @@ fn intersect_rect(first: SkiaRect, second: SkiaRect) -> Option<SkiaRect> {
     }
 
     SkiaRect::from_xywh(left, top, width, height)
+}
+
+fn tint_svg_pixmap(pixmap: &mut Pixmap, tint: Color) {
+    for pixel in pixmap.data_mut().chunks_exact_mut(4) {
+        let alpha = multiply_channel(pixel[3], tint.alpha);
+
+        pixel[0] = multiply_channel(tint.red, alpha);
+
+        pixel[1] = multiply_channel(tint.green, alpha);
+
+        pixel[2] = multiply_channel(tint.blue, alpha);
+
+        pixel[3] = alpha;
+    }
+}
+
+fn multiply_channel(first: u8, second: u8) -> u8 {
+    let value = u16::from(first) * u16::from(second);
+
+    ((value + 127) / 255) as u8
 }
