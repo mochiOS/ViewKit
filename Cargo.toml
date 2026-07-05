@@ -34,7 +34,7 @@ thiserror = "2"
 
 [lib]
 name = "viewkit"
-crate-type = ["cdylib", "rlib"]
+crate-type = ["cdylib", "rlib", "staticlib"]
 
 [[example]]
 name = "button"
