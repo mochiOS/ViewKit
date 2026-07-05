@@ -3,13 +3,14 @@
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
 use crate::layout::{StackAlignment, StackGap, ViewExt};
-use crate::theme::Theme;
+use crate::theme::{Color, Theme};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use super::{
-    Button, ButtonInteractionState, ButtonStyle, HStack, Padding, Text, VStack, ZStackAlignment,
+    Button, ButtonInteractionState, ButtonStyle, HStack, Icon, IconName, Padding, Text, VStack,
+    ZStackAlignment,
 };
 
 pub struct ListRow {
@@ -22,6 +23,7 @@ pub struct ListRow {
 
     interaction: ButtonInteractionState,
     on_select: Option<Rc<RefCell<Box<dyn FnMut()>>>>,
+    icon: Option<IconName>,
 }
 
 impl ListRow {
@@ -36,6 +38,7 @@ impl ListRow {
 
             interaction: ButtonInteractionState::new(),
             on_select: None,
+            icon: None,
         }
     }
 
@@ -46,6 +49,11 @@ impl ListRow {
 
     pub fn trailing(mut self, trailing: impl Into<String>) -> Self {
         self.trailing = Some(trailing.into());
+        self
+    }
+
+    pub fn icon(mut self, icon: IconName) -> Self {
+        self.icon = Some(icon);
         self
     }
 
@@ -91,8 +99,18 @@ impl ListRow {
 
         let mut row = HStack::new()
             .alignment(StackAlignment::Center)
-            .gap(StackGap::Medium)
-            .child(labels.layout().flex_grow(1.0));
+            .gap(StackGap::Medium);
+
+        if let Some(icon) = self.icon {
+            row = row.child(
+                Icon::new(icon)
+                    .size(20.0)
+                    .color(Color::BLACK)
+                    .frame(24.0, 24.0),
+            );
+        }
+
+        row = row.child(labels.layout().flex_grow(1.0));
 
         if let Some(trailing) = self.trailing.as_ref() {
             row = row.child(

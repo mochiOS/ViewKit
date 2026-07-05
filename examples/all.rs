@@ -6,6 +6,7 @@ struct FileItem {
     kind: &'static str,
     modified: &'static str,
     size: &'static str,
+    icon: IconName,
 }
 
 const LOCATIONS: &[(&str, &str)] = &[
@@ -22,48 +23,56 @@ const FILES: &[FileItem] = &[
         kind: "フォルダ",
         modified: "今日 15:12",
         size: "—",
+        icon: IconName::Folder,
     },
     FileItem {
         name: "Documents",
         kind: "フォルダ",
         modified: "今日 14:48",
         size: "—",
+        icon: IconName::Folder,
     },
     FileItem {
         name: "Downloads",
         kind: "フォルダ",
         modified: "今日 16:02",
         size: "—",
+        icon: IconName::Folder,
     },
     FileItem {
         name: "Pictures",
         kind: "フォルダ",
         modified: "昨日 21:19",
         size: "—",
+        icon: IconName::Folder,
     },
     FileItem {
         name: "Projects",
         kind: "フォルダ",
         modified: "今日 16:31",
         size: "—",
+        icon: IconName::Folder,
     },
     FileItem {
         name: "README.md",
         kind: "書類",
         modified: "今日 11:42",
         size: "5.8 KB",
+        icon: IconName::FileText,
     },
     FileItem {
         name: "mochiOS.img",
         kind: "バイナリ",
         modified: "今日 16:28",
         size: "512 MB",
+        icon: IconName::FileArchive,
     },
     FileItem {
         name: "screenshot.png",
         kind: "画像",
         modified: "昨日 22:04",
         size: "846 KB",
+        icon: IconName::FileImage,
     },
 ];
 
@@ -81,10 +90,15 @@ struct FileManagerExample {
 impl FileManagerExample {
     fn location_button(&self, index: usize) -> StackChild {
         let selected = self.active_location.get() == index;
+
         let active_location = self.active_location.clone();
+
         let selected_file = self.selected_file.clone();
+
         let path = self.path.clone();
+
         let status = self.status.clone();
+
         let (label, location_path) = LOCATIONS[index];
 
         Button::new(label)
@@ -97,30 +111,36 @@ impl FileManagerExample {
             .on_click(move || {
                 active_location.set(index);
                 selected_file.set(0);
+
                 path.set(String::from(location_path));
-                status.set(format!("{label}を表示中"));
+
+                status.set(format!("{label}を表示中",));
             })
             .height(36.0)
     }
 
     fn file_row(&self, index: usize, item: FileItem, show_metadata: bool) -> StackChild {
         let selected = self.selected_file.get() == index;
+
         let selected_file = self.selected_file.clone();
+
         let status = self.status.clone();
 
         let trailing = if show_metadata {
-            format!("{}  ·  {}", item.modified, item.size)
+            format!("{}  ·  {}", item.modified, item.size,)
         } else {
             item.size.to_owned()
         };
 
         ListRow::new(item.name)
+            .icon(item.icon)
             .subtitle(item.kind)
             .trailing(trailing)
             .selected(selected)
             .on_select(move || {
                 selected_file.set(index);
-                status.set(format!("{}を選択しました", item.name));
+
+                status.set(format!("{}を選択しました", item.name,));
             })
             .height(52.0)
     }
@@ -196,6 +216,7 @@ impl FileManagerExample {
                     .style(ButtonStyle::Ghost)
                     .on_click({
                         let status = status.clone();
+
                         move || status.set(String::from("前の場所へ戻ります"))
                     })
                     .frame(36.0, 32.0),
@@ -205,6 +226,7 @@ impl FileManagerExample {
                     .style(ButtonStyle::Ghost)
                     .on_click({
                         let status = status.clone();
+
                         move || status.set(String::from("次の場所へ進みます"))
                     })
                     .frame(36.0, 32.0),
@@ -239,6 +261,7 @@ impl FileManagerExample {
                     .style(ButtonStyle::Standard)
                     .on_click({
                         let status = status.clone();
+
                         move || status.set(String::from("新規フォルダを作成します"))
                     })
                     .frame(108.0, 32.0),
@@ -248,6 +271,7 @@ impl FileManagerExample {
                     .style(ButtonStyle::Accent)
                     .on_click({
                         let status = status.clone();
+
                         move || status.set(String::from("選択項目を開きます"))
                     })
                     .frame(68.0, 32.0),
@@ -321,14 +345,10 @@ impl FileManagerExample {
                                 .alignment(StackAlignment::Center)
                                 .gap(StackGap::Small)
                                 .child(
-                                    Text::new(
-                                        selected.kind.chars().next().unwrap_or('?').to_string(),
-                                    )
-                                    .font_size(32.0)
-                                    .line_height(64.0)
-                                    .weight(800)
-                                    .alignment(TextAlignment::Center)
-                                    .frame(64.0, 64.0),
+                                    Icon::new(selected.icon)
+                                        .size(48.0)
+                                        .color(Color::BLACK)
+                                        .frame(64.0, 64.0),
                                 )
                                 .child(
                                     Text::new(selected.name)
@@ -347,12 +367,12 @@ impl FileManagerExample {
                     ),
                 )
                 .child(
-                    Text::new(format!("更新日: {}", selected.modified))
+                    Text::new(format!("更新日: {}", selected.modified,))
                         .font_size(11.0)
                         .line_height(20.0),
                 )
                 .child(
-                    Text::new(format!("サイズ: {}", selected.size))
+                    Text::new(format!("サイズ: {}", selected.size,))
                         .font_size(11.0)
                         .line_height(20.0),
                 )
@@ -362,7 +382,8 @@ impl FileManagerExample {
                         .style(ButtonStyle::Accent)
                         .on_click({
                             let status = self.status.clone();
-                            move || status.set(format!("{}を開きました", selected.name))
+
+                            move || status.set(format!("{}を開きました", selected.name,))
                         })
                         .height(38.0),
                 ),
@@ -406,12 +427,19 @@ impl App for FileManagerExample {
     fn new() -> Self {
         Self {
             active_location: State::new(0),
+
             selected_file: State::new(0),
+
             path: State::new(String::from(LOCATIONS[0].1)),
+
             search: State::new(String::new()),
+
             status: State::new(String::from("ホームを表示中")),
+
             show_hidden: State::new(false),
+
             view_mode: State::new(0),
+
             volume: State::new(80.0),
         }
     }
@@ -424,9 +452,13 @@ impl App for FileManagerExample {
 
     fn body(&self, context: &ViewContext) -> Box<dyn View + 'static> {
         let width = context.size().width;
+
         let show_sidebar = width >= 720.0;
+
         let show_search = width >= 860.0;
+
         let show_metadata = width >= 900.0;
+
         let show_details = width >= 1040.0;
 
         let list = ContextMenu::new(self.file_list(show_metadata), self.menu());
@@ -456,7 +488,7 @@ impl App for FileManagerExample {
                             .alignment(StackAlignment::Center)
                             .gap(StackGap::Large)
                             .child(
-                                Text::new(format!("{}項目", FILES.len()))
+                                Text::new(format!("{}項目", FILES.len(),))
                                     .font_size(10.0)
                                     .line_height(22.0),
                             )
@@ -485,5 +517,5 @@ impl App for FileManagerExample {
 }
 
 fn main() -> Result<(), ViewKitError> {
-    viewkit::run::<FileManagerExample>()
+    run::<FileManagerExample>()
 }

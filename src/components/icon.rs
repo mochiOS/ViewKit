@@ -9,22 +9,6 @@ use std::sync::OnceLock;
 
 const DEFAULT_ICON_SIZE: f32 = 24.0;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum IconName {
-    Search,
-
-    Plus,
-    Minus,
-
-    Check,
-    X,
-
-    Settings,
-
-    ChevronLeft,
-    ChevronRight,
-}
-
 macro_rules! lucide_svg {
     ($name:literal) => {{
         static DATA: OnceLock<SvgData> = OnceLock::new();
@@ -41,6 +25,45 @@ macro_rules! lucide_svg {
         })
         .clone()
     }};
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum IconName {
+    Search,
+
+    Plus,
+    Minus,
+
+    Check,
+    X,
+
+    Settings,
+
+    ChevronLeft,
+    ChevronRight,
+
+    House,
+    AppWindow,
+    Download,
+    HardDrive,
+
+    Folder,
+    FolderOpen,
+    FolderPlus,
+
+    File,
+    FileText,
+    FileImage,
+    FileArchive,
+
+    ExternalLink,
+
+    LayoutList,
+    LayoutGrid,
+    Columns3,
+
+    Eye,
+    Volume2,
 }
 
 impl IconName {
@@ -76,6 +99,74 @@ impl IconName {
 
             Self::ChevronRight => {
                 lucide_svg!("chevron-right")
+            }
+
+            Self::House => {
+                lucide_svg!("house")
+            }
+
+            Self::AppWindow => {
+                lucide_svg!("app-window")
+            }
+
+            Self::Download => {
+                lucide_svg!("download")
+            }
+
+            Self::HardDrive => {
+                lucide_svg!("hard-drive")
+            }
+
+            Self::Folder => {
+                lucide_svg!("folder")
+            }
+
+            Self::FolderOpen => {
+                lucide_svg!("folder-open")
+            }
+
+            Self::FolderPlus => {
+                lucide_svg!("folder-plus")
+            }
+
+            Self::File => {
+                lucide_svg!("file")
+            }
+
+            Self::FileText => {
+                lucide_svg!("file-text")
+            }
+
+            Self::FileImage => {
+                lucide_svg!("file-image")
+            }
+
+            Self::FileArchive => {
+                lucide_svg!("file-archive")
+            }
+
+            Self::ExternalLink => {
+                lucide_svg!("external-link")
+            }
+
+            Self::LayoutList => {
+                lucide_svg!("layout-list")
+            }
+
+            Self::LayoutGrid => {
+                lucide_svg!("layout-grid")
+            }
+
+            Self::Columns3 => {
+                lucide_svg!("columns-3")
+            }
+
+            Self::Eye => {
+                lucide_svg!("eye")
+            }
+
+            Self::Volume2 => {
+                lucide_svg!("volume-2")
             }
         }
     }

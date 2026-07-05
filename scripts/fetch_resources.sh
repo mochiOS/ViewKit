@@ -23,6 +23,23 @@ ICONS=(
     settings
     chevron-left
     chevron-right
+    house
+    app-window
+    download
+    hard-drive
+    folder
+    folder-open
+    folder-plus
+    file
+    file-text
+    file-image
+    file-archive
+    external-link
+    layout-list
+    layout-grid
+    columns-3
+    eye
+    volume-2
 )
 
 mkdir -p "${ICON_DESTINATION}"
@@ -39,6 +56,8 @@ for icon in "${ICONS[@]}"; do
         --output "${ICON_DESTINATION}/${icon}.svg"
 done
 
+echo "fetching Lucide license"
+
 curl \
     --fail \
     --location \
@@ -47,4 +66,6 @@ curl \
     "${BASE_URL}/LICENSE" \
     --output "${DESTINATION}/LICENSE"
 
-echo "Lucide icons installed in ${DESTINATION}"
+echo
+echo "Lucide icons installed:"
+echo "  ${ICON_DESTINATION}"
