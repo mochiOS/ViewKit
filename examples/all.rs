@@ -417,6 +417,26 @@ impl App for FileManagerExample {
                             ),
                     )
                     .height(34.0),
+            )
+            .child(
+                Menu::new()
+                    .item(MenuItem::new("開く").shortcut("Enter").on_select(|| {
+                        println!("open");
+                    }))
+                    .item(MenuItem::new("名前を変更").shortcut("F2").on_select(|| {
+                        println!("rename");
+                    }))
+                    .item(MenuItem::new("複製").enabled(false))
+                    .separator()
+                    .item(
+                        MenuItem::new("削除")
+                            .shortcut("Delete")
+                            .danger(true)
+                            .on_select(|| {
+                                println!("delete");
+                            }),
+                    )
+                    .width(220.0),
             );
 
         let mut shell = HStack::new()
