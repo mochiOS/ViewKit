@@ -1036,4 +1036,61 @@ ffi_components! {
             ),
         ))
     };
+
+    leaf vk_push_image(
+        data: VkBytes
+            => image =
+                decode_image_data(data)?,
+
+        content_mode: u32
+            => content_mode =
+                decode_image_content_mode(
+                    content_mode,
+                )?,
+
+        radius_kind: u32,
+
+        radius: f32
+            => radius =
+                decode_corner_radius(
+                    radius_kind,
+                    radius,
+                )?,
+
+        opacity: f32
+            => opacity =
+                sanitize_opacity(opacity),
+
+        sampling: u32
+            => sampling =
+                decode_image_sampling(
+                    sampling,
+                )?,
+    ) build move |
+        _node_id,
+        children,
+        _context
+    | {
+        expect_no_children(children)?;
+
+        Ok(FfiBuiltView::View(
+            Box::new(
+                crate::components::Image::new(
+                    image,
+                )
+                .content_mode(
+                    content_mode,
+                )
+                .radius(
+                    radius,
+                )
+                .opacity(
+                    opacity,
+                )
+                .sampling(
+                    sampling,
+                ),
+            ),
+        ))
+    };
 }

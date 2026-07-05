@@ -1,10 +1,10 @@
 //! KomeからViewKit Runtimeを操作するためのC関数
 
 use crate::components::{
-    BorderStyle, ButtonColor, RectangleColor, ScrollAxis, ScrollBarVisibility, TextFieldSize,
-    ZStackAlignment,
+    BorderStyle, ButtonColor, ImageContentMode, RectangleColor, ScrollAxis, ScrollBarVisibility,
+    TextFieldSize, ZStackAlignment,
 };
-use crate::draw_command::{DisplayList, DrawCommand};
+use crate::draw_command::{DisplayList, DrawCommand, ImageSampling};
 use crate::event::{EventContext, EventDispatcher};
 use crate::geometry::{Rect, Size};
 use crate::layout::{LayoutLength, StackAlignment, StackDistribution, StackGap};
@@ -30,6 +30,7 @@ use crate::ffi::tree::{
     FfiBuildContext, FfiStateStore, FfiTreeBuilder, FfiTreeBuilderError, SharedActionQueue,
     SharedStateStore,
 };
+use crate::image::ImageData;
 pub use generated_components::*;
 
 pub const VK_Z_ALIGNMENT_TOP_LEADING: u32 = 0;
@@ -45,6 +46,14 @@ pub const VK_Z_ALIGNMENT_BOTTOM_TRAILING: u32 = 8;
 pub const VK_ABI_VERSION_MAJOR: u32 = 1;
 pub const VK_ABI_VERSION_MINOR: u32 = 0;
 pub const VK_ABI_VERSION_PATCH: u32 = 0;
+
+pub const VK_IMAGE_CONTENT_MODE_FIT: u32 = 0;
+pub const VK_IMAGE_CONTENT_MODE_FILL: u32 = 1;
+pub const VK_IMAGE_CONTENT_MODE_STRETCH: u32 = 2;
+
+pub const VK_IMAGE_SAMPLING_NEAREST: u32 = 0;
+pub const VK_IMAGE_SAMPLING_BILINEAR: u32 = 1;
+pub const VK_IMAGE_SAMPLING_BICUBIC: u32 = 2;
 
 /*
  * 0x00MMmmpp
@@ -104,6 +113,22 @@ impl VkString {
             pointer: value.as_ptr(),
 
             length: value.len(),
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct VkBytes {
+    pub pointer: *const u8,
+    pub length: usize,
+}
+
+impl Default for VkBytes {
+    fn default() -> Self {
+        Self {
+            pointer: ptr::null(),
+            length: 0,
         }
     }
 }
@@ -1271,4 +1296,50 @@ pub extern "C" fn vk_runtime_run_window(
             Err(VkStatus::UnsupportedPlatform)
         }
     })
+}
+
+fn decode_image_data(value: VkBytes) -> Result<ImageData, VkStatus> {
+    if value.length == 0 {
+        return Err(VkStatus::InvalidValue);
+    }
+
+    if value.pointer.is_null() {
+        return Err(VkStatus::NullPointer);
+    }
+
+    let bytes = unsafe { slice::from_raw_parts(value.pointer, value.length) };
+
+    ImageData::decode(bytes).map_err(|_| VkStatus::InvalidValue)
+}
+
+fn decode_image_content_mode(value: u32) -> Result<ImageContentMode, VkStatus> {
+    match value {
+        VK_IMAGE_CONTENT_MODE_FIT => Ok(ImageContentMode::Fit),
+
+        VK_IMAGE_CONTENT_MODE_FILL => Ok(ImageContentMode::Fill),
+
+        VK_IMAGE_CONTENT_MODE_STRETCH => Ok(ImageContentMode::Stretch),
+
+        _ => Err(VkStatus::InvalidEnumValue),
+    }
+}
+
+fn decode_image_sampling(value: u32) -> Result<ImageSampling, VkStatus> {
+    match value {
+        VK_IMAGE_SAMPLING_NEAREST => Ok(ImageSampling::Nearest),
+
+        VK_IMAGE_SAMPLING_BILINEAR => Ok(ImageSampling::Bilinear),
+
+        VK_IMAGE_SAMPLING_BICUBIC => Ok(ImageSampling::Bicubic),
+
+        _ => Err(VkStatus::InvalidEnumValue),
+    }
+}
+
+fn sanitize_opacity(value: f32) -> f32 {
+    if value.is_finite() {
+        value.clamp(0.0, 1.0)
+    } else {
+        1.0
+    }
 }
