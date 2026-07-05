@@ -219,7 +219,12 @@ impl FileManagerExample {
         }
 
         row = row
-            .child(Checkbox::new(self.show_hidden.binding()).label("隠しファイルを表示"))
+            .child(
+                Switch::new(self.show_hidden.binding())
+                    .label("隠しファイルを表示")
+                    .layout()
+                    .flex_shrink(0.0),
+            )
             .child(
                 Button::new("新規フォルダ")
                     .style(ButtonStyle::Standard)
