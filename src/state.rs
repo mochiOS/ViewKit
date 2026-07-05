@@ -2,6 +2,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::Instant;
 
 thread_local! {
     static STATE_CHANGED: Cell<bool> = const { Cell::new(false) };
@@ -21,6 +22,8 @@ pub(crate) fn take_state_changed() -> bool {
 /// cloneした`State`は、同じ値を共有します。
 pub struct State<T> {
     value: Rc<RefCell<T>>,
+    previous_value: Rc<RefCell<Option<T>>>,
+    last_changed_at: Rc<Cell<Option<Instant>>>,
 }
 
 impl<T> State<T> {
@@ -29,6 +32,8 @@ impl<T> State<T> {
     pub fn new(value: T) -> Self {
         Self {
             value: Rc::new(RefCell::new(value)),
+            previous_value: Rc::new(RefCell::new(None)),
+            last_changed_at: Rc::new(Cell::new(None)),
         }
     }
 
@@ -43,13 +48,19 @@ impl<T> State<T> {
 
     /// 現在の値を置き換えます。
     pub fn set(&self, value: T) {
-        *self.value.borrow_mut() = value;
+        let previous = self.value.replace(value);
+
+        self.previous_value.replace(Some(previous));
+        self.last_changed_at.set(Some(Instant::now()));
+
         mark_changed();
     }
 
     /// 現在の値を変更します。
     pub fn update<R>(&self, update: impl FnOnce(&mut T) -> R) -> R {
+        self.previous_value.replace(None);
         let result = update(&mut self.value.borrow_mut());
+        self.last_changed_at.set(Some(Instant::now()));
 
         mark_changed();
 
@@ -61,6 +72,8 @@ impl<T> State<T> {
     pub fn binding(&self) -> Binding<T> {
         Binding {
             value: Rc::clone(&self.value),
+            previous_value: Rc::clone(&self.previous_value),
+            last_changed_at: Rc::clone(&self.last_changed_at),
         }
     }
 }
@@ -69,6 +82,8 @@ impl<T> Clone for State<T> {
     fn clone(&self) -> Self {
         Self {
             value: Rc::clone(&self.value),
+            previous_value: Rc::clone(&self.previous_value),
+            last_changed_at: Rc::clone(&self.last_changed_at),
         }
     }
 }
@@ -76,6 +91,8 @@ impl<T> Clone for State<T> {
 /// Viewから状態を読み書きするための参照です。
 pub struct Binding<T> {
     value: Rc<RefCell<T>>,
+    previous_value: Rc<RefCell<Option<T>>>,
+    last_changed_at: Rc<Cell<Option<Instant>>>,
 }
 
 impl<T> Binding<T> {
@@ -90,13 +107,18 @@ impl<T> Binding<T> {
 
     /// 現在の値を置き換えます。
     pub fn set(&self, value: T) {
-        *self.value.borrow_mut() = value;
+        let previous = self.value.replace(value);
+        self.previous_value.replace(Some(previous));
+        self.last_changed_at.set(Some(Instant::now()));
+
         mark_changed();
     }
 
     /// 現在の値を変更します。
     pub fn update<R>(&self, update: impl FnOnce(&mut T) -> R) -> R {
+        self.previous_value.replace(None);
         let result = update(&mut self.value.borrow_mut());
+        self.last_changed_at.set(Some(Instant::now()));
 
         mark_changed();
 
@@ -108,6 +130,21 @@ impl<T> Binding<T> {
     /// View内部の操作状態を維持したままBindingへ値を同期するために使用します。
     pub(crate) fn set_without_notification(&self, value: T) {
         *self.value.borrow_mut() = value;
+        self.previous_value.replace(None);
+        self.last_changed_at.set(None);
+    }
+
+    pub(crate) fn transition(&self) -> Option<(T, T, Instant)>
+    where
+        T: Clone,
+    {
+        let changed_at = self.last_changed_at.get()?;
+
+        let previous = self.previous_value.borrow().as_ref()?.clone();
+
+        let current = self.value.borrow().clone();
+
+        Some((previous, current, changed_at))
     }
 }
 
@@ -115,6 +152,8 @@ impl<T> Clone for Binding<T> {
     fn clone(&self) -> Self {
         Self {
             value: Rc::clone(&self.value),
+            previous_value: Rc::clone(&self.previous_value),
+            last_changed_at: Rc::clone(&self.last_changed_at),
         }
     }
 }

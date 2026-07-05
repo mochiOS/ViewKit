@@ -4,6 +4,7 @@ use crate::layout::{StackAlignment, StackGap, ViewExt};
 use crate::state::Binding;
 use crate::theme::{Color, CornerRadius, Shadow, ShadowSet, ShadowStyle, Theme};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
+use std::time::{Duration, Instant};
 
 use super::{
     Button, ButtonInteractionState, ButtonStyle, HStack, Padding, Rectangle, RectangleColor, Text,
@@ -15,6 +16,8 @@ const TRACK_HEIGHT: f32 = 26.0;
 const KNOB_SIZE: f32 = 22.0;
 const PRESSED_KNOB_WIDTH: f32 = 25.0;
 const KNOB_INSET: f32 = 2.0;
+const SWITCH_ANIM_DURATION: Duration = Duration::from_millis(100);
+const SWITCH_ANIM_FRAME: Duration = Duration::from_millis(16);
 
 pub struct Switch {
     checked: Binding<bool>,
@@ -75,6 +78,7 @@ impl Switch {
         content = content.child(
             SwitchMark {
                 checked: self.checked.get(),
+                transition: self.checked.transition(),
                 enabled: self.enabled,
                 interaction: self.interaction.clone(),
             }
@@ -126,6 +130,7 @@ struct SwitchMark {
     checked: bool,
     enabled: bool,
     interaction: ButtonInteractionState,
+    transition: Option<(bool, bool, Instant)>,
 }
 
 impl View for SwitchMark {
@@ -137,7 +142,15 @@ impl View for SwitchMark {
         let hovered = self.interaction.is_hovered();
         let pressed = self.interaction.is_pressed();
 
-        let track_color = self.track_color(context.theme, hovered, pressed);
+        let now = Instant::now();
+
+        let (position, next_redraw) = self.animation_position(now);
+
+        if let Some(next_redraw) = next_redraw {
+            context.request_redraw_at(next_redraw);
+        }
+
+        let track_color = self.track_color(context.theme, hovered, pressed, position);
 
         Rectangle::new()
             .color(RectangleColor::Custom(track_color))
@@ -150,11 +163,11 @@ impl View for SwitchMark {
             KNOB_SIZE
         };
 
-        let knob_x = if self.checked {
-            bounds.origin.x + bounds.size.width - KNOB_INSET - knob_width
-        } else {
-            bounds.origin.x + KNOB_INSET
-        };
+        let knob_left = bounds.origin.x + KNOB_INSET;
+
+        let knob_right = bounds.origin.x + bounds.size.width - KNOB_INSET - knob_width;
+
+        let knob_x = lerp(knob_left, knob_right, position);
 
         let knob_y = bounds.origin.y + (bounds.size.height - KNOB_SIZE) / 2.0;
 
@@ -184,16 +197,8 @@ impl View for SwitchMark {
 }
 
 impl SwitchMark {
-    fn track_color(&self, theme: &Theme, hovered: bool, pressed: bool) -> Color {
-        let color = if self.checked {
-            if pressed {
-                theme.colors.accent_pressed
-            } else if hovered {
-                theme.colors.accent_hovered
-            } else {
-                theme.colors.accent
-            }
-        } else if pressed {
+    fn track_color(&self, theme: &Theme, hovered: bool, pressed: bool, position: f32) -> Color {
+        let off_color = if pressed {
             Color::from_rgb_hex(0xc7c7cc)
         } else if hovered {
             Color::from_rgb_hex(0xd1d1d6)
@@ -201,11 +206,58 @@ impl SwitchMark {
             Color::from_rgb_hex(0xe5e5ea)
         };
 
+        let on_color = if pressed {
+            theme.colors.accent_pressed
+        } else if hovered {
+            theme.colors.accent_hovered
+        } else {
+            theme.colors.accent
+        };
+
+        let color = lerp_color(off_color, on_color, position);
+
         if self.enabled {
             color
         } else {
             with_opacity(color, 0.45)
         }
+    }
+
+    fn animation_position(&self, now: Instant) -> (f32, Option<Instant>) {
+        let target = bool_position(self.checked);
+
+        let Some((from, to, started_at)) = self.transition else {
+            return (target, None);
+        };
+
+        if to != self.checked || from == to {
+            return (target, None);
+        }
+
+        let elapsed = now.saturating_duration_since(started_at);
+
+        if elapsed >= SWITCH_ANIM_DURATION {
+            return (target, None);
+        }
+
+        let linear_progress =
+            (elapsed.as_secs_f32() / SWITCH_ANIM_DURATION.as_secs_f32()).clamp(0.0, 1.0);
+
+        let progress = ease_out_cubic(linear_progress);
+
+        let position = lerp(bool_position(from), bool_position(to), progress);
+
+        let animation_end = started_at + SWITCH_ANIM_DURATION;
+
+        let next_frame = now + SWITCH_ANIM_FRAME;
+
+        let next_redraw = if next_frame < animation_end {
+            next_frame
+        } else {
+            animation_end
+        };
+
+        (position, Some(next_redraw))
     }
 }
 
@@ -217,4 +269,34 @@ fn with_opacity(color: Color, opacity: f32) -> Color {
     };
 
     color.with_alpha((color.alpha as f32 * opacity).round() as u8)
+}
+
+fn bool_position(value: bool) -> f32 {
+    if value { 1.0 } else { 0.0 }
+}
+
+fn ease_out_cubic(value: f32) -> f32 {
+    let value = value.clamp(0.0, 1.0);
+    let inverse = 1.0 - value;
+
+    1.0 - inverse * inverse * inverse
+}
+
+fn lerp(from: f32, to: f32, progress: f32) -> f32 {
+    from + (to - from) * progress.clamp(0.0, 1.0)
+}
+
+fn lerp_color(from: Color, to: Color, progress: f32) -> Color {
+    Color::rgba(
+        lerp_channel(from.red, to.red, progress),
+        lerp_channel(from.green, to.green, progress),
+        lerp_channel(from.blue, to.blue, progress),
+        lerp_channel(from.alpha, to.alpha, progress),
+    )
+}
+
+fn lerp_channel(from: u8, to: u8, progress: f32) -> u8 {
+    lerp(from as f32, to as f32, progress)
+        .round()
+        .clamp(0.0, 255.0) as u8
 }
