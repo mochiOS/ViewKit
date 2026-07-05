@@ -105,56 +105,21 @@ impl FileManagerExample {
         let selected_file = self.selected_file.clone();
         let status = self.status.clone();
 
-        let mut row = HStack::new()
-            .alignment(StackAlignment::Center)
-            .gap(StackGap::Medium)
-            .child(
-                Text::new(item.kind.chars().next().unwrap_or('?').to_string())
-                    .font_size(12.0)
-                    .line_height(28.0)
-                    .weight(700)
-                    .alignment(TextAlignment::Center)
-                    .frame(28.0, 28.0),
-            )
-            .child(
-                Text::new(item.name)
-                    .font_size(12.0)
-                    .line_height(20.0)
-                    .weight(if selected { 700 } else { 500 })
-                    .layout()
-                    .flex_grow(1.0),
-            );
+        let trailing = if show_metadata {
+            format!("{}  ·  {}", item.modified, item.size)
+        } else {
+            item.size.to_owned()
+        };
 
-        if show_metadata {
-            row = row
-                .child(
-                    Text::new(item.modified)
-                        .font_size(11.0)
-                        .line_height(20.0)
-                        .width(120.0),
-                )
-                .child(
-                    Text::new(item.size)
-                        .font_size(11.0)
-                        .line_height(20.0)
-                        .alignment(TextAlignment::End)
-                        .width(72.0),
-                );
-        }
-
-        Button::new("")
-            .style(if selected {
-                ButtonStyle::Standard
-            } else {
-                ButtonStyle::Ghost
-            })
-            .alignment(ZStackAlignment::Leading)
-            .content(Padding::symmetric(12.0, 6.0).content(row))
-            .on_click(move || {
+        ListRow::new(item.name)
+            .subtitle(item.kind)
+            .trailing(trailing)
+            .selected(selected)
+            .on_select(move || {
                 selected_file.set(index);
                 status.set(format!("{}を選択しました", item.name));
             })
-            .height(44.0)
+            .height(52.0)
     }
 
     fn sidebar(&self) -> impl View + 'static {
@@ -274,7 +239,13 @@ impl FileManagerExample {
     }
 
     fn file_list(&self, show_metadata: bool) -> impl View + 'static {
-        let mut header = HStack::new()
+        let trailing_header = if show_metadata {
+            "更新日 / サイズ"
+        } else {
+            "サイズ"
+        };
+
+        let header = HStack::new()
             .alignment(StackAlignment::Center)
             .gap(StackGap::Medium)
             .child(
@@ -284,26 +255,14 @@ impl FileManagerExample {
                     .weight(700)
                     .layout()
                     .flex_grow(1.0),
+            )
+            .child(
+                Text::new(trailing_header)
+                    .font_size(10.0)
+                    .line_height(16.0)
+                    .weight(700)
+                    .alignment(TextAlignment::End),
             );
-
-        if show_metadata {
-            header = header
-                .child(
-                    Text::new("更新日")
-                        .font_size(10.0)
-                        .line_height(16.0)
-                        .weight(700)
-                        .width(120.0),
-                )
-                .child(
-                    Text::new("サイズ")
-                        .font_size(10.0)
-                        .line_height(16.0)
-                        .weight(700)
-                        .alignment(TextAlignment::End)
-                        .width(72.0),
-                );
-        }
 
         let rows = FILES.iter().copied().enumerate().fold(
             VStack::new()
@@ -318,7 +277,7 @@ impl FileManagerExample {
             .child(Padding::symmetric(12.0, 7.0).content(header).height(32.0))
             .child(Divider::new())
             .child(
-                Scroll::vertical(rows.height(FILES.len() as f32 * 44.0))
+                Scroll::vertical(rows.height(FILES.len() as f32 * 52.0))
                     .layout()
                     .flex_grow(1.0),
             )
