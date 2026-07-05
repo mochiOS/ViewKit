@@ -2,6 +2,7 @@
 
 use crate::geometry::Rect;
 use crate::image::ImageData;
+use crate::svg::SvgData;
 use crate::theme::Color;
 use crate::typography::TextAlignment;
 
@@ -54,6 +55,10 @@ pub enum DrawCommand {
         command: ImageCommand,
     },
 
+    DrawSvg {
+        command: SvgCommand,
+    },
+
     PushClip {
         rect: Rect,
     },
@@ -102,6 +107,15 @@ pub struct ImageCommand {
 
     pub opacity: f32,
     pub sampling: ImageSampling,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SvgCommand {
+    pub svg: SvgData,
+    pub bounds: Rect,
+    pub opacity: f32,
+    // 単色シンボル用
+    pub tint: Option<Color>,
 }
 
 impl DisplayList {
