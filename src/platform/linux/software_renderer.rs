@@ -6,13 +6,13 @@ use std::rc::Rc;
 
 use softbuffer::{Context, SoftBufferError, Surface};
 use tiny_skia::{
-    Color as SkiaColor, FillRule, Mask, Paint, Path, PathBuilder, Pixmap, Rect as SkiaRect, Stroke,
-    Transform,
+    Color as SkiaColor, FillRule, FilterQuality, Mask, Paint, Path, PathBuilder, Pixmap,
+    PixmapPaint, PixmapRef, Rect as SkiaRect, Stroke, Transform,
 };
 use winit::event_loop::OwnedDisplayHandle;
 use winit::window::Window;
 
-use crate::draw_command::{DisplayList, DrawCommand, TextCommand};
+use crate::draw_command::{DisplayList, DrawCommand, ImageCommand, ImageSampling, TextCommand};
 use crate::font::create_font_system;
 use crate::geometry::Rect;
 use crate::renderer::{Renderer, Viewport};
@@ -401,6 +401,14 @@ impl Renderer for SoftwareRenderer {
                         clip_stack.last(),
                     );
                 }
+
+                DrawCommand::DrawImage { command } => {
+                    if command.bounds.intersection(dirty_bounds).is_none() {
+                        continue;
+                    }
+
+                    draw_image_command(pixmap, command, scale, clip_stack.last());
+                }
             }
         }
 
@@ -419,6 +427,85 @@ impl Renderer for SoftwareRenderer {
         )?;
 
         Ok(())
+    }
+}
+
+fn draw_image_command(
+    target: &mut Pixmap,
+    command: &ImageCommand,
+    display_scale: f32,
+    clip: Option<&Mask>,
+) {
+    let bounds = command.bounds;
+
+    if !is_valid_image_bounds(bounds) {
+        return;
+    }
+
+    let image_width = command.image.width();
+    let image_height = command.image.height();
+
+    if image_width == 0 || image_height == 0 {
+        return;
+    }
+
+    let Some(source) = PixmapRef::from_bytes(
+        command.image.premultiplied_rgba8(),
+        image_width,
+        image_height,
+    ) else {
+        return;
+    };
+
+    let scale_x = bounds.size.width * display_scale / image_width as f32;
+
+    let scale_y = bounds.size.height * display_scale / image_height as f32;
+
+    if !scale_x.is_finite() || !scale_y.is_finite() || scale_x <= 0.0 || scale_y <= 0.0 {
+        return;
+    }
+
+    let translate_x = bounds.origin.x * display_scale;
+
+    let translate_y = bounds.origin.y * display_scale;
+
+    if !translate_x.is_finite() || !translate_y.is_finite() {
+        return;
+    }
+
+    let transform = Transform::from_row(scale_x, 0.0, 0.0, scale_y, translate_x, translate_y);
+
+    let paint = PixmapPaint {
+        opacity: sanitize_image_opacity(command.opacity),
+
+        quality: match command.sampling {
+            ImageSampling::Nearest => FilterQuality::Nearest,
+
+            ImageSampling::Bilinear => FilterQuality::Bilinear,
+
+            ImageSampling::Bicubic => FilterQuality::Bicubic,
+        },
+
+        ..PixmapPaint::default()
+    };
+
+    target.draw_pixmap(0, 0, source, &paint, transform, clip);
+}
+
+fn is_valid_image_bounds(bounds: Rect) -> bool {
+    bounds.origin.x.is_finite()
+        && bounds.origin.y.is_finite()
+        && bounds.size.width.is_finite()
+        && bounds.size.height.is_finite()
+        && bounds.size.width > 0.0
+        && bounds.size.height > 0.0
+}
+
+fn sanitize_image_opacity(opacity: f32) -> f32 {
+    if opacity.is_finite() {
+        opacity.clamp(0.0, 1.0)
+    } else {
+        1.0
     }
 }
 
