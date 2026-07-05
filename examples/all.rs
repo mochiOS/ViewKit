@@ -73,6 +73,7 @@ struct FileManagerExample {
     path: State<String>,
     search: State<String>,
     status: State<String>,
+    show_hidden: State<bool>,
 }
 
 impl FileManagerExample {
@@ -216,6 +217,7 @@ impl FileManagerExample {
         }
 
         row = row
+            .child(Checkbox::new(self.show_hidden.binding()).label("隠しファイルを表示"))
             .child(
                 Button::new("新規フォルダ")
                     .style(ButtonStyle::Standard)
@@ -383,6 +385,7 @@ impl App for FileManagerExample {
             path: State::new(String::from(LOCATIONS[0].1)),
             search: State::new(String::new()),
             status: State::new(String::from("ホームを表示中")),
+            show_hidden: State::new(false),
         }
     }
 

@@ -1,6 +1,7 @@
 mod background;
 mod button;
 mod card;
+mod checkbox;
 pub mod context_menu;
 mod divider;
 mod group;
@@ -30,6 +31,7 @@ pub use zstack::{ZStack, ZStackAlignment};
 
 pub use button::{Button, ButtonColor, ButtonInteractionState, ButtonStyle};
 pub use card::Card;
+pub use checkbox::Checkbox;
 pub use context_menu::ContextMenu;
 pub use list::ListRow;
 pub use menu::{Menu, MenuItem};
