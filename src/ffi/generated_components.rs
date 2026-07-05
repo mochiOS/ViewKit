@@ -2,8 +2,8 @@
 // Do not edit manually.
 
 use super::tree::{
-    FfiBuiltView, FfiNode, FfiViewFactory, exactly_two_stack_children, expect_no_children,
-    into_stack_children, zero_or_one_stack_child, zero_or_one_view,
+    exactly_two_stack_children, expect_no_children, into_stack_children, zero_or_one_stack_child, zero_or_one_view,
+    FfiBuiltView, FfiNode, FfiViewFactory,
 };
 use super::*;
 #[unsafe(no_mangle)]
@@ -330,7 +330,7 @@ pub extern "C" fn vk_push_checkbox(
         let enabled = enabled != 0;
         let factory: FfiViewFactory = Box::new(move |node_id, children, context| {
             expect_no_children(children)?;
-            let checked = context.bool_binding(node_id, state_id, checked);
+            let checked = context.bool_binding(node_id, state_id, checked)?;
             let mut checkbox = crate::components::Checkbox::new(checked).enabled(enabled);
             if !label.is_empty() {
                 checkbox = checkbox.label(label);
@@ -561,7 +561,7 @@ pub extern "C" fn vk_push_radio_button(
         let enabled = enabled != 0;
         let factory: FfiViewFactory = Box::new(move |node_id, children, context| {
             expect_no_children(children)?;
-            let selection = context.usize_binding(node_id, state_id, selection);
+            let selection = context.usize_binding(node_id, state_id, selection)?;
             let mut radio = crate::components::RadioButton::new(selection, value).enabled(enabled);
             if !label.is_empty() {
                 radio = radio.label(label);
@@ -589,7 +589,7 @@ pub extern "C" fn vk_begin_scroll(
         let scrollbar = decode_scrollbar_visibility(scrollbar)?;
         let factory: FfiViewFactory = Box::new(move |node_id, children, context| {
             let content = zero_or_one_stack_child(children)?;
-            let state = context.scroll_state(node_id, state_id);
+            let state = context.scroll_state(node_id, state_id)?;
             Ok(FfiBuiltView::View(Box::new(
                 crate::components::Scroll::new(state)
                     .axis(axis)
@@ -620,7 +620,7 @@ pub extern "C" fn vk_push_segmented_control(
         let enabled = enabled != 0;
         let factory: FfiViewFactory = Box::new(move |node_id, children, context| {
             expect_no_children(children)?;
-            let selection = context.usize_binding(node_id, state_id, selection);
+            let selection = context.usize_binding(node_id, state_id, selection)?;
             let mut control = crate::components::SegmentedControl::new(selection).enabled(enabled);
             for item in items {
                 control = if item.enabled {
@@ -656,7 +656,7 @@ pub extern "C" fn vk_push_slider(
         let enabled = enabled != 0;
         let factory: FfiViewFactory = Box::new(move |node_id, children, context| {
             expect_no_children(children)?;
-            let value = context.float_binding(node_id, state_id, value);
+            let value = context.float_binding(node_id, state_id, value)?;
             let mut slider = crate::components::Slider::new(value)
                 .range(minimum..=maximum)
                 .step(step)
@@ -689,7 +689,7 @@ pub extern "C" fn vk_push_switch(
         let enabled = enabled != 0;
         let factory: FfiViewFactory = Box::new(move |node_id, children, context| {
             expect_no_children(children)?;
-            let checked = context.bool_binding(node_id, state_id, checked);
+            let checked = context.bool_binding(node_id, state_id, checked)?;
             let mut switch = crate::components::Switch::new(checked).enabled(enabled);
             if !label.is_empty() {
                 switch = switch.label(label);
@@ -725,7 +725,7 @@ pub extern "C" fn vk_push_text_field(
         let invalid = invalid != 0;
         let factory: FfiViewFactory = Box::new(move |node_id, children, context| {
             expect_no_children(children)?;
-            let value = context.string_binding(node_id, state_id, value);
+            let value = context.string_binding(node_id, state_id, value)?;
             Ok(FfiBuiltView::View(Box::new(
                 crate::components::TextField::new(value)
                     .placeholder(placeholder)

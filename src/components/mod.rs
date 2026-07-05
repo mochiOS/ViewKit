@@ -489,7 +489,7 @@ ffi_components! {
                 node_id,
                 state_id,
                 checked,
-            );
+            )?;
 
         let mut checkbox =
             crate::components::Checkbox::new(
@@ -779,7 +779,7 @@ ffi_components! {
                 node_id,
                 state_id,
                 selection,
-            );
+            )?;
 
         let mut radio =
             crate::components::RadioButton::new(
@@ -823,7 +823,7 @@ ffi_components! {
             context.scroll_state(
                 node_id,
                 state_id,
-            );
+            )?;
 
         Ok(FfiBuiltView::View(
             Box::new(
@@ -862,7 +862,7 @@ ffi_components! {
                 node_id,
                 state_id,
                 selection,
-            );
+            )?;
 
         let mut control =
             crate::components::SegmentedControl::new(
@@ -915,7 +915,7 @@ ffi_components! {
                 node_id,
                 state_id,
                 value,
-            );
+            )?;
 
         let mut slider =
             crate::components::Slider::new(
@@ -958,7 +958,7 @@ ffi_components! {
                 node_id,
                 state_id,
                 checked,
-            );
+            )?;
 
         let mut switch =
             crate::components::Switch::new(
@@ -1015,7 +1015,7 @@ ffi_components! {
                 node_id,
                 state_id,
                 value,
-            );
+            )?;
 
         Ok(FfiBuiltView::View(
             Box::new(

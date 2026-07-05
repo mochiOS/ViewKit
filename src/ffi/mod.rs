@@ -83,6 +83,11 @@ pub enum VkStatus {
     InvalidChildCount = 13,
     InvalidTreeNode = 14,
 
+    StateNotFound = 15,
+    StateTypeMismatch = 16,
+    BufferTooSmall = 17,
+    InvalidValue = 18,
+
     Panic = 255,
 }
 
@@ -530,6 +535,14 @@ fn status_name(status: i32) -> &'static str {
         value if value == VkStatus::PlatformError as i32 => "platform_error",
 
         value if value == VkStatus::UnsupportedPlatform as i32 => "unsupported_platform",
+
+        value if value == VkStatus::StateNotFound as i32 => "state_not_found",
+
+        value if value == VkStatus::StateTypeMismatch as i32 => "state_type_mismatch",
+
+        value if value == VkStatus::BufferTooSmall as i32 => "buffer_too_small",
+
+        value if value == VkStatus::InvalidValue as i32 => "invalid_value",
 
         _ => "unknown_status",
     }

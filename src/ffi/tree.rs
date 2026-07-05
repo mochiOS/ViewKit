@@ -9,7 +9,17 @@ use crate::state::{Binding, State};
 use crate::view::View;
 
 pub(crate) type SharedActionQueue = Rc<RefCell<VecDeque<VkActionEvent>>>;
+
 pub(crate) type SharedStateStore = Rc<RefCell<FfiStateStore>>;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FfiStateKind {
+    Bool,
+    Float,
+    Usize,
+    String,
+    Scroll,
+}
 
 #[derive(Default)]
 pub(crate) struct FfiStateStore {
@@ -21,36 +31,182 @@ pub(crate) struct FfiStateStore {
 }
 
 impl FfiStateStore {
-    fn bool_binding(&mut self, id: u64, initial: bool) -> Binding<bool> {
+    fn kind(&self, id: u64) -> Option<FfiStateKind> {
+        if self.bools.contains_key(&id) {
+            Some(FfiStateKind::Bool)
+        } else if self.floats.contains_key(&id) {
+            Some(FfiStateKind::Float)
+        } else if self.usizes.contains_key(&id) {
+            Some(FfiStateKind::Usize)
+        } else if self.strings.contains_key(&id) {
+            Some(FfiStateKind::String)
+        } else if self.scrolls.contains_key(&id) {
+            Some(FfiStateKind::Scroll)
+        } else {
+            None
+        }
+    }
+
+    fn ensure_kind(&self, id: u64, expected: FfiStateKind) -> Result<(), VkStatus> {
+        match self.kind(id) {
+            Some(actual) if actual != expected => Err(VkStatus::StateTypeMismatch),
+
+            _ => Ok(()),
+        }
+    }
+
+    pub(crate) fn bool_binding(
+        &mut self,
+        id: u64,
+        initial: bool,
+    ) -> Result<Binding<bool>, VkStatus> {
+        self.ensure_kind(id, FfiStateKind::Bool)?;
+
+        Ok(self
+            .bools
+            .entry(id)
+            .or_insert_with(|| State::new(initial))
+            .binding())
+    }
+
+    pub(crate) fn float_binding(
+        &mut self,
+        id: u64,
+        initial: f32,
+    ) -> Result<Binding<f32>, VkStatus> {
+        if !initial.is_finite() {
+            return Err(VkStatus::InvalidValue);
+        }
+
+        self.ensure_kind(id, FfiStateKind::Float)?;
+
+        Ok(self
+            .floats
+            .entry(id)
+            .or_insert_with(|| State::new(initial))
+            .binding())
+    }
+
+    pub(crate) fn usize_binding(
+        &mut self,
+        id: u64,
+        initial: usize,
+    ) -> Result<Binding<usize>, VkStatus> {
+        self.ensure_kind(id, FfiStateKind::Usize)?;
+
+        Ok(self
+            .usizes
+            .entry(id)
+            .or_insert_with(|| State::new(initial))
+            .binding())
+    }
+
+    pub(crate) fn string_binding(
+        &mut self,
+        id: u64,
+        initial: String,
+    ) -> Result<Binding<String>, VkStatus> {
+        self.ensure_kind(id, FfiStateKind::String)?;
+
+        Ok(self
+            .strings
+            .entry(id)
+            .or_insert_with(|| State::new(initial))
+            .binding())
+    }
+
+    pub(crate) fn scroll_state(&mut self, id: u64) -> Result<ScrollState, VkStatus> {
+        self.ensure_kind(id, FfiStateKind::Scroll)?;
+
+        Ok(self.scrolls.entry(id).or_default().clone())
+    }
+
+    pub(crate) fn get_bool(&self, id: u64) -> Result<bool, VkStatus> {
+        self.ensure_kind(id, FfiStateKind::Bool)?;
+
         self.bools
-            .entry(id)
-            .or_insert_with(|| State::new(initial))
-            .binding()
+            .get(&id)
+            .map(|state| state.get())
+            .ok_or(VkStatus::StateNotFound)
     }
 
-    fn float_binding(&mut self, id: u64, initial: f32) -> Binding<f32> {
+    pub(crate) fn set_bool(&mut self, id: u64, value: bool) -> Result<(), VkStatus> {
+        self.ensure_kind(id, FfiStateKind::Bool)?;
+
+        if let Some(state) = self.bools.get(&id) {
+            state.set(value);
+        } else {
+            self.bools.insert(id, State::new(value));
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn get_float(&self, id: u64) -> Result<f32, VkStatus> {
+        self.ensure_kind(id, FfiStateKind::Float)?;
+
         self.floats
-            .entry(id)
-            .or_insert_with(|| State::new(initial))
-            .binding()
+            .get(&id)
+            .map(|state| state.get())
+            .ok_or(VkStatus::StateNotFound)
     }
 
-    fn usize_binding(&mut self, id: u64, initial: usize) -> Binding<usize> {
+    pub(crate) fn set_float(&mut self, id: u64, value: f32) -> Result<(), VkStatus> {
+        if !value.is_finite() {
+            return Err(VkStatus::InvalidValue);
+        }
+
+        self.ensure_kind(id, FfiStateKind::Float)?;
+
+        if let Some(state) = self.floats.get(&id) {
+            state.set(value);
+        } else {
+            self.floats.insert(id, State::new(value));
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn get_usize(&self, id: u64) -> Result<usize, VkStatus> {
+        self.ensure_kind(id, FfiStateKind::Usize)?;
+
         self.usizes
-            .entry(id)
-            .or_insert_with(|| State::new(initial))
-            .binding()
+            .get(&id)
+            .map(|state| state.get())
+            .ok_or(VkStatus::StateNotFound)
     }
 
-    fn string_binding(&mut self, id: u64, initial: String) -> Binding<String> {
+    pub(crate) fn set_usize(&mut self, id: u64, value: usize) -> Result<(), VkStatus> {
+        self.ensure_kind(id, FfiStateKind::Usize)?;
+
+        if let Some(state) = self.usizes.get(&id) {
+            state.set(value);
+        } else {
+            self.usizes.insert(id, State::new(value));
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn get_string(&self, id: u64) -> Result<String, VkStatus> {
+        self.ensure_kind(id, FfiStateKind::String)?;
+
         self.strings
-            .entry(id)
-            .or_insert_with(|| State::new(initial))
-            .binding()
+            .get(&id)
+            .map(|state| state.get())
+            .ok_or(VkStatus::StateNotFound)
     }
 
-    fn scroll_state(&mut self, id: u64) -> ScrollState {
-        self.scrolls.entry(id).or_default().clone()
+    pub(crate) fn set_string(&mut self, id: u64, value: String) -> Result<(), VkStatus> {
+        self.ensure_kind(id, FfiStateKind::String)?;
+
+        if let Some(state) = self.strings.get(&id) {
+            state.set(value);
+        } else {
+            self.strings.insert(id, State::new(value));
+        }
+
+        Ok(())
     }
 
     fn retain(&mut self, active: &HashSet<u64>) {
@@ -71,7 +227,9 @@ pub(crate) type FfiViewFactory =
 
 pub(crate) enum FfiBuiltView {
     View(Box<dyn View>),
+
     StackChild(StackChild),
+
     StackChildren(Vec<StackChild>),
 }
 
@@ -142,8 +300,10 @@ impl FfiBuildContext {
     ) -> Self {
         Self {
             component_instance_id,
+
             actions,
             states,
+
             active_state_ids: HashSet::new(),
         }
     }
@@ -157,12 +317,14 @@ impl FfiBuildContext {
         node_id: u64,
         state_id: u64,
         initial: bool,
-    ) -> Binding<bool> {
+    ) -> Result<Binding<bool>, VkStatus> {
         let id = Self::state_key(node_id, state_id);
+
+        let binding = self.states.borrow_mut().bool_binding(id, initial)?;
 
         self.active_state_ids.insert(id);
 
-        self.states.borrow_mut().bool_binding(id, initial)
+        Ok(binding)
     }
 
     pub(crate) fn float_binding(
@@ -170,12 +332,14 @@ impl FfiBuildContext {
         node_id: u64,
         state_id: u64,
         initial: f32,
-    ) -> Binding<f32> {
+    ) -> Result<Binding<f32>, VkStatus> {
         let id = Self::state_key(node_id, state_id);
+
+        let binding = self.states.borrow_mut().float_binding(id, initial)?;
 
         self.active_state_ids.insert(id);
 
-        self.states.borrow_mut().float_binding(id, initial)
+        Ok(binding)
     }
 
     pub(crate) fn usize_binding(
@@ -183,12 +347,14 @@ impl FfiBuildContext {
         node_id: u64,
         state_id: u64,
         initial: usize,
-    ) -> Binding<usize> {
+    ) -> Result<Binding<usize>, VkStatus> {
         let id = Self::state_key(node_id, state_id);
+
+        let binding = self.states.borrow_mut().usize_binding(id, initial)?;
 
         self.active_state_ids.insert(id);
 
-        self.states.borrow_mut().usize_binding(id, initial)
+        Ok(binding)
     }
 
     pub(crate) fn string_binding(
@@ -196,20 +362,28 @@ impl FfiBuildContext {
         node_id: u64,
         state_id: u64,
         initial: String,
-    ) -> Binding<String> {
+    ) -> Result<Binding<String>, VkStatus> {
         let id = Self::state_key(node_id, state_id);
+
+        let binding = self.states.borrow_mut().string_binding(id, initial)?;
 
         self.active_state_ids.insert(id);
 
-        self.states.borrow_mut().string_binding(id, initial)
+        Ok(binding)
     }
 
-    pub(crate) fn scroll_state(&mut self, node_id: u64, state_id: u64) -> ScrollState {
+    pub(crate) fn scroll_state(
+        &mut self,
+        node_id: u64,
+        state_id: u64,
+    ) -> Result<ScrollState, VkStatus> {
         let id = Self::state_key(node_id, state_id);
+
+        let state = self.states.borrow_mut().scroll_state(id)?;
 
         self.active_state_ids.insert(id);
 
-        self.states.borrow_mut().scroll_state(id)
+        Ok(state)
     }
 
     pub(crate) fn retain_active_states(&self) {
@@ -224,8 +398,10 @@ impl FfiBuildContext {
         move || {
             actions.borrow_mut().push_back(VkActionEvent {
                 component_instance_id,
+
                 node_id,
                 action_id,
+
                 event_kind: VK_EVENT_BUTTON_CLICKED,
             });
         }
@@ -234,12 +410,15 @@ impl FfiBuildContext {
 
 enum FfiNodeKind {
     Root,
+
     Component(FfiViewFactory),
 }
 
 pub(crate) struct FfiNode {
     id: u64,
+
     kind: FfiNodeKind,
+
     children: Vec<FfiNode>,
 }
 
@@ -247,7 +426,9 @@ impl FfiNode {
     pub(crate) fn root(id: u64) -> Self {
         Self {
             id,
+
             kind: FfiNodeKind::Root,
+
             children: Vec::new(),
         }
     }
@@ -255,7 +436,9 @@ impl FfiNode {
     pub(crate) fn component(id: u64, factory: FfiViewFactory) -> Self {
         Self {
             id,
+
             kind: FfiNodeKind::Component(factory),
+
             children: Vec::new(),
         }
     }
@@ -288,25 +471,32 @@ impl FfiTree {
             return Err(VkStatus::InvalidTreeNode);
         }
 
-        let children = children
-            .into_iter()
-            .map(|child| child.build(context).map(FfiBuiltView::into_stack_child))
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut built_children = Vec::new();
 
-        Ok(Box::new(VStack::new().children(children)))
+        for child in children {
+            let child = child.build(context)?;
+
+            built_children.extend(child.into_stack_children());
+        }
+
+        Ok(Box::new(VStack::new().children(built_children)))
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FfiTreeBuilderError {
     NoOpenNode,
+
     UnclosedNodes,
+
     MultipleRoots,
+
     MissingRoot,
 }
 
 pub(crate) struct FfiTreeBuilder {
     stack: Vec<FfiNode>,
+
     roots: Vec<FfiNode>,
 }
 
@@ -416,13 +606,9 @@ pub(crate) fn exactly_two_stack_children(
 ) -> Result<(StackChild, StackChild), VkStatus> {
     let mut children = children.into_iter();
 
-    let Some(first) = children.next() else {
-        return Err(VkStatus::InvalidChildCount);
-    };
+    let first = children.next().ok_or(VkStatus::InvalidChildCount)?;
 
-    let Some(second) = children.next() else {
-        return Err(VkStatus::InvalidChildCount);
-    };
+    let second = children.next().ok_or(VkStatus::InvalidChildCount)?;
 
     if children.next().is_some() {
         return Err(VkStatus::InvalidChildCount);
