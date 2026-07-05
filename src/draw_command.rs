@@ -58,6 +58,11 @@ pub enum DrawCommand {
         rect: Rect,
     },
 
+    PushRoundedClip {
+        rect: Rect,
+        radius: f32,
+    },
+
     PopClip,
 }
 

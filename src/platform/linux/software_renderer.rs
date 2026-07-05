@@ -378,6 +378,19 @@ impl Renderer for SoftwareRenderer {
                     clip_stack.push(mask);
                 }
 
+                DrawCommand::PushRoundedClip { rect, radius } => {
+                    let mask = create_rounded_clip_mask(
+                        *rect,
+                        *radius,
+                        clip_stack.last(),
+                        self.viewport.physical_width,
+                        self.viewport.physical_height,
+                        transform,
+                    )?;
+
+                    clip_stack.push(mask);
+                }
+
                 DrawCommand::PopClip => {
                     if clip_stack.len() <= 1 {
                         return Err(SoftwareRendererError::ClipStackUnderflow);
@@ -516,6 +529,31 @@ fn create_clip_mask(
     physical_height: u32,
     transform: Transform,
 ) -> Result<Mask, SoftwareRendererError> {
+    let path = to_skia_rect(rect).map(PathBuilder::from_rect);
+
+    create_path_clip_mask(path, previous, physical_width, physical_height, transform)
+}
+
+fn create_rounded_clip_mask(
+    rect: Rect,
+    radius: f32,
+    previous: Option<&Mask>,
+    physical_width: u32,
+    physical_height: u32,
+    transform: Transform,
+) -> Result<Mask, SoftwareRendererError> {
+    let path = to_skia_rect(rect).map(|rect| rounded_rect_path(rect, radius));
+
+    create_path_clip_mask(path, previous, physical_width, physical_height, transform)
+}
+
+fn create_path_clip_mask(
+    path: Option<Path>,
+    previous: Option<&Mask>,
+    physical_width: u32,
+    physical_height: u32,
+    transform: Transform,
+) -> Result<Mask, SoftwareRendererError> {
     let has_previous = previous.is_some();
 
     let mut mask = match previous {
@@ -524,26 +562,15 @@ fn create_clip_mask(
         None => Mask::new(physical_width, physical_height).ok_or(
             SoftwareRendererError::ClipMaskAllocation {
                 width: physical_width,
-
                 height: physical_height,
             },
         )?,
     };
 
-    let Some(rect) = to_skia_rect(rect) else {
-        /*
-         * 不正なクリップ領域を無視すると、
-         * クリップされずに描画されてしまいます。
-         *
-         * そのため空のマスクにして、
-         * 何も描画されない状態にします。
-         */
+    let Some(path) = path else {
         mask.clear();
-
         return Ok(mask);
     };
-
-    let path = PathBuilder::from_rect(rect);
 
     if has_previous {
         mask.intersect_path(&path, FillRule::Winding, false, transform);
