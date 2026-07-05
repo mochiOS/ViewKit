@@ -7,9 +7,9 @@
 pub use crate::app::{App, ViewContext, WindowOptions};
 pub use crate::components::{
     Background, BorderStyle, Button, ButtonColor, ButtonInteractionState, ButtonStyle, Card,
-    Divider, Group, HStack, Overlay, Padding, Rectangle, RectangleColor, Scroll, ScrollAxis,
-    ScrollState, Spacer, Text, TextField, TextFieldInteractionState, TextFieldSize, VStack, ZStack,
-    ZStackAlignment,
+    Divider, Group, HStack, ListRow, Overlay, Padding, Rectangle, RectangleColor, Scroll,
+    ScrollAxis, ScrollState, Spacer, Text, TextField, TextFieldInteractionState, TextFieldSize,
+    VStack, ZStack, ZStackAlignment,
 };
 pub use crate::geometry::{Point, Rect, Size};
 pub use crate::layout::{

@@ -4,6 +4,7 @@ mod card;
 mod divider;
 mod group;
 mod hstack;
+mod list;
 mod overlay;
 mod padding;
 mod rectangle;
@@ -27,6 +28,7 @@ pub use zstack::{ZStack, ZStackAlignment};
 
 pub use button::{Button, ButtonColor, ButtonInteractionState, ButtonStyle};
 pub use card::Card;
+pub use list::ListRow;
 pub use rectangle::{BorderStyle, Rectangle, RectangleColor};
 pub use text::Text;
 pub use text_field::{TextField, TextFieldInteractionState, TextFieldSize};
