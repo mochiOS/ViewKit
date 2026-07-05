@@ -1,6 +1,7 @@
 //! レンダラーへ渡す描画命令を定義
 
 use crate::geometry::Rect;
+use crate::image::ImageData;
 use crate::theme::Color;
 use crate::typography::TextAlignment;
 
@@ -49,6 +50,10 @@ pub enum DrawCommand {
         command: TextCommand,
     },
 
+    DrawImage {
+        command: ImageCommand,
+    },
+
     PushClip {
         rect: Rect,
     },
@@ -73,6 +78,25 @@ pub struct TextCommand {
     pub alignment: TextAlignment,
 
     pub color: Color,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ImageSampling {
+    Nearest,
+
+    #[default]
+    Bilinear,
+
+    Bicubic,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ImageCommand {
+    pub image: ImageData,
+    pub bounds: Rect,
+
+    pub opacity: f32,
+    pub sampling: ImageSampling,
 }
 
 impl DisplayList {
