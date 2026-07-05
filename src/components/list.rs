@@ -1,12 +1,12 @@
 //! リストコンポーネント
 
-use std::cell::RefCell;
-
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
 use crate::layout::{StackAlignment, StackGap, ViewExt};
 use crate::theme::Theme;
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use super::{
     Button, ButtonInteractionState, ButtonStyle, HStack, Padding, Text, VStack, ZStackAlignment,
@@ -21,7 +21,7 @@ pub struct ListRow {
     enabled: bool,
 
     interaction: ButtonInteractionState,
-    on_select: Option<RefCell<Box<dyn FnMut()>>>,
+    on_select: Option<Rc<RefCell<Box<dyn FnMut()>>>>,
 }
 
 impl ListRow {
@@ -60,7 +60,7 @@ impl ListRow {
     }
 
     pub fn on_select(mut self, callback: impl FnMut() + 'static) -> Self {
-        self.on_select = Some(RefCell::new(Box::new(callback)));
+        self.on_select = Some(Rc::new(RefCell::new(Box::new(callback))));
         self
     }
 
@@ -107,7 +107,7 @@ impl ListRow {
     }
 
     fn button(&self, theme: &Theme) -> Button {
-        Button::with_interaction(self.interaction.clone())
+        let mut button = Button::with_interaction(self.interaction.clone())
             .style(if self.selected {
                 ButtonStyle::Standard
             } else {
@@ -115,7 +115,16 @@ impl ListRow {
             })
             .alignment(ZStackAlignment::Leading)
             .enabled(self.enabled)
-            .content(self.content_view(theme))
+            .content(self.content_view(theme));
+
+        if let Some(on_select) = self.on_select.as_ref() {
+            let on_select = Rc::clone(on_select);
+            button = button.on_click(move || {
+                (on_select.borrow_mut())();
+            });
+        }
+
+        button
     }
 }
 
@@ -140,7 +149,7 @@ impl View for ListRow {
 
         if self.interaction.take_clicked() {
             if let Some(callback) = self.on_select.as_ref() {
-                (callback.borrow_mut())();
+                callback.borrow_mut();
             }
 
             return EventResult::Consumed;
