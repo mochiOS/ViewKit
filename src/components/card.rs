@@ -79,6 +79,10 @@ where
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
+        let resolved_radius =
+            self.radius
+                .resolve(&context.theme.radius, bounds.size.width, bounds.size.height);
+
         Rectangle::new()
             .color(self.color)
             .radius(self.radius)
@@ -90,11 +94,12 @@ where
             .display_list
             .push(DrawCommand::PushClip { rect: bounds });
 
+        context.push_corner_radius(resolved_radius);
         self.content.paint(bounds, context);
+        context.pop_corner_radius();
 
         context.display_list.push(DrawCommand::PopClip);
     }
-
     fn handle_event(
         &self,
         bounds: Rect,

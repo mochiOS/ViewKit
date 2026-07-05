@@ -43,6 +43,7 @@ pub struct PaintContext<'a> {
     pub typography: &'a Typography,
     pub text_measurer: &'a mut TextMeasurer,
     redraw_schedule: Option<&'a mut RedrawSchedule>,
+    inherited_corner_radii: Vec<f32>,
 }
 
 impl<'a> PaintContext<'a> {
@@ -59,6 +60,7 @@ impl<'a> PaintContext<'a> {
             text_measurer,
 
             redraw_schedule: None,
+            inherited_corner_radii: Vec::new(),
         }
     }
 
@@ -73,6 +75,18 @@ impl<'a> PaintContext<'a> {
         };
 
         schedule.request_at(deadline);
+    }
+
+    pub(crate) fn inherited_corner_radius(&self) -> Option<f32> {
+        self.inherited_corner_radii.last().copied()
+    }
+
+    pub(crate) fn push_corner_radius(&mut self, radius: f32) {
+        self.inherited_corner_radii.push(radius.max(0.0));
+    }
+
+    pub(crate) fn pop_corner_radius(&mut self) {
+        self.inherited_corner_radii.pop();
     }
 }
 

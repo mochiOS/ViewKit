@@ -139,7 +139,23 @@ where
             return;
         }
 
-        self.content.paint(content_bounds, context);
+        let inherited_radius = context.inherited_corner_radius();
+
+        if let Some(parent_radius) = inherited_radius {
+            let insets = self.insets.sanitized();
+            let radius_inset = insets
+                .top
+                .max(insets.right)
+                .max(insets.bottom)
+                .max(insets.left);
+            let child_radius = (parent_radius - radius_inset).max(0.0);
+
+            context.push_corner_radius(child_radius);
+            self.content.paint(content_bounds, context);
+            context.pop_corner_radius();
+        } else {
+            self.content.paint(content_bounds, context);
+        }
     }
 
     fn handle_event(

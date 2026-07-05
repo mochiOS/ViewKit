@@ -333,7 +333,7 @@ pub struct Button {
     content: Option<StackChild>,
     intrinsic_label_size: RefCell<Option<Size>>,
     style: ButtonStyle,
-    radius: CornerRadius,
+    radius: Option<CornerRadius>,
     shadow: ShadowStyle,
     alignment: ZStackAlignment,
     enabled: bool,
@@ -347,7 +347,7 @@ impl Button {
             label: Some(label.into()),
             content: None,
             style: ButtonStyle::Standard,
-            radius: CornerRadius::Medium,
+            radius: None,
             shadow: ShadowStyle::None,
             alignment: ZStackAlignment::Center,
             enabled: true,
@@ -378,7 +378,7 @@ impl Button {
     }
 
     pub fn radius(mut self, radius: CornerRadius) -> Self {
-        self.radius = radius;
+        self.radius = Some(radius);
         self
     }
 
@@ -407,7 +407,7 @@ impl Button {
             label: None,
             content: None,
             style: ButtonStyle::Standard,
-            radius: CornerRadius::Medium,
+            radius: Option::from(CornerRadius::Medium),
             shadow: ShadowStyle::None,
             alignment: ZStackAlignment::Center,
             enabled: true,
@@ -489,9 +489,16 @@ impl View for Button {
             self.shadow
         };
 
+        let radius = self.radius.unwrap_or_else(|| {
+            context
+                .inherited_corner_radius()
+                .map(CornerRadius::Custom)
+                .unwrap_or(CornerRadius::Medium)
+        });
+
         Rectangle::new()
             .color(RectangleColor::Custom(appearance.background))
-            .radius(self.radius)
+            .radius(radius)
             .shadow(shadow)
             .border(BorderStyle::custom(appearance.border, 1.0))
             .paint(bounds, context);
