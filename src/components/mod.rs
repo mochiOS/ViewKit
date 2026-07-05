@@ -29,7 +29,7 @@ pub use group::Group;
 pub use hstack::HStack;
 pub use overlay::Overlay;
 pub use padding::Padding;
-pub use scroll::{Scroll, ScrollAxis, ScrollState};
+pub use scroll::{Scroll, ScrollAxis, ScrollBarVisibility, ScrollState};
 pub use spacer::Spacer;
 pub use vstack::VStack;
 pub use zstack::{ZStack, ZStackAlignment};
@@ -440,5 +440,598 @@ ffi_components! {
                     ),
             ),
         )
+    };
+
+        container vk_begin_card(
+        style: VkRectangleStyle
+            => style =
+                decode_rectangle_style(style)?,
+    ) build move |
+        _node_id,
+        children,
+        _context
+    | {
+        let content =
+            zero_or_one_view(children)?;
+
+        Ok(FfiBuiltView::View(
+            Box::new(
+                crate::components::Card::new()
+                    .color(style.color)
+                    .radius(style.radius)
+                    .border(style.border)
+                    .content(content),
+            ),
+        ))
+    };
+
+    leaf vk_push_checkbox(
+        state_id: u64,
+
+        checked: u8
+            => checked = checked != 0,
+
+        label: VkString
+            => label =
+                copy_string(label)?,
+
+        enabled: u8
+            => enabled = enabled != 0,
+    ) build move |
+        node_id,
+        children,
+        context
+    | {
+        expect_no_children(children)?;
+
+        let checked =
+            context.bool_binding(
+                node_id,
+                state_id,
+                checked,
+            );
+
+        let mut checkbox =
+            crate::components::Checkbox::new(
+                checked,
+            )
+            .enabled(enabled);
+
+        if !label.is_empty() {
+            checkbox =
+                checkbox.label(label);
+        }
+
+        Ok(FfiBuiltView::View(
+            Box::new(checkbox),
+        ))
+    };
+
+    container vk_begin_context_menu(
+    ) build move |
+        _node_id,
+        children,
+        _context
+    | {
+        let (content, menu) =
+            exactly_two_stack_children(
+                children,
+            )?;
+
+        Ok(FfiBuiltView::View(
+            Box::new(
+                crate::components::ContextMenu::new(
+                    content,
+                    menu,
+                ),
+            ),
+        ))
+    };
+
+    leaf vk_push_ellipse(
+        style: VkRectangleStyle
+            => style =
+                decode_rectangle_style(style)?,
+    ) build move |
+        _node_id,
+        children,
+        _context
+    | {
+        expect_no_children(children)?;
+
+        Ok(FfiBuiltView::View(
+            Box::new(
+                crate::components::Ellipse::new()
+                    .color(style.color)
+                    .border(style.border),
+            ),
+        ))
+    };
+
+    container vk_begin_group(
+    ) build move |
+        _node_id,
+        children,
+        _context
+    | {
+        Ok(FfiBuiltView::StackChildren(
+            into_stack_children(children),
+        ))
+    };
+
+    leaf vk_push_list_row(
+        title: VkString
+            => title =
+                copy_string(title)?,
+
+        subtitle: VkString
+            => subtitle =
+                copy_string(subtitle)?,
+
+        trailing: VkString
+            => trailing =
+                copy_string(trailing)?,
+
+        selected: u8
+            => selected = selected != 0,
+
+        enabled: u8
+            => enabled = enabled != 0,
+
+        action_id: u64,
+    ) build move |
+        node_id,
+        children,
+        context
+    | {
+        expect_no_children(children)?;
+
+        let mut row =
+            crate::components::ListRow::new(
+                title,
+            )
+            .selected(selected)
+            .enabled(enabled);
+
+        if !subtitle.is_empty() {
+            row = row.subtitle(subtitle);
+        }
+
+        if !trailing.is_empty() {
+            row = row.trailing(trailing);
+        }
+
+        if action_id != 0 {
+            row = row.on_select(
+                context.button_callback(
+                    node_id,
+                    action_id,
+                ),
+            );
+        }
+
+        Ok(FfiBuiltView::View(
+            Box::new(row),
+        ))
+    };
+
+    leaf vk_push_menu_item(
+        label: VkString
+            => label =
+                copy_string(label)?,
+
+        shortcut: VkString
+            => shortcut =
+                copy_string(shortcut)?,
+
+        enabled: u8
+            => enabled = enabled != 0,
+
+        danger: u8
+            => danger = danger != 0,
+
+        action_id: u64,
+    ) build move |
+        node_id,
+        children,
+        context
+    | {
+        expect_no_children(children)?;
+
+        let mut item =
+            crate::components::MenuItem::new(
+                label,
+            )
+            .enabled(enabled)
+            .danger(danger);
+
+        if !shortcut.is_empty() {
+            item =
+                item.shortcut(shortcut);
+        }
+
+        if action_id != 0 {
+            item = item.on_select(
+                context.button_callback(
+                    node_id,
+                    action_id,
+                ),
+            );
+        }
+
+        Ok(FfiBuiltView::View(
+            Box::new(item),
+        ))
+    };
+
+    leaf vk_push_menu(
+        entries: VkMenuEntries
+            => entries =
+                copy_menu_entries(entries)?,
+    ) build move |
+        node_id,
+        children,
+        context
+    | {
+        expect_no_children(children)?;
+
+        let mut menu =
+            crate::components::Menu::new();
+
+        for entry in entries {
+            match entry {
+                DecodedMenuEntry::Separator => {
+                    menu = menu.separator();
+                }
+
+                DecodedMenuEntry::Item {
+                    label,
+                    shortcut,
+                    enabled,
+                    danger,
+                    action_id,
+                } => {
+                    let mut item =
+                        crate::components::MenuItem::new(
+                            label,
+                        )
+                        .enabled(enabled)
+                        .danger(danger);
+
+                    if let Some(shortcut) =
+                        shortcut
+                    {
+                        item =
+                            item.shortcut(shortcut);
+                    }
+
+                    if action_id != 0 {
+                        item = item.on_select(
+                            context.button_callback(
+                                node_id,
+                                action_id,
+                            ),
+                        );
+                    }
+
+                    menu = menu.item(item);
+                }
+            }
+        }
+
+        Ok(FfiBuiltView::View(
+            Box::new(menu),
+        ))
+    };
+
+    container vk_begin_overlay(
+        alignment: u32
+            => alignment =
+                decode_zstack_alignment(
+                    alignment,
+                )?,
+    ) build move |
+        _node_id,
+        children,
+        _context
+    | {
+        let (content, overlay) =
+            exactly_two_stack_children(
+                children,
+            )?;
+
+        Ok(FfiBuiltView::View(
+            Box::new(
+                crate::components::Overlay::new()
+                    .content(content)
+                    .overlay(overlay)
+                    .alignment(alignment),
+            ),
+        ))
+    };
+
+    leaf vk_push_radio_button(
+        state_id: u64,
+
+        selection: u64
+            => selection =
+                decode_usize(selection)?,
+
+        value: u64
+            => value =
+                decode_usize(value)?,
+
+        label: VkString
+            => label =
+                copy_string(label)?,
+
+        enabled: u8
+            => enabled = enabled != 0,
+    ) build move |
+        node_id,
+        children,
+        context
+    | {
+        expect_no_children(children)?;
+
+        let selection =
+            context.usize_binding(
+                node_id,
+                state_id,
+                selection,
+            );
+
+        let mut radio =
+            crate::components::RadioButton::new(
+                selection,
+                value,
+            )
+            .enabled(enabled);
+
+        if !label.is_empty() {
+            radio = radio.label(label);
+        }
+
+        Ok(FfiBuiltView::View(
+            Box::new(radio),
+        ))
+    };
+
+    container vk_begin_scroll(
+        state_id: u64,
+
+        axis: u32
+            => axis =
+                decode_scroll_axis(axis)?,
+
+        scrollbar: u32
+            => scrollbar =
+                decode_scrollbar_visibility(
+                    scrollbar,
+                )?,
+    ) build move |
+        node_id,
+        children,
+        context
+    | {
+        let content =
+            zero_or_one_stack_child(
+                children,
+            )?;
+
+        let state =
+            context.scroll_state(
+                node_id,
+                state_id,
+            );
+
+        Ok(FfiBuiltView::View(
+            Box::new(
+                crate::components::Scroll::new(
+                    state,
+                )
+                .axis(axis)
+                .scrollbar(scrollbar)
+                .content(content),
+            ),
+        ))
+    };
+
+    leaf vk_push_segmented_control(
+        state_id: u64,
+
+        selection: u64
+            => selection =
+                decode_usize(selection)?,
+
+        items: VkSegmentedItems
+            => items =
+                copy_segmented_items(items)?,
+
+        enabled: u8
+            => enabled = enabled != 0,
+    ) build move |
+        node_id,
+        children,
+        context
+    | {
+        expect_no_children(children)?;
+
+        let selection =
+            context.usize_binding(
+                node_id,
+                state_id,
+                selection,
+            );
+
+        let mut control =
+            crate::components::SegmentedControl::new(
+                selection,
+            )
+            .enabled(enabled);
+
+        for item in items {
+            control = if item.enabled {
+                control.item(
+                    item.value,
+                    item.label,
+                )
+            } else {
+                control.disabled_item(
+                    item.value,
+                    item.label,
+                )
+            };
+        }
+
+        Ok(FfiBuiltView::View(
+            Box::new(control),
+        ))
+    };
+
+    leaf vk_push_slider(
+        state_id: u64,
+
+        value: f32,
+        minimum: f32,
+        maximum: f32,
+        step: f32,
+
+        label: VkString
+            => label =
+                copy_string(label)?,
+
+        enabled: u8
+            => enabled = enabled != 0,
+    ) build move |
+        node_id,
+        children,
+        context
+    | {
+        expect_no_children(children)?;
+
+        let value =
+            context.float_binding(
+                node_id,
+                state_id,
+                value,
+            );
+
+        let mut slider =
+            crate::components::Slider::new(
+                value,
+            )
+            .range(minimum..=maximum)
+            .step(step)
+            .enabled(enabled);
+
+        if !label.is_empty() {
+            slider = slider.label(label);
+        }
+
+        Ok(FfiBuiltView::View(
+            Box::new(slider),
+        ))
+    };
+
+    leaf vk_push_switch(
+        state_id: u64,
+
+        checked: u8
+            => checked = checked != 0,
+
+        label: VkString
+            => label =
+                copy_string(label)?,
+
+        enabled: u8
+            => enabled = enabled != 0,
+    ) build move |
+        node_id,
+        children,
+        context
+    | {
+        expect_no_children(children)?;
+
+        let checked =
+            context.bool_binding(
+                node_id,
+                state_id,
+                checked,
+            );
+
+        let mut switch =
+            crate::components::Switch::new(
+                checked,
+            )
+            .enabled(enabled);
+
+        if !label.is_empty() {
+            switch = switch.label(label);
+        }
+
+        Ok(FfiBuiltView::View(
+            Box::new(switch),
+        ))
+    };
+
+    leaf vk_push_text_field(
+        state_id: u64,
+
+        value: VkString
+            => value =
+                copy_string(value)?,
+
+        placeholder: VkString
+            => placeholder =
+                copy_string(
+                    placeholder,
+                )?,
+
+        size: u32
+            => size =
+                decode_text_field_size(
+                    size,
+                )?,
+
+        radius: f32
+            => radius =
+                sanitize_length(radius),
+
+        enabled: u8
+            => enabled = enabled != 0,
+
+        invalid: u8
+            => invalid = invalid != 0,
+    ) build move |
+        node_id,
+        children,
+        context
+    | {
+        expect_no_children(children)?;
+
+        let value =
+            context.string_binding(
+                node_id,
+                state_id,
+                value,
+            );
+
+        Ok(FfiBuiltView::View(
+            Box::new(
+                crate::components::TextField::new(
+                    value,
+                )
+                .placeholder(placeholder)
+                .size(size)
+                .radius(
+                    crate::theme::CornerRadius::Custom(
+                        radius,
+                    ),
+                )
+                .enabled(enabled)
+                .invalid(invalid),
+            ),
+        ))
     };
 }
