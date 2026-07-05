@@ -9,9 +9,8 @@ use crate::platform::linux::LinuxBackend;
 use crate::platform::{PlatformApplication, PlatformEvent, PlatformWindow, WindowConfig};
 use crate::renderer::Viewport;
 use crate::runtime::{
-    ActionId, ButtonNode, ComponentInstanceId, FrameNode, HStackNode, NodeId, PaddingNode,
-    RectangleNode, RuntimeEvent, TextNode, VStackNode, ViewNode, ViewNodeKind, ViewRuntime,
-    ViewTreeBuilder, ZStackNode,
+    ComponentInstanceId, NodeId, RectangleNode, RuntimeEvent, ViewNode, ViewNodeKind, ViewRuntime,
+    ViewTreeBuilder,
 };
 use crate::theme::{Color, CornerRadius, Theme};
 use crate::typography::{TextAlignment, TextMeasurer, Typography};
@@ -21,6 +20,10 @@ use std::ptr;
 use std::slice;
 use std::str;
 use std::time::Instant;
+
+mod generated_components;
+
+pub use generated_components::*;
 
 pub const VK_Z_ALIGNMENT_TOP_LEADING: u32 = 0;
 pub const VK_Z_ALIGNMENT_TOP: u32 = 1;
@@ -495,148 +498,6 @@ pub extern "C" fn vk_tree_abort(runtime: *mut VkRuntime) -> i32 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn vk_begin_vstack(
-    runtime: *mut VkRuntime,
-    node_id: u64,
-    gap: u32,
-    alignment: u32,
-    distribution: u32,
-) -> i32 {
-    ffi_status(|| {
-        let gap = decode_stack_gap(gap)?;
-
-        let alignment = decode_stack_alignment(alignment)?;
-
-        let distribution = decode_stack_distribution(distribution)?;
-
-        let runtime = runtime_mut(runtime)?;
-
-        let builder = active_builder(runtime)?;
-
-        builder.begin(ViewNode::new(
-            NodeId(node_id),
-            ViewNodeKind::VStack(VStackNode {
-                gap,
-                alignment,
-                distribution,
-            }),
-        ));
-
-        Ok(())
-    })
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn vk_push_text(
-    runtime: *mut VkRuntime,
-    node_id: u64,
-    content: VkString,
-    font_size: f32,
-    line_height: f32,
-    weight: u16,
-    alignment: u32,
-    color: u32,
-) -> i32 {
-    ffi_status(|| {
-        let content = copy_string(content)?;
-
-        let alignment = decode_text_alignment(alignment)?;
-
-        let color = decode_text_color(color)?;
-
-        let runtime = runtime_mut(runtime)?;
-
-        let builder = active_builder(runtime)?;
-
-        builder.leaf(ViewNode::new(
-            NodeId(node_id),
-            ViewNodeKind::Text(TextNode {
-                content,
-                font_family: String::from("Noto Sans JP"),
-                font_size: finite_or_default(font_size, 16.0),
-                line_height: finite_or_default(line_height, 24.0),
-                weight,
-                alignment,
-                color,
-            }),
-        ));
-
-        Ok(())
-    })
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn vk_push_button(
-    runtime: *mut VkRuntime,
-    node_id: u64,
-    title: VkString,
-    color: u32,
-    radius: f32,
-    action_id: u64,
-) -> i32 {
-    ffi_status(|| {
-        let title = copy_string(title)?;
-
-        let color = decode_button_color(color)?;
-
-        let action = if action_id == 0 {
-            None
-        } else {
-            Some(ActionId(action_id))
-        };
-
-        let runtime = runtime_mut(runtime)?;
-
-        let builder = active_builder(runtime)?;
-
-        builder.leaf(ViewNode::new(
-            NodeId(node_id),
-            ViewNodeKind::Button(ButtonNode {
-                title,
-                color,
-
-                radius: sanitize_length(radius),
-
-                action,
-            }),
-        ));
-
-        Ok(())
-    })
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn vk_begin_padding(
-    runtime: *mut VkRuntime,
-    node_id: u64,
-    top: f32,
-    right: f32,
-    bottom: f32,
-    left: f32,
-) -> i32 {
-    ffi_status(|| {
-        let runtime = runtime_mut(runtime)?;
-
-        let builder = active_builder(runtime)?;
-
-        builder.begin(ViewNode::new(
-            NodeId(node_id),
-            ViewNodeKind::Padding(PaddingNode {
-                top: sanitize_length(top),
-
-                right: sanitize_length(right),
-
-                bottom: sanitize_length(bottom),
-
-                left: sanitize_length(left),
-            }),
-        ));
-
-        Ok(())
-    })
-}
-
-#[unsafe(no_mangle)]
 pub extern "C" fn vk_end_node(runtime: *mut VkRuntime) -> i32 {
     ffi_status(|| {
         let runtime = runtime_mut(runtime)?;
@@ -883,56 +744,6 @@ where
     }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn vk_begin_hstack(
-    runtime: *mut VkRuntime,
-    node_id: u64,
-    gap: u32,
-    alignment: u32,
-    distribution: u32,
-) -> i32 {
-    ffi_status(|| {
-        let gap = decode_stack_gap(gap)?;
-
-        let alignment = decode_stack_alignment(alignment)?;
-
-        let distribution = decode_stack_distribution(distribution)?;
-
-        let runtime = runtime_mut(runtime)?;
-
-        let builder = active_builder(runtime)?;
-
-        builder.begin(ViewNode::new(
-            NodeId(node_id),
-            ViewNodeKind::HStack(HStackNode {
-                gap,
-                alignment,
-                distribution,
-            }),
-        ));
-
-        Ok(())
-    })
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn vk_begin_zstack(runtime: *mut VkRuntime, node_id: u64, alignment: u32) -> i32 {
-    ffi_status(|| {
-        let alignment = decode_zstack_alignment(alignment)?;
-
-        let runtime = runtime_mut(runtime)?;
-
-        let builder = active_builder(runtime)?;
-
-        builder.begin(ViewNode::new(
-            NodeId(node_id),
-            ViewNodeKind::ZStack(ZStackNode { alignment }),
-        ));
-
-        Ok(())
-    })
-}
-
 fn decode_zstack_alignment(value: u32) -> Result<ZStackAlignment, VkStatus> {
     match value {
         VK_Z_ALIGNMENT_TOP_LEADING => Ok(ZStackAlignment::TopLeading),
@@ -957,57 +768,6 @@ fn decode_zstack_alignment(value: u32) -> Result<ZStackAlignment, VkStatus> {
     }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn vk_push_spacer(runtime: *mut VkRuntime, node_id: u64) -> i32 {
-    ffi_status(|| {
-        let runtime = runtime_mut(runtime)?;
-
-        let builder = active_builder(runtime)?;
-
-        builder.leaf(ViewNode::new(NodeId(node_id), ViewNodeKind::Spacer));
-
-        Ok(())
-    })
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn vk_push_divider(runtime: *mut VkRuntime, node_id: u64) -> i32 {
-    ffi_status(|| {
-        let runtime = runtime_mut(runtime)?;
-
-        let builder = active_builder(runtime)?;
-
-        builder.leaf(ViewNode::new(NodeId(node_id), ViewNodeKind::Divider));
-
-        Ok(())
-    })
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn vk_begin_frame(
-    runtime: *mut VkRuntime,
-    node_id: u64,
-    width: VkLength,
-    height: VkLength,
-) -> i32 {
-    ffi_status(|| {
-        let width = decode_layout_length(width)?;
-
-        let height = decode_layout_length(height)?;
-
-        let runtime = runtime_mut(runtime)?;
-
-        let builder = active_builder(runtime)?;
-
-        builder.begin(ViewNode::new(
-            NodeId(node_id),
-            ViewNodeKind::Frame(FrameNode { width, height }),
-        ));
-
-        Ok(())
-    })
-}
-
 fn decode_layout_length(value: VkLength) -> Result<LayoutLength, VkStatus> {
     match value.kind {
         VK_LENGTH_AUTO => Ok(LayoutLength::Auto),
@@ -1016,48 +776,6 @@ fn decode_layout_length(value: VkLength) -> Result<LayoutLength, VkStatus> {
 
         _ => Err(VkStatus::InvalidEnumValue),
     }
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn vk_push_rectangle(
-    runtime: *mut VkRuntime,
-    node_id: u64,
-    style: VkRectangleStyle,
-) -> i32 {
-    ffi_status(|| {
-        let properties = decode_rectangle_style(style)?;
-
-        let runtime = runtime_mut(runtime)?;
-        let builder = active_builder(runtime)?;
-
-        builder.leaf(ViewNode::new(
-            NodeId(node_id),
-            ViewNodeKind::Rectangle(properties),
-        ));
-
-        Ok(())
-    })
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn vk_begin_background(
-    runtime: *mut VkRuntime,
-    node_id: u64,
-    style: VkRectangleStyle,
-) -> i32 {
-    ffi_status(|| {
-        let properties = decode_rectangle_style(style)?;
-
-        let runtime = runtime_mut(runtime)?;
-        let builder = active_builder(runtime)?;
-
-        builder.begin(ViewNode::new(
-            NodeId(node_id),
-            ViewNodeKind::Background(properties),
-        ));
-
-        Ok(())
-    })
 }
 
 fn decode_rectangle_style(style: VkRectangleStyle) -> Result<RectangleNode, VkStatus> {
