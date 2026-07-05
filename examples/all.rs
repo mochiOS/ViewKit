@@ -74,6 +74,7 @@ struct FileManagerExample {
     search: State<String>,
     status: State<String>,
     show_hidden: State<bool>,
+    view_mode: State<usize>,
 }
 
 impl FileManagerExample {
@@ -199,6 +200,7 @@ impl FileManagerExample {
                     })
                     .frame(36.0, 32.0),
             )
+            .child(self.view_mode_selector().layout().flex_shrink(0.0))
             .child(
                 TextField::new(self.path.binding())
                     .size(TextFieldSize::Small)
@@ -373,6 +375,15 @@ impl FileManagerExample {
             )
             .width(220.0)
     }
+
+    fn view_mode_selector(&self) -> impl View + 'static {
+        HStack::new()
+            .alignment(StackAlignment::Center)
+            .gap(StackGap::Small)
+            .child(RadioButton::new(self.view_mode.binding(), 0).label("リスト"))
+            .child(RadioButton::new(self.view_mode.binding(), 1).label("グリッド"))
+            .child(RadioButton::new(self.view_mode.binding(), 2).label("カラム"))
+    }
 }
 
 impl App for FileManagerExample {
@@ -386,6 +397,7 @@ impl App for FileManagerExample {
             search: State::new(String::new()),
             status: State::new(String::from("ホームを表示中")),
             show_hidden: State::new(false),
+            view_mode: State::new(0),
         }
     }
 
@@ -402,8 +414,7 @@ impl App for FileManagerExample {
         let show_metadata = width >= 900.0;
         let show_details = width >= 1040.0;
 
-        let list =
-            viewkit::components::ContextMenu::new(self.file_list(show_metadata), self.menu());
+        let list = ContextMenu::new(self.file_list(show_metadata), self.menu());
 
         let mut content = HStack::new()
             .alignment(StackAlignment::Stretch)
