@@ -71,6 +71,7 @@ pub struct LinuxBackend<A> {
     shortcut_pressed: bool,
 
     runtime_error: Option<LinuxBackendError>,
+    pending_pointer_move: Option<(f32, f32)>,
 }
 
 impl<A> LinuxBackend<A>
@@ -90,6 +91,7 @@ where
             shortcut_pressed: false,
 
             runtime_error: None,
+            pending_pointer_move: None,
         }
     }
 
@@ -167,6 +169,14 @@ where
 
             event_loop.exit();
         }
+    }
+
+    fn flush_pending_pointer_move(&mut self) {
+        let Some((x, y)) = self.pending_pointer_move.take() else {
+            return;
+        };
+
+        self.emit(PlatformEvent::PointerMoved { x, y });
     }
 }
 
@@ -299,15 +309,12 @@ where
                     .map(|window| window.scale_factor())
                     .unwrap_or(1.0);
 
-                let position = physical_position_to_logical(position, scale_factor);
-
-                self.emit(PlatformEvent::PointerMoved {
-                    x: position.0,
-                    y: position.1,
-                });
+                self.pending_pointer_move =
+                    Some(physical_position_to_logical(position, scale_factor));
             }
 
             WindowEvent::CursorLeft { .. } => {
+                self.pending_pointer_move = None;
                 self.emit(PlatformEvent::PointerLeft);
             }
 
@@ -320,14 +327,15 @@ where
             }
 
             WindowEvent::MouseInput { state, button, .. } => {
+                self.flush_pending_pointer_move();
                 self.emit(PlatformEvent::PointerButton {
                     button: convert_mouse_button(button),
-
                     state: convert_button_state(state),
                 });
             }
 
             WindowEvent::MouseWheel { delta, .. } => {
+                self.flush_pending_pointer_move();
                 let scale_factor = self
                     .window
                     .as_ref()
@@ -409,15 +417,14 @@ where
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.flush_pending_pointer_move();
         let Some(deadline) = self.application.next_redraw_at() else {
             event_loop.set_control_flow(ControlFlow::Wait);
-
             return;
         };
 
         if deadline <= Instant::now() {
             self.request_redraw();
-
             event_loop.set_control_flow(ControlFlow::Wait);
         } else {
             event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
