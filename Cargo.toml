@@ -64,3 +64,7 @@ path = "examples/text_field.rs"
 [[example]]
 name = "all"
 path = "examples/all.rs"
+
+[[example]]
+name = "image"
+path = "examples/image.rs"
