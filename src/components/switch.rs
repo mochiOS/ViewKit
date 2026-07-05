@@ -9,6 +9,7 @@ use crate::layout::{StackAlignment, StackGap, ViewExt};
 use crate::state::Binding;
 use crate::theme::{Color, CornerRadius, Motion, Shadow, ShadowSet, ShadowStyle, Theme};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 const TRACK_WIDTH: f32 = 44.0;
@@ -17,13 +18,34 @@ const KNOB_SIZE: f32 = 18.0;
 const PRESSED_KNOB_WIDTH: f32 = 24.0;
 const KNOB_INSET: f32 = 2.0;
 
+#[derive(Clone, Copy)]
+struct KnobWidthAnimation {
+    from: f32,
+    to: f32,
+    started_at: Instant,
+}
+
+struct KnobWidthAnimationState {
+    pressed: bool,
+    animation: Option<KnobWidthAnimation>,
+}
+
+impl Default for KnobWidthAnimationState {
+    fn default() -> Self {
+        Self {
+            pressed: false,
+            animation: None,
+        }
+    }
+}
+
 pub struct Switch {
     checked: Binding<bool>,
     label: Option<String>,
     enabled: bool,
     interaction: ButtonInteractionState,
+    knob_width_animation: Arc<Mutex<KnobWidthAnimationState>>,
 }
-
 impl Switch {
     pub fn new(checked: Binding<bool>) -> Self {
         Self {
@@ -31,6 +53,7 @@ impl Switch {
             label: None,
             enabled: true,
             interaction: ButtonInteractionState::new(),
+            knob_width_animation: Arc::new(Mutex::new(KnobWidthAnimationState::default())),
         }
     }
 
@@ -79,6 +102,7 @@ impl Switch {
                 transition: self.checked.transition(),
                 enabled: self.enabled,
                 interaction: self.interaction.clone(),
+                knob_width_animation: self.knob_width_animation.clone(),
             }
             .frame(TRACK_WIDTH, TRACK_HEIGHT)
             .flex_shrink(0.0),
@@ -129,6 +153,7 @@ struct SwitchMark {
     transition: Option<Transition<bool>>,
     enabled: bool,
     interaction: ButtonInteractionState,
+    knob_width_animation: Arc<Mutex<KnobWidthAnimationState>>,
 }
 
 impl View for SwitchMark {
@@ -156,11 +181,12 @@ impl View for SwitchMark {
             .radius(CornerRadius::Full)
             .paint(bounds, context);
 
-        let knob_width = if pressed {
-            PRESSED_KNOB_WIDTH
-        } else {
-            KNOB_SIZE
-        };
+        let (position, position_redraw) = self.animation_position(now, motion);
+        let (knob_width, width_redraw) = self.animated_knob_width(now, motion, pressed);
+
+        if let Some(next_redraw) = position_redraw.into_iter().chain(width_redraw).min() {
+            context.request_redraw_at(next_redraw);
+        }
 
         let knob_left = bounds.origin.x + KNOB_INSET;
 
@@ -245,6 +271,55 @@ impl SwitchMark {
 
         (position, sample.next_redraw_at)
     }
+
+    fn animated_knob_width(
+        &self,
+        now: Instant,
+        motion: Motion,
+        pressed: bool,
+    ) -> (f32, Option<Instant>) {
+        let mut state = self
+            .knob_width_animation
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        let current_width = match state.animation {
+            Some(animation) => {
+                let sample = Animation::new(animation.started_at, motion.duration)
+                    .easing(motion.easing)
+                    .sample(now);
+
+                interpolate(animation.from, animation.to, sample.progress)
+            }
+            None => knob_width_for_pressed(state.pressed),
+        };
+
+        if state.pressed != pressed {
+            state.pressed = pressed;
+            state.animation = Some(KnobWidthAnimation {
+                from: current_width,
+                to: knob_width_for_pressed(pressed),
+                started_at: now,
+            });
+        }
+
+        let Some(animation) = state.animation else {
+            return (knob_width_for_pressed(pressed), None);
+        };
+
+        let sample = Animation::new(animation.started_at, motion.duration)
+            .easing(motion.easing)
+            .sample(now);
+
+        let width = interpolate(animation.from, animation.to, sample.progress);
+        let next_redraw = sample.next_redraw_at;
+
+        if next_redraw.is_none() {
+            state.animation = None;
+        }
+
+        (width, next_redraw)
+    }
 }
 
 fn with_opacity(color: Color, opacity: f32) -> Color {
@@ -259,4 +334,12 @@ fn with_opacity(color: Color, opacity: f32) -> Color {
 
 fn bool_position(value: bool) -> f32 {
     if value { 1.0 } else { 0.0 }
+}
+
+fn knob_width_for_pressed(pressed: bool) -> f32 {
+    if pressed {
+        PRESSED_KNOB_WIDTH
+    } else {
+        KNOB_SIZE
+    }
 }
