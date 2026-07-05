@@ -318,7 +318,7 @@ impl Switch {
             }
 
             ViewEvent::FocusChanged { focused: false } => {
-                let final_position = {
+                let _final_position = {
                     let mut drag = self.drag.inner.borrow_mut();
 
                     if !drag.tracking {
