@@ -4,6 +4,9 @@
 //! use viewkit::prelude::*;
 //! ```
 
+pub use crate::animation::{
+    Animation, AnimationSample, Easing, Interpolate, Transition, interpolate,
+};
 pub use crate::app::{App, ViewContext, WindowOptions};
 pub use crate::components::{
     Background, BorderStyle, Button, ButtonColor, ButtonInteractionState, ButtonStyle, Card,

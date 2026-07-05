@@ -1,5 +1,6 @@
 //! アプリケーションの変更可能な状態を扱います。
 
+use crate::animation::Transition;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Instant;
@@ -134,17 +135,17 @@ impl<T> Binding<T> {
         self.last_changed_at.set(None);
     }
 
-    pub(crate) fn transition(&self) -> Option<(T, T, Instant)>
+    pub(crate) fn transition(&self) -> Option<Transition<T>>
     where
         T: Clone,
     {
-        let changed_at = self.last_changed_at.get()?;
+        let started_at = self.last_changed_at.get()?;
 
-        let previous = self.previous_value.borrow().as_ref()?.clone();
+        let from = self.previous_value.borrow().as_ref()?.clone();
 
-        let current = self.value.borrow().clone();
+        let to = self.value.borrow().clone();
 
-        Some((previous, current, changed_at))
+        Some(Transition::new(from, to, started_at))
     }
 }
 

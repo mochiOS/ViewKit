@@ -1,3 +1,8 @@
+use super::{
+    Button, ButtonInteractionState, ButtonStyle, HStack, Padding, Rectangle, RectangleColor, Text,
+    ZStackAlignment,
+};
+use crate::animation::{Animation, Easing, Transition, interpolate};
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
 use crate::layout::{StackAlignment, StackGap, ViewExt};
@@ -6,18 +11,12 @@ use crate::theme::{Color, CornerRadius, Shadow, ShadowSet, ShadowStyle, Theme};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 use std::time::{Duration, Instant};
 
-use super::{
-    Button, ButtonInteractionState, ButtonStyle, HStack, Padding, Rectangle, RectangleColor, Text,
-    ZStackAlignment,
-};
-
 const TRACK_WIDTH: f32 = 44.0;
 const TRACK_HEIGHT: f32 = 26.0;
 const KNOB_SIZE: f32 = 22.0;
 const PRESSED_KNOB_WIDTH: f32 = 25.0;
 const KNOB_INSET: f32 = 2.0;
-const SWITCH_ANIM_DURATION: Duration = Duration::from_millis(100);
-const SWITCH_ANIM_FRAME: Duration = Duration::from_millis(16);
+const ANIM_DURATION: Duration = Duration::from_millis(100);
 
 pub struct Switch {
     checked: Binding<bool>,
@@ -128,9 +127,9 @@ impl View for Switch {
 
 struct SwitchMark {
     checked: bool,
+    transition: Option<Transition<bool>>,
     enabled: bool,
     interaction: ButtonInteractionState,
-    transition: Option<(bool, bool, Instant)>,
 }
 
 impl View for SwitchMark {
@@ -167,7 +166,7 @@ impl View for SwitchMark {
 
         let knob_right = bounds.origin.x + bounds.size.width - KNOB_INSET - knob_width;
 
-        let knob_x = lerp(knob_left, knob_right, position);
+        let knob_x = interpolate(knob_left, knob_right, position);
 
         let knob_y = bounds.origin.y + (bounds.size.height - KNOB_SIZE) / 2.0;
 
@@ -214,7 +213,7 @@ impl SwitchMark {
             theme.colors.accent
         };
 
-        let color = lerp_color(off_color, on_color, position);
+        let color = interpolate(off_color, on_color, position);
 
         if self.enabled {
             color
@@ -226,38 +225,25 @@ impl SwitchMark {
     fn animation_position(&self, now: Instant) -> (f32, Option<Instant>) {
         let target = bool_position(self.checked);
 
-        let Some((from, to, started_at)) = self.transition else {
+        let Some(transition) = self.transition else {
             return (target, None);
         };
 
-        if to != self.checked || from == to {
+        if transition.to != self.checked || transition.from == transition.to {
             return (target, None);
         }
 
-        let elapsed = now.saturating_duration_since(started_at);
+        let sample = Animation::new(transition.started_at, ANIM_DURATION)
+            .easing(Easing::EaseOutCubic)
+            .sample(now);
 
-        if elapsed >= SWITCH_ANIM_DURATION {
-            return (target, None);
-        }
+        let position = interpolate(
+            bool_position(transition.from),
+            bool_position(transition.to),
+            sample.progress,
+        );
 
-        let linear_progress =
-            (elapsed.as_secs_f32() / SWITCH_ANIM_DURATION.as_secs_f32()).clamp(0.0, 1.0);
-
-        let progress = ease_out_cubic(linear_progress);
-
-        let position = lerp(bool_position(from), bool_position(to), progress);
-
-        let animation_end = started_at + SWITCH_ANIM_DURATION;
-
-        let next_frame = now + SWITCH_ANIM_FRAME;
-
-        let next_redraw = if next_frame < animation_end {
-            next_frame
-        } else {
-            animation_end
-        };
-
-        (position, Some(next_redraw))
+        (position, sample.next_redraw_at)
     }
 }
 
@@ -273,30 +259,4 @@ fn with_opacity(color: Color, opacity: f32) -> Color {
 
 fn bool_position(value: bool) -> f32 {
     if value { 1.0 } else { 0.0 }
-}
-
-fn ease_out_cubic(value: f32) -> f32 {
-    let value = value.clamp(0.0, 1.0);
-    let inverse = 1.0 - value;
-
-    1.0 - inverse * inverse * inverse
-}
-
-fn lerp(from: f32, to: f32, progress: f32) -> f32 {
-    from + (to - from) * progress.clamp(0.0, 1.0)
-}
-
-fn lerp_color(from: Color, to: Color, progress: f32) -> Color {
-    Color::rgba(
-        lerp_channel(from.red, to.red, progress),
-        lerp_channel(from.green, to.green, progress),
-        lerp_channel(from.blue, to.blue, progress),
-        lerp_channel(from.alpha, to.alpha, progress),
-    )
-}
-
-fn lerp_channel(from: u8, to: u8, progress: f32) -> u8 {
-    lerp(from as f32, to as f32, progress)
-        .round()
-        .clamp(0.0, 255.0) as u8
 }
