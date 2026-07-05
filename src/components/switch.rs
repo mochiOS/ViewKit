@@ -13,8 +13,8 @@ use std::time::Instant;
 
 const TRACK_WIDTH: f32 = 44.0;
 const TRACK_HEIGHT: f32 = 26.0;
-const KNOB_SIZE: f32 = 22.0;
-const PRESSED_KNOB_WIDTH: f32 = 25.0;
+const KNOB_SIZE: f32 = 18.0;
+const PRESSED_KNOB_WIDTH: f32 = 24.0;
 const KNOB_INSET: f32 = 2.0;
 
 pub struct Switch {
