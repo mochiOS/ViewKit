@@ -2,7 +2,7 @@ mod background;
 mod button;
 mod card;
 mod checkbox;
-pub mod context_menu;
+mod context_menu;
 mod divider;
 mod ellipse;
 mod group;
