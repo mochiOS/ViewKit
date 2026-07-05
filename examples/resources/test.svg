@@ -1,0 +1,107 @@
+<svg
+        xmlns="http://www.w3.org/2000/svg"
+        width="240"
+        height="160"
+        viewBox="0 0 240 160"
+>
+    <defs>
+        <linearGradient
+                id="sky"
+                x1="0"
+                y1="0"
+                x2="0"
+                y2="1"
+        >
+            <stop
+                    offset="0"
+                    stop-color="#b9dcff"
+            />
+            <stop
+                    offset="1"
+                    stop-color="#f4f9ff"
+            />
+        </linearGradient>
+
+        <linearGradient
+                id="mountain"
+                x1="0"
+                y1="0"
+                x2="1"
+                y2="1"
+        >
+            <stop
+                    offset="0"
+                    stop-color="#6574d9"
+            />
+            <stop
+                    offset="1"
+                    stop-color="#38469b"
+            />
+        </linearGradient>
+    </defs>
+
+    <rect
+            width="240"
+            height="160"
+            rx="18"
+            fill="url(#sky)"
+    />
+
+    <circle
+            cx="188"
+            cy="42"
+            r="21"
+            fill="#ffd45c"
+    />
+
+    <path
+            d="M0 123 L65 57 L107 103 L143 69 L240 133 L240 160 L0 160 Z"
+            fill="url(#mountain)"
+    />
+
+    <path
+            d="M0 131 C39 111 66 141 107 126 C148 111 182 138 240 116 L240 160 L0 160 Z"
+            fill="#63b979"
+    />
+
+    <path
+            d="M0 143 C48 126 78 151 122 137 C165 123 196 147 240 132 L240 160 L0 160 Z"
+            fill="#398b58"
+    />
+
+    <path
+            d="M65 57 L82 76 L67 72 L56 79 Z"
+            fill="#ffffff"
+            fill-opacity="0.9"
+    />
+
+    <path
+            d="M143 69 L161 81 L147 80 L136 87 Z"
+            fill="#ffffff"
+            fill-opacity="0.9"
+    />
+
+    <circle
+            cx="34"
+            cy="35"
+            r="5"
+            fill="#ffffff"
+            fill-opacity="0.85"
+    />
+
+    <circle
+            cx="54"
+            cy="25"
+            r="3"
+            fill="#ffffff"
+            fill-opacity="0.7"
+    />
+
+    <circle
+            cx="75"
+            cy="39"
+            r="4"
+            fill="#ffffff"
+            fill-opacity="0.8"
+    />
+</svg>

@@ -72,3 +72,7 @@ path = "examples/all.rs"
 [[example]]
 name = "image"
 path = "examples/image.rs"
+
+[[example]]
+name = "svg"
+path = "examples/svg.rs"
