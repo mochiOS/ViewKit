@@ -159,11 +159,6 @@ typedef struct VkActionEvent {
   uint32_t event_kind;
 } VkActionEvent;
 
-typedef struct VkLength {
-  uint32_t kind;
-  float value;
-} VkLength;
-
 typedef struct VkColor {
   uint8_t red;
   uint8_t green;
@@ -180,6 +175,11 @@ typedef struct VkRectangleStyle {
   struct VkColor border_color;
   float border_width;
 } VkRectangleStyle;
+
+typedef struct VkLength {
+  uint32_t kind;
+  float value;
+} VkLength;
 
 
 
@@ -239,19 +239,24 @@ int32_t vk_runtime_run_window(struct VkRuntime *runtime,
                               float height,
                               uint8_t resizable);
 
-int32_t vk_begin_vstack(struct VkRuntime *runtime,
-                        uint64_t node_id,
-                        uint32_t gap,
-                        uint32_t alignment,
-                        uint32_t distribution);
+int32_t vk_begin_background(struct VkRuntime *runtime,
+                            uint64_t node_id,
+                            struct VkRectangleStyle style);
+
+int32_t vk_push_button(struct VkRuntime *runtime,
+                       uint64_t node_id,
+                       struct VkString title,
+                       uint32_t color,
+                       float radius,
+                       uint64_t action_id);
+
+int32_t vk_push_divider(struct VkRuntime *runtime, uint64_t node_id);
 
 int32_t vk_begin_hstack(struct VkRuntime *runtime,
                         uint64_t node_id,
                         uint32_t gap,
                         uint32_t alignment,
                         uint32_t distribution);
-
-int32_t vk_begin_zstack(struct VkRuntime *runtime, uint64_t node_id, uint32_t alignment);
 
 int32_t vk_begin_padding(struct VkRuntime *runtime,
                          uint64_t node_id,
@@ -260,14 +265,11 @@ int32_t vk_begin_padding(struct VkRuntime *runtime,
                          float bottom,
                          float left);
 
-int32_t vk_begin_frame(struct VkRuntime *runtime,
-                       uint64_t node_id,
-                       struct VkLength width,
-                       struct VkLength height);
+int32_t vk_push_rectangle(struct VkRuntime *runtime,
+                          uint64_t node_id,
+                          struct VkRectangleStyle style);
 
-int32_t vk_begin_background(struct VkRuntime *runtime,
-                            uint64_t node_id,
-                            struct VkRectangleStyle style);
+int32_t vk_push_spacer(struct VkRuntime *runtime, uint64_t node_id);
 
 int32_t vk_push_text(struct VkRuntime *runtime,
                      uint64_t node_id,
@@ -278,19 +280,17 @@ int32_t vk_push_text(struct VkRuntime *runtime,
                      uint32_t alignment,
                      uint32_t color);
 
-int32_t vk_push_button(struct VkRuntime *runtime,
+int32_t vk_begin_vstack(struct VkRuntime *runtime,
+                        uint64_t node_id,
+                        uint32_t gap,
+                        uint32_t alignment,
+                        uint32_t distribution);
+
+int32_t vk_begin_zstack(struct VkRuntime *runtime, uint64_t node_id, uint32_t alignment);
+
+int32_t vk_begin_frame(struct VkRuntime *runtime,
                        uint64_t node_id,
-                       struct VkString title,
-                       uint32_t color,
-                       float radius,
-                       uint64_t action_id);
-
-int32_t vk_push_spacer(struct VkRuntime *runtime, uint64_t node_id);
-
-int32_t vk_push_divider(struct VkRuntime *runtime, uint64_t node_id);
-
-int32_t vk_push_rectangle(struct VkRuntime *runtime,
-                          uint64_t node_id,
-                          struct VkRectangleStyle style);
+                       struct VkLength width,
+                       struct VkLength height);
 
 #endif  /* VIEWKIT_ABI_H */

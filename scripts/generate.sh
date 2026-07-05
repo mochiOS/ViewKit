@@ -9,19 +9,23 @@ ROOT="$(
 
 cargo run \
     --quiet \
-    --manifest-path "$ROOT/tools/ffi-gen/Cargo.toml" \
+    --manifest-path \
+        "$ROOT/tools/ffi-gen/Cargo.toml" \
     -- \
     "$ROOT/src/components/mod.rs" \
+    "$ROOT/src/runtime/node.rs" \
     "$ROOT/src/ffi/generated_components.rs"
 
 rustfmt \
     --edition 2024 \
     "$ROOT/src/ffi/generated_components.rs"
 
-cbindgen \
-    --config "$ROOT/cbindgen.toml" \
-    --crate viewkit \
-    --output "$ROOT/lib/include/viewkit_abi.h" \
-    "$ROOT"
+(
+    cd "$ROOT"
 
-$ROOT/scripts/generate-header.sh
+    cbindgen \
+        --config cbindgen.toml \
+        --crate viewkit \
+        --output \
+            lib/include/viewkit_abi.h
+)
