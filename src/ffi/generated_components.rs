@@ -288,3 +288,457 @@ pub extern "C" fn vk_push_divider(runtime: *mut VkRuntime, node_id: u64) -> i32 
         Ok(())
     })
 }
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn vk_begin_card(
+    runtime: *mut VkRuntime,
+    node_id: u64,
+    style: VkRectangleStyle,
+) -> i32 {
+    ffi_status(|| {
+        let style = decode_rectangle_style(style)?;
+        let factory: FfiViewFactory = Box::new(move |_node_id, children, _context| {
+            let content = zero_or_one_view(children)?;
+            Ok(FfiBuiltView::View(Box::new(
+                crate::components::Card::new()
+                    .color(style.color)
+                    .radius(style.radius)
+                    .border(style.border)
+                    .content(content),
+            )))
+        });
+        let runtime = runtime_mut(runtime)?;
+        let builder = active_builder(runtime)?;
+        let node = FfiNode::component(node_id, factory);
+        builder.begin(node);
+        Ok(())
+    })
+}
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn vk_push_checkbox(
+    runtime: *mut VkRuntime,
+    node_id: u64,
+    state_id: u64,
+    checked: u8,
+    label: VkString,
+    enabled: u8,
+) -> i32 {
+    ffi_status(|| {
+        let checked = checked != 0;
+        let label = copy_string(label)?;
+        let enabled = enabled != 0;
+        let factory: FfiViewFactory = Box::new(move |node_id, children, context| {
+            expect_no_children(children)?;
+            let checked = context.bool_binding(node_id, state_id, checked);
+            let mut checkbox = crate::components::Checkbox::new(checked).enabled(enabled);
+            if !label.is_empty() {
+                checkbox = checkbox.label(label);
+            }
+            Ok(FfiBuiltView::View(Box::new(checkbox)))
+        });
+        let runtime = runtime_mut(runtime)?;
+        let builder = active_builder(runtime)?;
+        let node = FfiNode::component(node_id, factory);
+        builder.leaf(node);
+        Ok(())
+    })
+}
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn vk_begin_context_menu(runtime: *mut VkRuntime, node_id: u64) -> i32 {
+    ffi_status(|| {
+        let factory: FfiViewFactory = Box::new(move |_node_id, children, _context| {
+            let (content, menu) = exactly_two_stack_children(children)?;
+            Ok(FfiBuiltView::View(Box::new(
+                crate::components::ContextMenu::new(content, menu),
+            )))
+        });
+        let runtime = runtime_mut(runtime)?;
+        let builder = active_builder(runtime)?;
+        let node = FfiNode::component(node_id, factory);
+        builder.begin(node);
+        Ok(())
+    })
+}
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn vk_push_ellipse(
+    runtime: *mut VkRuntime,
+    node_id: u64,
+    style: VkRectangleStyle,
+) -> i32 {
+    ffi_status(|| {
+        let style = decode_rectangle_style(style)?;
+        let factory: FfiViewFactory = Box::new(move |_node_id, children, _context| {
+            expect_no_children(children)?;
+            Ok(FfiBuiltView::View(Box::new(
+                crate::components::Ellipse::new()
+                    .color(style.color)
+                    .border(style.border),
+            )))
+        });
+        let runtime = runtime_mut(runtime)?;
+        let builder = active_builder(runtime)?;
+        let node = FfiNode::component(node_id, factory);
+        builder.leaf(node);
+        Ok(())
+    })
+}
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn vk_begin_group(runtime: *mut VkRuntime, node_id: u64) -> i32 {
+    ffi_status(|| {
+        let factory: FfiViewFactory = Box::new(move |_node_id, children, _context| {
+            Ok(FfiBuiltView::StackChildren(into_stack_children(children)))
+        });
+        let runtime = runtime_mut(runtime)?;
+        let builder = active_builder(runtime)?;
+        let node = FfiNode::component(node_id, factory);
+        builder.begin(node);
+        Ok(())
+    })
+}
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn vk_push_list_row(
+    runtime: *mut VkRuntime,
+    node_id: u64,
+    title: VkString,
+    subtitle: VkString,
+    trailing: VkString,
+    selected: u8,
+    enabled: u8,
+    action_id: u64,
+) -> i32 {
+    ffi_status(|| {
+        let title = copy_string(title)?;
+        let subtitle = copy_string(subtitle)?;
+        let trailing = copy_string(trailing)?;
+        let selected = selected != 0;
+        let enabled = enabled != 0;
+        let factory: FfiViewFactory = Box::new(move |node_id, children, context| {
+            expect_no_children(children)?;
+            let mut row = crate::components::ListRow::new(title)
+                .selected(selected)
+                .enabled(enabled);
+            if !subtitle.is_empty() {
+                row = row.subtitle(subtitle);
+            }
+            if !trailing.is_empty() {
+                row = row.trailing(trailing);
+            }
+            if action_id != 0 {
+                row = row.on_select(context.button_callback(node_id, action_id));
+            }
+            Ok(FfiBuiltView::View(Box::new(row)))
+        });
+        let runtime = runtime_mut(runtime)?;
+        let builder = active_builder(runtime)?;
+        let node = FfiNode::component(node_id, factory);
+        builder.leaf(node);
+        Ok(())
+    })
+}
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn vk_push_menu_item(
+    runtime: *mut VkRuntime,
+    node_id: u64,
+    label: VkString,
+    shortcut: VkString,
+    enabled: u8,
+    danger: u8,
+    action_id: u64,
+) -> i32 {
+    ffi_status(|| {
+        let label = copy_string(label)?;
+        let shortcut = copy_string(shortcut)?;
+        let enabled = enabled != 0;
+        let danger = danger != 0;
+        let factory: FfiViewFactory = Box::new(move |node_id, children, context| {
+            expect_no_children(children)?;
+            let mut item = crate::components::MenuItem::new(label)
+                .enabled(enabled)
+                .danger(danger);
+            if !shortcut.is_empty() {
+                item = item.shortcut(shortcut);
+            }
+            if action_id != 0 {
+                item = item.on_select(context.button_callback(node_id, action_id));
+            }
+            Ok(FfiBuiltView::View(Box::new(item)))
+        });
+        let runtime = runtime_mut(runtime)?;
+        let builder = active_builder(runtime)?;
+        let node = FfiNode::component(node_id, factory);
+        builder.leaf(node);
+        Ok(())
+    })
+}
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn vk_push_menu(
+    runtime: *mut VkRuntime,
+    node_id: u64,
+    entries: VkMenuEntries,
+) -> i32 {
+    ffi_status(|| {
+        let entries = copy_menu_entries(entries)?;
+        let factory: FfiViewFactory = Box::new(move |node_id, children, context| {
+            expect_no_children(children)?;
+            let mut menu = crate::components::Menu::new();
+            for entry in entries {
+                match entry {
+                    DecodedMenuEntry::Separator => {
+                        menu = menu.separator();
+                    }
+                    DecodedMenuEntry::Item {
+                        label,
+                        shortcut,
+                        enabled,
+                        danger,
+                        action_id,
+                    } => {
+                        let mut item = crate::components::MenuItem::new(label)
+                            .enabled(enabled)
+                            .danger(danger);
+                        if let Some(shortcut) = shortcut {
+                            item = item.shortcut(shortcut);
+                        }
+                        if action_id != 0 {
+                            item = item.on_select(context.button_callback(node_id, action_id));
+                        }
+                        menu = menu.item(item);
+                    }
+                }
+            }
+            Ok(FfiBuiltView::View(Box::new(menu)))
+        });
+        let runtime = runtime_mut(runtime)?;
+        let builder = active_builder(runtime)?;
+        let node = FfiNode::component(node_id, factory);
+        builder.leaf(node);
+        Ok(())
+    })
+}
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn vk_begin_overlay(runtime: *mut VkRuntime, node_id: u64, alignment: u32) -> i32 {
+    ffi_status(|| {
+        let alignment = decode_zstack_alignment(alignment)?;
+        let factory: FfiViewFactory = Box::new(move |_node_id, children, _context| {
+            let (content, overlay) = exactly_two_stack_children(children)?;
+            Ok(FfiBuiltView::View(Box::new(
+                crate::components::Overlay::new()
+                    .content(content)
+                    .overlay(overlay)
+                    .alignment(alignment),
+            )))
+        });
+        let runtime = runtime_mut(runtime)?;
+        let builder = active_builder(runtime)?;
+        let node = FfiNode::component(node_id, factory);
+        builder.begin(node);
+        Ok(())
+    })
+}
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn vk_push_radio_button(
+    runtime: *mut VkRuntime,
+    node_id: u64,
+    state_id: u64,
+    selection: u64,
+    value: u64,
+    label: VkString,
+    enabled: u8,
+) -> i32 {
+    ffi_status(|| {
+        let selection = decode_usize(selection)?;
+        let value = decode_usize(value)?;
+        let label = copy_string(label)?;
+        let enabled = enabled != 0;
+        let factory: FfiViewFactory = Box::new(move |node_id, children, context| {
+            expect_no_children(children)?;
+            let selection = context.usize_binding(node_id, state_id, selection);
+            let mut radio = crate::components::RadioButton::new(selection, value).enabled(enabled);
+            if !label.is_empty() {
+                radio = radio.label(label);
+            }
+            Ok(FfiBuiltView::View(Box::new(radio)))
+        });
+        let runtime = runtime_mut(runtime)?;
+        let builder = active_builder(runtime)?;
+        let node = FfiNode::component(node_id, factory);
+        builder.leaf(node);
+        Ok(())
+    })
+}
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn vk_begin_scroll(
+    runtime: *mut VkRuntime,
+    node_id: u64,
+    state_id: u64,
+    axis: u32,
+    scrollbar: u32,
+) -> i32 {
+    ffi_status(|| {
+        let axis = decode_scroll_axis(axis)?;
+        let scrollbar = decode_scrollbar_visibility(scrollbar)?;
+        let factory: FfiViewFactory = Box::new(move |node_id, children, context| {
+            let content = zero_or_one_stack_child(children)?;
+            let state = context.scroll_state(node_id, state_id);
+            Ok(FfiBuiltView::View(Box::new(
+                crate::components::Scroll::new(state)
+                    .axis(axis)
+                    .scrollbar(scrollbar)
+                    .content(content),
+            )))
+        });
+        let runtime = runtime_mut(runtime)?;
+        let builder = active_builder(runtime)?;
+        let node = FfiNode::component(node_id, factory);
+        builder.begin(node);
+        Ok(())
+    })
+}
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn vk_push_segmented_control(
+    runtime: *mut VkRuntime,
+    node_id: u64,
+    state_id: u64,
+    selection: u64,
+    items: VkSegmentedItems,
+    enabled: u8,
+) -> i32 {
+    ffi_status(|| {
+        let selection = decode_usize(selection)?;
+        let items = copy_segmented_items(items)?;
+        let enabled = enabled != 0;
+        let factory: FfiViewFactory = Box::new(move |node_id, children, context| {
+            expect_no_children(children)?;
+            let selection = context.usize_binding(node_id, state_id, selection);
+            let mut control = crate::components::SegmentedControl::new(selection).enabled(enabled);
+            for item in items {
+                control = if item.enabled {
+                    control.item(item.value, item.label)
+                } else {
+                    control.disabled_item(item.value, item.label)
+                };
+            }
+            Ok(FfiBuiltView::View(Box::new(control)))
+        });
+        let runtime = runtime_mut(runtime)?;
+        let builder = active_builder(runtime)?;
+        let node = FfiNode::component(node_id, factory);
+        builder.leaf(node);
+        Ok(())
+    })
+}
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn vk_push_slider(
+    runtime: *mut VkRuntime,
+    node_id: u64,
+    state_id: u64,
+    value: f32,
+    minimum: f32,
+    maximum: f32,
+    step: f32,
+    label: VkString,
+    enabled: u8,
+) -> i32 {
+    ffi_status(|| {
+        let label = copy_string(label)?;
+        let enabled = enabled != 0;
+        let factory: FfiViewFactory = Box::new(move |node_id, children, context| {
+            expect_no_children(children)?;
+            let value = context.float_binding(node_id, state_id, value);
+            let mut slider = crate::components::Slider::new(value)
+                .range(minimum..=maximum)
+                .step(step)
+                .enabled(enabled);
+            if !label.is_empty() {
+                slider = slider.label(label);
+            }
+            Ok(FfiBuiltView::View(Box::new(slider)))
+        });
+        let runtime = runtime_mut(runtime)?;
+        let builder = active_builder(runtime)?;
+        let node = FfiNode::component(node_id, factory);
+        builder.leaf(node);
+        Ok(())
+    })
+}
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn vk_push_switch(
+    runtime: *mut VkRuntime,
+    node_id: u64,
+    state_id: u64,
+    checked: u8,
+    label: VkString,
+    enabled: u8,
+) -> i32 {
+    ffi_status(|| {
+        let checked = checked != 0;
+        let label = copy_string(label)?;
+        let enabled = enabled != 0;
+        let factory: FfiViewFactory = Box::new(move |node_id, children, context| {
+            expect_no_children(children)?;
+            let checked = context.bool_binding(node_id, state_id, checked);
+            let mut switch = crate::components::Switch::new(checked).enabled(enabled);
+            if !label.is_empty() {
+                switch = switch.label(label);
+            }
+            Ok(FfiBuiltView::View(Box::new(switch)))
+        });
+        let runtime = runtime_mut(runtime)?;
+        let builder = active_builder(runtime)?;
+        let node = FfiNode::component(node_id, factory);
+        builder.leaf(node);
+        Ok(())
+    })
+}
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn vk_push_text_field(
+    runtime: *mut VkRuntime,
+    node_id: u64,
+    state_id: u64,
+    value: VkString,
+    placeholder: VkString,
+    size: u32,
+    radius: f32,
+    enabled: u8,
+    invalid: u8,
+) -> i32 {
+    ffi_status(|| {
+        let value = copy_string(value)?;
+        let placeholder = copy_string(placeholder)?;
+        let size = decode_text_field_size(size)?;
+        let radius = sanitize_length(radius);
+        let enabled = enabled != 0;
+        let invalid = invalid != 0;
+        let factory: FfiViewFactory = Box::new(move |node_id, children, context| {
+            expect_no_children(children)?;
+            let value = context.string_binding(node_id, state_id, value);
+            Ok(FfiBuiltView::View(Box::new(
+                crate::components::TextField::new(value)
+                    .placeholder(placeholder)
+                    .size(size)
+                    .radius(crate::theme::CornerRadius::Custom(radius))
+                    .enabled(enabled)
+                    .invalid(invalid),
+            )))
+        });
+        let runtime = runtime_mut(runtime)?;
+        let builder = active_builder(runtime)?;
+        let node = FfiNode::component(node_id, factory);
+        builder.leaf(node);
+        Ok(())
+    })
+}

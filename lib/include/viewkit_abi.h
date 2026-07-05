@@ -293,4 +293,88 @@ int32_t vk_push_spacer(struct VkRuntime *runtime, uint64_t node_id);
 
 int32_t vk_push_divider(struct VkRuntime *runtime, uint64_t node_id);
 
+int32_t vk_begin_card(struct VkRuntime *runtime, uint64_t node_id, struct VkRectangleStyle style);
+
+int32_t vk_push_checkbox(struct VkRuntime *runtime,
+                         uint64_t node_id,
+                         uint64_t state_id,
+                         uint8_t checked,
+                         struct VkString label,
+                         uint8_t enabled);
+
+int32_t vk_begin_context_menu(struct VkRuntime *runtime, uint64_t node_id);
+
+int32_t vk_push_ellipse(struct VkRuntime *runtime, uint64_t node_id, struct VkRectangleStyle style);
+
+int32_t vk_begin_group(struct VkRuntime *runtime, uint64_t node_id);
+
+int32_t vk_push_list_row(struct VkRuntime *runtime,
+                         uint64_t node_id,
+                         struct VkString title,
+                         struct VkString subtitle,
+                         struct VkString trailing,
+                         uint8_t selected,
+                         uint8_t enabled,
+                         uint64_t action_id);
+
+int32_t vk_push_menu_item(struct VkRuntime *runtime,
+                          uint64_t node_id,
+                          struct VkString label,
+                          struct VkString shortcut,
+                          uint8_t enabled,
+                          uint8_t danger,
+                          uint64_t action_id);
+
+int32_t vk_push_menu(struct VkRuntime *runtime, uint64_t node_id, VkMenuEntries entries);
+
+int32_t vk_begin_overlay(struct VkRuntime *runtime, uint64_t node_id, uint32_t alignment);
+
+int32_t vk_push_radio_button(struct VkRuntime *runtime,
+                             uint64_t node_id,
+                             uint64_t state_id,
+                             uint64_t selection,
+                             uint64_t value,
+                             struct VkString label,
+                             uint8_t enabled);
+
+int32_t vk_begin_scroll(struct VkRuntime *runtime,
+                        uint64_t node_id,
+                        uint64_t state_id,
+                        uint32_t axis,
+                        uint32_t scrollbar);
+
+int32_t vk_push_segmented_control(struct VkRuntime *runtime,
+                                  uint64_t node_id,
+                                  uint64_t state_id,
+                                  uint64_t selection,
+                                  VkSegmentedItems items,
+                                  uint8_t enabled);
+
+int32_t vk_push_slider(struct VkRuntime *runtime,
+                       uint64_t node_id,
+                       uint64_t state_id,
+                       float value,
+                       float minimum,
+                       float maximum,
+                       float step,
+                       struct VkString label,
+                       uint8_t enabled);
+
+int32_t vk_push_switch(struct VkRuntime *runtime,
+                       uint64_t node_id,
+                       uint64_t state_id,
+                       uint8_t checked,
+                       struct VkString label,
+                       uint8_t enabled);
+
+int32_t vk_push_text_field(struct VkRuntime *runtime,
+                           uint64_t node_id,
+                           uint64_t state_id,
+                           struct VkString value,
+                           struct VkString placeholder,
+                           uint32_t size,
+                           float radius,
+                           uint8_t enabled,
+                           uint8_t invalid);
+
 #endif  /* VIEWKIT_ABI_H */
