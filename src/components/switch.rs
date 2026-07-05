@@ -2,21 +2,20 @@ use super::{
     Button, ButtonInteractionState, ButtonStyle, HStack, Padding, Rectangle, RectangleColor, Text,
     ZStackAlignment,
 };
-use crate::animation::{Animation, Easing, Transition, interpolate};
+use crate::animation::{Animation, Transition, interpolate};
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
 use crate::layout::{StackAlignment, StackGap, ViewExt};
 use crate::state::Binding;
-use crate::theme::{Color, CornerRadius, Shadow, ShadowSet, ShadowStyle, Theme};
+use crate::theme::{Color, CornerRadius, Motion, Shadow, ShadowSet, ShadowStyle, Theme};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 const TRACK_WIDTH: f32 = 44.0;
 const TRACK_HEIGHT: f32 = 26.0;
 const KNOB_SIZE: f32 = 22.0;
 const PRESSED_KNOB_WIDTH: f32 = 25.0;
 const KNOB_INSET: f32 = 2.0;
-const ANIM_DURATION: Duration = Duration::from_millis(100);
 
 pub struct Switch {
     checked: Binding<bool>,
@@ -142,8 +141,9 @@ impl View for SwitchMark {
         let pressed = self.interaction.is_pressed();
 
         let now = Instant::now();
+        let motion = context.theme.motion.toggle;
 
-        let (position, next_redraw) = self.animation_position(now);
+        let (position, next_redraw) = self.animation_position(now, motion);
 
         if let Some(next_redraw) = next_redraw {
             context.request_redraw_at(next_redraw);
@@ -222,7 +222,7 @@ impl SwitchMark {
         }
     }
 
-    fn animation_position(&self, now: Instant) -> (f32, Option<Instant>) {
+    fn animation_position(&self, now: Instant, motion: Motion) -> (f32, Option<Instant>) {
         let target = bool_position(self.checked);
 
         let Some(transition) = self.transition else {
@@ -233,8 +233,8 @@ impl SwitchMark {
             return (target, None);
         }
 
-        let sample = Animation::new(transition.started_at, ANIM_DURATION)
-            .easing(Easing::EaseOutCubic)
+        let sample = Animation::new(transition.started_at, motion.duration)
+            .easing(motion.easing)
             .sample(now);
 
         let position = interpolate(

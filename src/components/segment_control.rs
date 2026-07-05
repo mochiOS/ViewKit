@@ -1,16 +1,15 @@
 use super::{BorderStyle, Button, ButtonInteractionState, ButtonStyle, Rectangle, RectangleColor};
-use crate::animation::{Animation, Easing, interpolate};
+use crate::animation::{Animation, interpolate};
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
 use crate::state::Binding;
-use crate::theme::{CornerRadius, ShadowStyle};
+use crate::theme::{CornerRadius, Motion, ShadowStyle};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 const CONTROL_INSET: f32 = 2.0;
 const SEGMENT_HEIGHT: f32 = 30.0;
 const SEGMENT_MIN_WIDTH: f32 = 64.0;
-const ANIM_DURATION: Duration = Duration::from_millis(180);
 
 struct SegmentedItem {
     value: usize,
@@ -77,7 +76,9 @@ impl SegmentedControl {
             .shadow(ShadowStyle::None)
             .enabled(enabled)
             .on_click(move || {
-                selection.set(value);
+                if selection.get() != value {
+                    selection.set(value);
+                }
             })
     }
 
@@ -113,7 +114,7 @@ impl SegmentedControl {
             .collect()
     }
 
-    fn animated_index(&self, now: Instant) -> (Option<f32>, Option<Instant>) {
+    fn animated_index(&self, now: Instant, motion: Motion) -> (Option<f32>, Option<Instant>) {
         let current_value = self.selection.get();
 
         let Some(current_index) = self.selected_index(current_value) else {
@@ -140,8 +141,8 @@ impl SegmentedControl {
             return (Some(to_index as f32), None);
         }
 
-        let sample = Animation::new(transition.started_at, ANIM_DURATION)
-            .easing(Easing::EaseOutCubic)
+        let sample = Animation::new(transition.started_at, motion.duration)
+            .easing(motion.easing)
             .sample(now);
 
         let index = interpolate(from_index as f32, to_index as f32, sample.progress);
@@ -192,8 +193,9 @@ impl View for SegmentedControl {
         }
 
         let now = Instant::now();
+        let motion = context.theme.motion.selection;
 
-        let (animated_index, next_redraw) = self.animated_index(now);
+        let (animated_index, next_redraw) = self.animated_index(now, motion);
 
         if let Some(next_redraw) = next_redraw {
             context.request_redraw_at(next_redraw);
