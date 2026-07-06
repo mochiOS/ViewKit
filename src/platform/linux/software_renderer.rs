@@ -908,7 +908,7 @@ fn draw_text_command(
 
     let height = (command.bounds.size.height * scale).max(0.0);
 
-    let origin_x = command.bounds.origin.x * scale;
+    let origin_x = (command.bounds.origin.x * scale).round();
 
     let origin_y = command.bounds.origin.y * scale;
 
@@ -963,8 +963,10 @@ fn draw_text_command(
     let mut physical_glyphs = Vec::new();
 
     for run in buffer.layout_runs() {
+        let baseline_y = (origin_y + run.line_y).round();
+
         for glyph in run.glyphs {
-            physical_glyphs.push(glyph.physical((origin_x, origin_y + run.line_y), 1.0));
+            physical_glyphs.push(glyph.physical((origin_x, baseline_y), 1.0));
         }
     }
 
