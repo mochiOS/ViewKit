@@ -11,6 +11,7 @@ use crate::renderer::{Renderer, Viewport};
 
 use softbuffer::Context;
 
+use crate::platform::CursorIcon;
 use std::rc::Rc;
 use std::time::Instant;
 use winit::application::ApplicationHandler;
@@ -19,6 +20,7 @@ use winit::error::{EventLoopError, OsError};
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, OwnedDisplayHandle};
 use winit::keyboard::{Key, NamedKey};
+use winit::window::CursorIcon as WinitCursorIcon;
 use winit::window::{Window, WindowId};
 
 const LINE_SCROLL_PIXELS: f32 = 40.0;
@@ -56,6 +58,26 @@ impl PlatformWindow for WinitWindow<'_> {
 
     fn viewport(&self) -> Viewport {
         viewport_from_window(self.inner)
+    }
+
+    fn set_cursor(&self, cursor: CursorIcon) {
+        let cursor = match cursor {
+            CursorIcon::Default => WinitCursorIcon::Default,
+
+            CursorIcon::Pointer => WinitCursorIcon::Pointer,
+
+            CursorIcon::Text => WinitCursorIcon::Text,
+
+            CursorIcon::EwResize => WinitCursorIcon::EwResize,
+
+            CursorIcon::NsResize => WinitCursorIcon::NsResize,
+
+            CursorIcon::NwseResize => WinitCursorIcon::NwseResize,
+
+            CursorIcon::NeswResize => WinitCursorIcon::NeswResize,
+        };
+
+        self.inner.set_cursor(cursor);
     }
 }
 

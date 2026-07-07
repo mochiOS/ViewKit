@@ -15,6 +15,7 @@ pub use crate::layout::{
     IntoStackChild, IntoStackChildren, LayoutLength, StackAlignment, StackChild, StackDistribution,
     StackGap, ViewExt,
 };
+pub use crate::platform::CursorIcon;
 pub use crate::runtime::{ViewKitError, run};
 pub use crate::state::{Binding, State};
 pub use crate::svg::{SvgData, SvgError};

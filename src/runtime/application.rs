@@ -94,7 +94,7 @@ where
 
         self.ensure_root(viewport);
 
-        let redraw_request = {
+        let (redraw_request, cursor_icon) = {
             let root = self
                 .root
                 .as_ref()
@@ -106,8 +106,12 @@ where
             self.event_dispatcher
                 .dispatch(root, viewport.logical_bounds(), &event, &mut context);
 
-            context.redraw_request()
+            (context.redraw_request(), context.cursor_icon())
         };
+
+        if let Some(cursor_icon) = cursor_icon {
+            window.set_cursor(cursor_icon);
+        }
 
         let state_changed = take_state_changed();
 

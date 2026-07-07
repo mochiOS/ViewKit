@@ -8,4 +8,4 @@ pub mod linux;
 pub mod mochios;
 
 pub use event::{ButtonState, PlatformEvent, PointerButton};
-pub use window::{PlatformApplication, PlatformWindow, WindowConfig};
+pub use window::{CursorIcon, PlatformApplication, PlatformWindow, WindowConfig};

@@ -1,7 +1,7 @@
 //! Viewツリー内部で使用するイベント配送API
 
 use crate::geometry::{Point, Rect};
-use crate::platform::{ButtonState, PlatformEvent, PointerButton};
+use crate::platform::{ButtonState, CursorIcon, PlatformEvent, PointerButton};
 use crate::theme::Theme;
 use crate::typography::{TextMeasurer, Typography};
 use crate::view::View;
@@ -167,6 +167,7 @@ pub struct EventContext<'a> {
     pub(crate) text_measurer: &'a mut TextMeasurer,
 
     redraw_request: RedrawRequest,
+    cursor_icon: Option<CursorIcon>,
 }
 
 impl<'a> EventContext<'a> {
@@ -180,6 +181,7 @@ impl<'a> EventContext<'a> {
             typography,
             text_measurer,
             redraw_request: RedrawRequest::None,
+            cursor_icon: None,
         }
     }
 
@@ -205,6 +207,14 @@ impl<'a> EventContext<'a> {
 
     pub fn redraw_request(&self) -> RedrawRequest {
         self.redraw_request
+    }
+
+    pub fn set_cursor(&mut self, cursor_icon: CursorIcon) {
+        self.cursor_icon = Some(cursor_icon);
+    }
+
+    pub fn cursor_icon(&self) -> Option<CursorIcon> {
+        self.cursor_icon
     }
 }
 
