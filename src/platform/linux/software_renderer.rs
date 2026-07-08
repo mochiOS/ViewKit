@@ -43,11 +43,16 @@ pub enum SoftwareRendererError {
 
     #[error("SVG描画バッファを確保できませんでした: {width}x{height}")]
     SvgPixmapAllocation { width: u32, height: u32 },
+
+    #[error("画像描画バッファを確保できませんでした: {width}x{height}")]
+    ImagePixmapAllocation { width: u32, height: u32 },
 }
 
 const TEXT_LAYOUT_CACHE_CAPACITY: usize = 1024;
 const SVG_SMALL_RENDER_LIMIT: f32 = 256.0;
 const SVG_SMALL_RENDER_SUPERSAMPLE: f32 = 2.0;
+const IMAGE_SMALL_RENDER_LIMIT: f32 = 256.0;
+const IMAGE_SMALL_RENDER_SUPERSAMPLE: f32 = 3.0;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct TextLayoutKey {
@@ -427,7 +432,7 @@ impl Renderer for SoftwareRenderer {
                         continue;
                     }
 
-                    draw_image_command(pixmap, command, scale, clip_stack.last());
+                    draw_image_command(pixmap, command, scale, clip_stack.last())?;
                 }
 
                 DrawCommand::DrawSvg { command } => {
@@ -463,18 +468,18 @@ fn draw_image_command(
     command: &ImageCommand,
     display_scale: f32,
     clip: Option<&Mask>,
-) {
+) -> Result<(), SoftwareRendererError> {
     let bounds = command.bounds;
 
     if !is_valid_image_bounds(bounds) {
-        return;
+        return Ok(());
     }
 
     let image_width = command.image.width();
     let image_height = command.image.height();
 
     if image_width == 0 || image_height == 0 {
-        return;
+        return Ok(());
     }
 
     let Some(source) = PixmapRef::from_bytes(
@@ -482,15 +487,19 @@ fn draw_image_command(
         image_width,
         image_height,
     ) else {
-        return;
+        return Ok(());
     };
 
-    let scale_x = bounds.size.width * display_scale / image_width as f32;
+    let destination_width = bounds.size.width * display_scale;
 
-    let scale_y = bounds.size.height * display_scale / image_height as f32;
+    let destination_height = bounds.size.height * display_scale;
 
-    if !scale_x.is_finite() || !scale_y.is_finite() || scale_x <= 0.0 || scale_y <= 0.0 {
-        return;
+    if !destination_width.is_finite()
+        || !destination_height.is_finite()
+        || destination_width <= 0.0
+        || destination_height <= 0.0
+    {
+        return Ok(());
     }
 
     let translate_x = bounds.origin.x * display_scale;
@@ -498,26 +507,147 @@ fn draw_image_command(
     let translate_y = bounds.origin.y * display_scale;
 
     if !translate_x.is_finite() || !translate_y.is_finite() {
-        return;
+        return Ok(());
     }
 
-    let transform = Transform::from_row(scale_x, 0.0, 0.0, scale_y, translate_x, translate_y);
+    let quality = image_filter_quality(command.sampling);
 
-    let paint = PixmapPaint {
-        opacity: sanitize_image_opacity(command.opacity),
+    let supersample = if command.sampling == ImageSampling::Nearest {
+        1.0
+    } else {
+        image_supersample_scale(
+            destination_width,
+            destination_height,
+            image_width as f32,
+            image_height as f32,
+        )
+    };
 
-        quality: match command.sampling {
-            ImageSampling::Nearest => FilterQuality::Nearest,
+    if supersample <= 1.0 {
+        let scale_x = destination_width / image_width as f32;
 
-            ImageSampling::Bilinear => FilterQuality::Bilinear,
+        let scale_y = destination_height / image_height as f32;
 
-            ImageSampling::Bicubic => FilterQuality::Bicubic,
+        if !scale_x.is_finite() || !scale_y.is_finite() || scale_x <= 0.0 || scale_y <= 0.0 {
+            return Ok(());
+        }
+
+        let transform = Transform::from_row(scale_x, 0.0, 0.0, scale_y, translate_x, translate_y);
+
+        let paint = PixmapPaint {
+            opacity: sanitize_image_opacity(command.opacity),
+
+            quality,
+
+            ..PixmapPaint::default()
+        };
+
+        target.draw_pixmap(0, 0, source, &paint, transform, clip);
+
+        return Ok(());
+    }
+
+    let raster_width = (destination_width * supersample).ceil() as u32;
+
+    let raster_height = (destination_height * supersample).ceil() as u32;
+
+    if raster_width == 0 || raster_height == 0 {
+        return Ok(());
+    }
+
+    let mut raster = Pixmap::new(raster_width, raster_height).ok_or(
+        SoftwareRendererError::ImagePixmapAllocation {
+            width: raster_width,
+            height: raster_height,
         },
+    )?;
+
+    let first_scale_x = raster_width as f32 / image_width as f32;
+
+    let first_scale_y = raster_height as f32 / image_height as f32;
+
+    if !first_scale_x.is_finite()
+        || !first_scale_y.is_finite()
+        || first_scale_x <= 0.0
+        || first_scale_y <= 0.0
+    {
+        return Ok(());
+    }
+
+    let first_transform = Transform::from_scale(first_scale_x, first_scale_y);
+
+    let first_paint = PixmapPaint {
+        opacity: 1.0,
+        quality: FilterQuality::Bicubic,
 
         ..PixmapPaint::default()
     };
 
-    target.draw_pixmap(0, 0, source, &paint, transform, clip);
+    raster.draw_pixmap(0, 0, source, &first_paint, first_transform, None);
+
+    let second_transform = Transform::from_row(
+        destination_width / raster_width as f32,
+        0.0,
+        0.0,
+        destination_height / raster_height as f32,
+        translate_x,
+        translate_y,
+    );
+
+    let second_paint = PixmapPaint {
+        opacity: sanitize_image_opacity(command.opacity),
+
+        quality: FilterQuality::Bicubic,
+
+        ..PixmapPaint::default()
+    };
+
+    target.draw_pixmap(0, 0, raster.as_ref(), &second_paint, second_transform, clip);
+
+    Ok(())
+}
+
+fn image_filter_quality(sampling: ImageSampling) -> FilterQuality {
+    match sampling {
+        ImageSampling::Nearest => FilterQuality::Nearest,
+        ImageSampling::Bilinear => FilterQuality::Bilinear,
+        ImageSampling::Bicubic => FilterQuality::Bicubic,
+    }
+}
+
+fn image_supersample_scale(
+    destination_width: f32,
+    destination_height: f32,
+    source_width: f32,
+    source_height: f32,
+) -> f32 {
+    if !destination_width.is_finite()
+        || !destination_height.is_finite()
+        || !source_width.is_finite()
+        || !source_height.is_finite()
+        || destination_width <= 0.0
+        || destination_height <= 0.0
+        || source_width <= 0.0
+        || source_height <= 0.0
+    {
+        return 1.0;
+    }
+
+    if destination_width.max(destination_height) > IMAGE_SMALL_RENDER_LIMIT {
+        return 1.0;
+    }
+
+    let downscale_x = source_width / destination_width;
+
+    let downscale_y = source_height / destination_height;
+
+    let downscale = downscale_x.max(downscale_y);
+
+    if downscale <= 1.5 {
+        return 1.0;
+    }
+
+    IMAGE_SMALL_RENDER_SUPERSAMPLE
 }
 
 fn draw_svg_command(
