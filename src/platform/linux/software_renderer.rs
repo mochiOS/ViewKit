@@ -46,6 +46,8 @@ pub enum SoftwareRendererError {
 }
 
 const TEXT_LAYOUT_CACHE_CAPACITY: usize = 1024;
+const SVG_SMALL_RENDER_LIMIT: f32 = 256.0;
+const SVG_SMALL_RENDER_SUPERSAMPLE: f32 = 2.0;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct TextLayoutKey {
@@ -549,9 +551,11 @@ fn draw_svg_command(
         return Ok(());
     }
 
-    let raster_width = destination_width.ceil() as u32;
+    let supersample = svg_supersample_scale(destination_width, destination_height);
 
-    let raster_height = destination_height.ceil() as u32;
+    let raster_width = (destination_width * supersample).ceil() as u32;
+
+    let raster_height = (destination_height * supersample).ceil() as u32;
 
     if raster_width == 0 || raster_height == 0 {
         return Ok(());
@@ -595,7 +599,7 @@ fn draw_svg_command(
     let paint = PixmapPaint {
         opacity: sanitize_image_opacity(command.opacity),
 
-        quality: FilterQuality::Bilinear,
+        quality: FilterQuality::Bicubic,
 
         ..PixmapPaint::default()
     };
@@ -603,6 +607,22 @@ fn draw_svg_command(
     target.draw_pixmap(0, 0, raster.as_ref(), &paint, composite_transform, clip);
 
     Ok(())
+}
+
+fn svg_supersample_scale(destination_width: f32, destination_height: f32) -> f32 {
+    if !destination_width.is_finite()
+        || !destination_height.is_finite()
+        || destination_width <= 0.0
+        || destination_height <= 0.0
+    {
+        return 1.0;
+    }
+
+    if destination_width.max(destination_height) <= SVG_SMALL_RENDER_LIMIT {
+        SVG_SMALL_RENDER_SUPERSAMPLE
+    } else {
+        1.0
+    }
 }
 
 fn is_valid_image_bounds(bounds: Rect) -> bool {
@@ -669,15 +689,16 @@ fn create_path_clip_mask(
 
     let Some(path) = path else {
         mask.clear();
+
         return Ok(mask);
     };
 
     if has_previous {
-        mask.intersect_path(&path, FillRule::Winding, false, transform);
+        mask.intersect_path(&path, FillRule::Winding, true, transform);
     } else {
         mask.clear();
 
-        mask.fill_path(&path, FillRule::Winding, false, transform);
+        mask.fill_path(&path, FillRule::Winding, true, transform);
     }
 
     Ok(mask)

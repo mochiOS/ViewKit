@@ -45,14 +45,10 @@ impl Image {
     pub fn new(image: ImageData) -> Self {
         Self {
             image,
-
             content_mode: ImageContentMode::Fit,
-
             radius: CornerRadius::None,
-
             opacity: 1.0,
-
-            sampling: ImageSampling::Bilinear,
+            sampling: ImageSampling::Bicubic,
         }
     }
 

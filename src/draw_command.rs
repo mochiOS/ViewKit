@@ -94,9 +94,9 @@ pub struct TextCommand {
 pub enum ImageSampling {
     Nearest,
 
-    #[default]
     Bilinear,
 
+    #[default]
     Bicubic,
 }
 
