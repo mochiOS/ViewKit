@@ -571,7 +571,6 @@ impl View for Button {
                 let changed = inner.hovered != hovered || inner.pressed != pressed;
 
                 inner.hovered = hovered;
-
                 inner.pressed = pressed;
 
                 let armed = inner.armed;
@@ -582,7 +581,7 @@ impl View for Button {
                     context.request_redraw_in(bounds.expanded(16.0));
                 }
 
-                if armed {
+                if hovered || armed {
                     EventResult::Consumed
                 } else {
                     EventResult::Ignored

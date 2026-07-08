@@ -33,7 +33,7 @@ impl Theme {
             accent: Color::from_rgb_hex(0x0a84ff),
             accent_hovered: Color::from_rgb_hex(0x0077e6),
             accent_pressed: Color::from_rgb_hex(0x006bc7),
-            accent_soft: Color::rgba(10, 132, 255, 28),
+            accent_soft: Color::rgba(200, 200, 200, 25),
 
             border: Color::rgba(0, 0, 0, 20),
             border_strong: Color::rgba(0, 0, 0, 38),

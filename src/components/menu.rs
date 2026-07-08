@@ -145,7 +145,13 @@ impl MenuItem {
                 foreground: theme.colors.destructive,
             }
         } else {
-            ButtonStyle::Ghost
+            ButtonStyle::Custom {
+                background: Color::TRANSPARENT,
+                hovered_background: theme.colors.accent_soft,
+                border: Color::TRANSPARENT,
+                hovered_border: Color::TRANSPARENT,
+                foreground: theme.colors.text_primary,
+            }
         };
 
         let mut button = Button::with_interaction(self.interaction.clone())
