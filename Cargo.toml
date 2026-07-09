@@ -4,7 +4,7 @@ description = "A UI kit for mochiOS"
 keywords = ["uikit", "mochios", "viewkit", "ui", "kagami"]
 categories = ["gui"]
 license = "Apache-2.0"
-version = "0.3.5"
+version = "1.0.0"
 edition = "2024"
 autoexamples = false
 
