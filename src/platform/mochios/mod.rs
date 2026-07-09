@@ -1,11 +1,13 @@
 use std::cell::Cell;
+use std::time::Instant;
 
 use mochi_user_syscall as syscall;
 
 use crate::draw_command::{DisplayList, DrawCommand};
 use crate::geometry::Rect;
 use crate::platform::{
-    CursorIcon, PlatformApplication, PlatformEvent, PlatformWindow, WindowConfig,
+    ButtonState, CursorIcon, PlatformApplication, PlatformEvent, PlatformWindow, PointerButton,
+    WindowConfig,
 };
 use crate::renderer::Viewport;
 use crate::theme::Color;
@@ -20,12 +22,31 @@ const PIXEL_FORMAT_XRGB8888: u32 = 1;
 const PAGE_SIZE: usize = 4096;
 const MAX_IPC_PAGE_CHUNK: usize = 128;
 const MAX_SURFACE_EXTENT: u32 = 4096;
-const EVENT_LOOP_IDLE_YIELDS: usize = 128;
+const EVENT_POINTER_ENTER: u32 = 2;
+const EVENT_POINTER_LEAVE: u32 = 3;
+const EVENT_POINTER_MOTION: u32 = 4;
+const EVENT_POINTER_BUTTON: u32 = 5;
+const EVENT_KEY: u32 = 6;
+const EVENT_FOCUS_GAINED: u32 = 8;
+const EVENT_FOCUS_LOST: u32 = 9;
+const EVENT_FRAME_DONE: u32 = 10;
+const KEY_BACKSPACE: u16 = 2;
+const KEY_TAB: u16 = 3;
+const KEY_ENTER: u16 = 4;
+const KEY_SPACE: u16 = 5;
+const KEY_DELETE: u16 = 76;
+const KEY_HOME: u16 = 71;
+const KEY_END: u16 = 79;
+const KEY_LEFT: u16 = 75;
+const KEY_RIGHT: u16 = 77;
+const KEY_PAGE_UP: u16 = 73;
+const KEY_PAGE_DOWN: u16 = 81;
 
 static mut CREATE_SURFACE_REQ: [u8; 24] = [0; 24];
 static mut ATTACH_BUFFER_REQ: [u8; 28] = [0; 28];
 static mut TOKEN_REQ: [u8; 12] = [0; 12];
 static mut IPC_REPLY: [u8; 16] = [0; 16];
+static mut EVENT_BUF: [u8; 32] = [0; 32];
 
 #[derive(Debug, thiserror::Error)]
 pub enum MochiOsBackendError {
@@ -43,6 +64,9 @@ pub enum MochiOsBackendError {
 
     #[error("arithmetic overflow")]
     ArithmeticOverflow,
+
+    #[error("invalid compositor event")]
+    InvalidEvent,
 }
 
 pub struct MochiOsBackend<A>
@@ -51,6 +75,7 @@ where
 {
     app: A,
     config: WindowConfig,
+    pressed_buttons: Vec<u16>,
 }
 
 impl<A> MochiOsBackend<A>
@@ -58,15 +83,20 @@ where
     A: PlatformApplication,
 {
     pub fn new(app: A, config: WindowConfig) -> Self {
-        Self { app, config }
+        Self {
+            app,
+            config,
+            pressed_buttons: Vec::new(),
+        }
     }
 
     pub fn run(mut self) -> Result<(), MochiOsBackendError> {
         let compositor = find_compositor()?;
+        let event_endpoint = create_event_endpoint()?;
         let size = checked_surface_size(self.config.size)?;
         let viewport = Viewport::new(self.config.size, size.0, size.1, 1.0);
         let window = MochiOsWindow::new(viewport);
-        let token = create_surface(compositor, 0, size.0, size.1)?;
+        let token = create_surface(compositor, event_endpoint, size.0, size.1)?;
         let mut shared_buffer = SharedBuffer::new(size.0 as usize, size.1 as usize)?;
 
         self.app
@@ -76,7 +106,19 @@ where
         let mut display_list = DisplayList::new();
 
         loop {
-            if window.take_redraw_requested() {
+            let mut handled_work = false;
+
+            while let Some(event) = try_recv_event(event_endpoint)? {
+                self.handle_compositor_event(event, &window)?;
+                handled_work = true;
+            }
+
+            let redraw_due = self
+                .app
+                .next_redraw_at()
+                .is_some_and(|deadline| deadline <= Instant::now());
+
+            if window.take_redraw_requested() || redraw_due {
                 display_list.clear();
                 let _ = self.app.draw(window.viewport(), &mut display_list);
                 let buffer = render_display_list(window.viewport(), &display_list)?;
@@ -90,12 +132,116 @@ where
                 )?;
                 simple_token_request(compositor, OP_DAMAGE, token)?;
                 simple_token_request(compositor, OP_COMMIT, token)?;
+                handled_work = true;
             }
 
-            for _ in 0..EVENT_LOOP_IDLE_YIELDS {
-                let _ = syscall::call0(syscall::SyscallNumber::ThreadYield);
+            if !handled_work {
+                if let Some(deadline) = self.app.next_redraw_at() {
+                    if wait_until_deadline(deadline, &window, &mut self)? {
+                        continue;
+                    }
+                } else {
+                    wait_for_event(event_endpoint, &window, &mut self)?;
+                }
             }
         }
+    }
+
+    fn handle_compositor_event(
+        &mut self,
+        event: [u8; 32],
+        window: &MochiOsWindow,
+    ) -> Result<(), MochiOsBackendError> {
+        let kind = unsafe { read_u32_raw(event.as_ptr(), 0) };
+        let a = unsafe { read_i32_raw(event.as_ptr(), 4) };
+        let b = unsafe { read_i32_raw(event.as_ptr(), 8) };
+        let c = unsafe { read_u32_raw(event.as_ptr(), 12) };
+
+        match kind {
+            EVENT_POINTER_ENTER | EVENT_POINTER_MOTION => {
+                self.app.handle_event(
+                    PlatformEvent::PointerMoved {
+                        x: a as f32,
+                        y: b as f32,
+                    },
+                    window,
+                );
+            }
+            EVENT_POINTER_LEAVE => {
+                self.app.handle_event(PlatformEvent::PointerLeft, window);
+            }
+            EVENT_POINTER_BUTTON => {
+                let button = match c as u16 {
+                    1 => PointerButton::Primary,
+                    2 => PointerButton::Secondary,
+                    3 => PointerButton::Middle,
+                    other => PointerButton::Other(other),
+                };
+                let button_id = c as u16;
+                let state = if let Some(pos) = self
+                    .pressed_buttons
+                    .iter()
+                    .position(|pressed| *pressed == button_id)
+                {
+                    self.pressed_buttons.swap_remove(pos);
+                    ButtonState::Released
+                } else {
+                    self.pressed_buttons.push(button_id);
+                    ButtonState::Pressed
+                };
+                self.app
+                    .handle_event(PlatformEvent::PointerButton { button, state }, window);
+            }
+            EVENT_KEY => {
+                if c & 1 != 0 {
+                    if let Some(event) = self.key_event(a as u16, b as u32) {
+                        self.app.handle_event(event, window);
+                    }
+                }
+            }
+            EVENT_FOCUS_GAINED => {
+                self.app.handle_event(PlatformEvent::Focused(true), window);
+            }
+            EVENT_FOCUS_LOST => {
+                self.app.handle_event(PlatformEvent::Focused(false), window);
+            }
+            EVENT_FRAME_DONE => {
+                window.request_redraw();
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
+
+    fn key_event(&self, keycode: u16, codepoint: u32) -> Option<PlatformEvent> {
+        if let Some(text) = char::from_u32(codepoint)
+            && !text.is_control()
+        {
+            return Some(PlatformEvent::TextInput {
+                text: text.to_string(),
+            });
+        }
+        Some(match keycode {
+            KEY_BACKSPACE => PlatformEvent::Backspace,
+            KEY_TAB => PlatformEvent::TextInput {
+                text: String::from("\t"),
+            },
+            KEY_ENTER => PlatformEvent::TextInput {
+                text: String::from("\n"),
+            },
+            KEY_SPACE => PlatformEvent::TextInput {
+                text: String::from(" "),
+            },
+            KEY_DELETE => PlatformEvent::Delete,
+            KEY_HOME => PlatformEvent::Home,
+            KEY_END => PlatformEvent::End,
+            KEY_LEFT => PlatformEvent::ArrowLeft,
+            KEY_RIGHT => PlatformEvent::ArrowRight,
+            KEY_PAGE_UP => PlatformEvent::SelectHome,
+            KEY_PAGE_DOWN => PlatformEvent::SelectEnd,
+            _ => return None,
+        })
     }
 }
 
@@ -166,6 +312,10 @@ fn syscall_result<T>(result: syscall::SysResult<T>) -> Result<T, MochiOsBackendE
     result.map_err(|err| MochiOsBackendError::Syscall(err.errno().unwrap_or(5)))
 }
 
+fn create_event_endpoint() -> Result<u64, MochiOsBackendError> {
+    syscall_result(syscall::call2(syscall::SyscallNumber::IpcCreate, 0, 0))
+}
+
 fn find_compositor() -> Result<u64, MochiOsBackendError> {
     let name = COMPOSITOR_SERVICE_NAME.as_bytes();
     for _ in 0..64 {
@@ -196,6 +346,20 @@ fn ipc_call_raw(
         req_len as u64,
         reply_ptr as u64,
         reply_len as u64,
+    ))?;
+    Ok((msg & 0xffff_ffff) as usize)
+}
+
+fn ipc_wait_raw(
+    endpoint: u64,
+    buf_ptr: *mut u8,
+    buf_len: usize,
+) -> Result<usize, MochiOsBackendError> {
+    let msg = syscall_result(syscall::call3(
+        syscall::SyscallNumber::IpcWait,
+        buf_ptr as u64,
+        buf_len as u64,
+        endpoint,
     ))?;
     Ok((msg & 0xffff_ffff) as usize)
 }
@@ -290,6 +454,14 @@ unsafe fn put_u32_raw(ptr: *mut u8, offset: usize, value: u32) {
     }
 }
 
+unsafe fn read_i32_raw(ptr: *const u8, offset: usize) -> i32 {
+    let mut bytes = [0u8; 4];
+    unsafe {
+        core::ptr::copy_nonoverlapping(ptr.add(offset), bytes.as_mut_ptr(), 4);
+    }
+    i32::from_le_bytes(bytes)
+}
+
 unsafe fn put_u64_raw(ptr: *mut u8, offset: usize, value: u64) {
     unsafe {
         core::ptr::copy_nonoverlapping(value.to_le_bytes().as_ptr(), ptr.add(offset), 8);
@@ -322,6 +494,66 @@ fn status_from_raw(ptr: *const u8, len: usize) -> Result<(), MochiOsBackendError
     } else {
         Err(MochiOsBackendError::Syscall(status as u64))
     }
+}
+
+fn try_recv_event() -> Result<Option<[u8; 32]>, MochiOsBackendError> {
+    let event = core::ptr::addr_of_mut!(EVENT_BUF).cast::<u8>();
+    let len = match ipc_wait_raw(0, event, 32) {
+        Ok(len) => len,
+        Err(MochiOsBackendError::Syscall(err)) if err == syscall::EAGAIN => return Ok(None),
+        Err(err) => return Err(err),
+    };
+    if len < 16 {
+        return Err(MochiOsBackendError::InvalidEvent);
+    }
+    let mut out = [0u8; 32];
+    let copy_len = len.min(out.len());
+    unsafe {
+        core::ptr::copy_nonoverlapping(event, out.as_mut_ptr(), copy_len);
+    }
+    Ok(Some(out))
+}
+
+fn wait_for_event<A: PlatformApplication>(
+    endpoint: u64,
+    window: &MochiOsWindow,
+    backend: &mut MochiOsBackend<A>,
+) -> Result<(), MochiOsBackendError> {
+    if let Some(event) = read_event_blocking(endpoint)? {
+        backend.handle_compositor_event(event, window)?;
+    }
+    Ok(())
+}
+
+fn wait_until_deadline<A: PlatformApplication>(
+    deadline: Instant,
+    window: &MochiOsWindow,
+    backend: &mut MochiOsBackend<A>,
+) -> Result<bool, MochiOsBackendError> {
+    loop {
+        if let Some(event) = try_recv_event()? {
+            backend.handle_compositor_event(event, window)?;
+            return Ok(true);
+        }
+        if Instant::now() >= deadline {
+            return Ok(false);
+        }
+        let _ = syscall::call0(syscall::SyscallNumber::ThreadYield);
+    }
+}
+
+fn read_event_blocking(endpoint: u64) -> Result<Option<[u8; 32]>, MochiOsBackendError> {
+    let event = core::ptr::addr_of_mut!(EVENT_BUF).cast::<u8>();
+    let len = ipc_wait_raw(endpoint, event, 32)?;
+    if len < 16 {
+        return Err(MochiOsBackendError::InvalidEvent);
+    }
+    let mut out = [0u8; 32];
+    let copy_len = len.min(out.len());
+    unsafe {
+        core::ptr::copy_nonoverlapping(event, out.as_mut_ptr(), copy_len);
+    }
+    Ok(Some(out))
 }
 
 fn create_surface(
