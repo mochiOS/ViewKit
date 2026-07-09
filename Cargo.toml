@@ -42,7 +42,7 @@ tiny-skia = "0.12.0"
 thiserror = "2"
 
 [target.'cfg(target_os = "mochios")'.dependencies]
-mochi-user-syscall = { path = "../../user/crates/syscall" }
+mochi-user-syscall = "0.1.0"
 
 [lib]
 name = "viewkit"
