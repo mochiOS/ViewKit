@@ -108,7 +108,7 @@ where
         loop {
             let mut handled_work = false;
 
-            while let Some(event) = try_recv_event(event_endpoint)? {
+            while let Some(event) = try_recv_event()? {
                 self.handle_compositor_event(event, &window)?;
                 handled_work = true;
             }
