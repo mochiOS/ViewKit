@@ -1,5 +1,6 @@
 //! 文字列を描画するTextを定義
 
+#[cfg(not(target_os = "mochios"))]
 use cosmic_text::{Attrs, Buffer, Family, Metrics, Shaping, Weight};
 
 use crate::draw_command::{DrawCommand, TextCommand};
@@ -80,67 +81,108 @@ impl Text {
     }
 
     pub fn measure_text(&self, measurer: &mut TextMeasurer, maximum_width: Option<f32>) -> Size {
-        if self.value.is_empty() {
-            return Size::new(0.0, 0.0);
+        #[cfg(target_os = "mochios")]
+        {
+            let _ = measurer;
+            return self.measure_text_without_font(maximum_width);
         }
 
-        let font_size = resolved_font_size(self.font_size);
+        #[cfg(not(target_os = "mochios"))]
+        {
+            if self.value.is_empty() {
+                return Size::new(0.0, 0.0);
+            }
 
-        let line_height = resolved_line_height(font_size, self.line_height);
+            let font_size = resolved_font_size(self.font_size);
 
-        let metrics = Metrics::new(font_size, line_height);
+            let line_height = resolved_line_height(font_size, self.line_height);
 
-        let font_system = measurer.font_system_mut();
+            let metrics = Metrics::new(font_size, line_height);
 
-        let mut buffer = Buffer::new(font_system, metrics);
+            let font_system = measurer.font_system_mut();
 
-        let attrs = self.create_attrs();
+            let mut buffer = Buffer::new(font_system, metrics);
 
-        let maximum_width = normalize_maximum_width(maximum_width);
+            let attrs = self.create_attrs();
 
-        let mut buffer = buffer.borrow_with(font_system);
+            let maximum_width = normalize_maximum_width(maximum_width);
 
-        /*
-         * 高さをNoneにすることで、
-         * 全行を計測対象にします。
-         */
-        buffer.set_size(maximum_width, None);
+            let mut buffer = buffer.borrow_with(font_system);
 
-        buffer.set_text(
-            self.value.as_str(),
-            &attrs,
-            Shaping::Advanced,
-            self.alignment.to_cosmic(),
-        );
+            /*
+             * 高さをNoneにすることで、
+             * 全行を計測対象にします。
+             */
+            buffer.set_size(maximum_width, None);
 
-        let mut measured_width = 0.0_f32;
+            buffer.set_text(
+                self.value.as_str(),
+                &attrs,
+                Shaping::Advanced,
+                self.alignment.to_cosmic(),
+            );
 
-        let mut measured_height = 0.0_f32;
+            let mut measured_width = 0.0_f32;
 
-        for run in buffer.layout_runs() {
-            measured_width = measured_width.max(run.line_w);
+            let mut measured_height = 0.0_f32;
 
-            measured_height = measured_height.max(run.line_top + run.line_height);
+            for run in buffer.layout_runs() {
+                measured_width = measured_width.max(run.line_w);
+
+                measured_height = measured_height.max(run.line_top + run.line_height);
+            }
+
+            if let Some(maximum_width) = maximum_width {
+                measured_width = measured_width.min(maximum_width);
+            }
+
+            Size::new(
+                measured_width.max(0.0).ceil(),
+                measured_height.max(0.0).ceil(),
+            )
         }
-
-        if let Some(maximum_width) = maximum_width {
-            measured_width = measured_width.min(maximum_width);
-        }
-
-        Size::new(
-            measured_width.max(0.0).ceil(),
-            measured_height.max(0.0).ceil(),
-        )
     }
 
     pub fn measure_unbounded(&self, measurer: &mut TextMeasurer) -> Size {
         self.measure_text(measurer, None)
     }
 
+    #[cfg(not(target_os = "mochios"))]
     fn create_attrs(&self) -> Attrs<'_> {
         Attrs::new()
             .family(Family::Name(self.font_family.as_str()))
             .weight(Weight(self.weight.clamp(1, 1000)))
+    }
+
+    #[cfg(target_os = "mochios")]
+    fn measure_text_without_font(&self, maximum_width: Option<f32>) -> Size {
+        if self.value.is_empty() {
+            return Size::new(0.0, 0.0);
+        }
+
+        let font_size = resolved_font_size(self.font_size);
+        let line_height = resolved_line_height(font_size, self.line_height);
+        let glyph_width = (font_size * 0.56).max(1.0);
+        let max_width = normalize_maximum_width(maximum_width);
+        let mut line_count = 0usize;
+        let mut measured_width = 0.0_f32;
+
+        for line in self.value.split('\n') {
+            let line_width = line.chars().count() as f32 * glyph_width;
+            if let Some(max_width) = max_width.filter(|width| *width > 0.0) {
+                let wrapped_lines = (line_width / max_width).ceil().max(1.0);
+                line_count = line_count.saturating_add(wrapped_lines as usize);
+                measured_width = measured_width.max(line_width.min(max_width));
+            } else {
+                line_count = line_count.saturating_add(1);
+                measured_width = measured_width.max(line_width);
+            }
+        }
+
+        Size::new(
+            measured_width.max(0.0).ceil(),
+            (line_count.max(1) as f32 * line_height).ceil(),
+        )
     }
 }
 

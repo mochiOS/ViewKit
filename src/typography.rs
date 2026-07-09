@@ -1,6 +1,8 @@
 //! 文字スタイルを定義
 
+#[cfg(not(target_os = "mochios"))]
 use crate::font::create_font_system;
+#[cfg(not(target_os = "mochios"))]
 use cosmic_text::{Align, FontSystem};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -13,6 +15,7 @@ pub enum TextAlignment {
 }
 
 impl TextAlignment {
+    #[cfg(not(target_os = "mochios"))]
     pub(crate) fn to_cosmic(self) -> Option<Align> {
         match self {
             // Noneは通常の行列配置
@@ -28,6 +31,7 @@ impl TextAlignment {
 }
 
 pub struct TextMeasurer {
+    #[cfg(not(target_os = "mochios"))]
     font_system: FontSystem,
 }
 
@@ -40,10 +44,12 @@ impl Default for TextMeasurer {
 impl TextMeasurer {
     pub fn new() -> Self {
         Self {
+            #[cfg(not(target_os = "mochios"))]
             font_system: create_font_system(),
         }
     }
 
+    #[cfg(not(target_os = "mochios"))]
     pub(crate) fn font_system_mut(&mut self) -> &mut FontSystem {
         &mut self.font_system
     }

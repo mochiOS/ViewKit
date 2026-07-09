@@ -18,6 +18,7 @@ const OP_COMMIT: u32 = 4;
 const ROLE_TOPLEVEL: u32 = 1;
 const PIXEL_FORMAT_XRGB8888: u32 = 1;
 const PAGE_SIZE: usize = 4096;
+const MAX_IPC_PAGE_CHUNK: usize = 128;
 const MAX_SURFACE_EXTENT: u32 = 4096;
 const EVENT_LOOP_IDLE_YIELDS: usize = 128;
 
@@ -226,8 +227,7 @@ fn send_pages(dest: u64, page_count: usize, local_base: u64) -> Result<(), Mochi
 
 struct SharedBuffer {
     virt: u64,
-    page_count: usize,
-    pixel_count: usize,
+    byte_capacity: usize,
 }
 
 impl SharedBuffer {
@@ -242,28 +242,39 @@ impl SharedBuffer {
             .checked_add(PAGE_SIZE - 1)
             .map(|len| len / PAGE_SIZE)
             .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
+        let page_count = page_count.min(MAX_IPC_PAGE_CHUNK).max(1);
+        let byte_capacity = page_count
+            .checked_mul(PAGE_SIZE)
+            .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
         let virt = alloc_shared_page_count(page_count)?;
 
         Ok(Self {
             virt,
-            page_count,
-            pixel_count,
+            byte_capacity,
         })
     }
 
-    fn copy_from(&mut self, buffer: &[u32]) -> Result<(), MochiOsBackendError> {
-        if buffer.len() < self.pixel_count {
-            return Err(MochiOsBackendError::InvalidWindowSize);
+    fn send_to(&mut self, compositor: u64, buffer: &[u32]) -> Result<(), MochiOsBackendError> {
+        let bytes_len = buffer
+            .len()
+            .checked_mul(4)
+            .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
+        let src = unsafe { std::slice::from_raw_parts(buffer.as_ptr().cast::<u8>(), bytes_len) };
+        let dst =
+            unsafe { std::slice::from_raw_parts_mut(self.virt as *mut u8, self.byte_capacity) };
+        let mut offset = 0usize;
+        while offset < src.len() {
+            let remaining = src.len() - offset;
+            let chunk_len = remaining.min(self.byte_capacity);
+            dst[..chunk_len].copy_from_slice(&src[offset..offset + chunk_len]);
+            let page_count = chunk_len
+                .checked_add(PAGE_SIZE - 1)
+                .map(|len| len / PAGE_SIZE)
+                .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
+            send_pages(compositor, page_count, self.virt)?;
+            offset += chunk_len;
         }
-
-        let pixels =
-            unsafe { std::slice::from_raw_parts_mut(self.virt as *mut u32, self.pixel_count) };
-        pixels.copy_from_slice(&buffer[..self.pixel_count]);
         Ok(())
-    }
-
-    fn send_to(&self, compositor: u64) -> Result<(), MochiOsBackendError> {
-        send_pages(compositor, self.page_count, self.virt)
     }
 }
 
@@ -352,8 +363,6 @@ fn attach_buffer(
     if buffer.len() < pixel_count {
         return Err(MochiOsBackendError::InvalidWindowSize);
     }
-    shared_buffer.copy_from(buffer)?;
-
     let request = core::ptr::addr_of_mut!(ATTACH_BUFFER_REQ).cast::<u8>();
     let reply = core::ptr::addr_of_mut!(IPC_REPLY).cast::<u8>();
     unsafe {
@@ -368,7 +377,7 @@ fn attach_buffer(
     }
     let len = ipc_call_raw(compositor, request, 28, reply, 16)?;
     status_from_raw(reply, len)?;
-    shared_buffer.send_to(compositor)
+    shared_buffer.send_to(compositor, &buffer[..pixel_count])
 }
 
 fn simple_token_request(

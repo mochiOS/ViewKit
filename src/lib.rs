@@ -20,4 +20,4 @@ pub mod theme;
 pub mod typography;
 pub mod view;
 
-pub use runtime::{run, ViewKitError};
+pub use runtime::{ViewKitError, run};
