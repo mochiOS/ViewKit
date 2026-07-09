@@ -4,6 +4,7 @@ pub mod components;
 pub mod draw_command;
 pub mod edge_insets;
 pub mod event;
+#[cfg(target_os = "linux")]
 pub mod ffi;
 pub mod font;
 pub mod geometry;
@@ -19,4 +20,4 @@ pub mod theme;
 pub mod typography;
 pub mod view;
 
-pub use runtime::{ViewKitError, run};
+pub use runtime::{run, ViewKitError};

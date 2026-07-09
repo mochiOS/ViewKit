@@ -9,7 +9,7 @@ edition = "2024"
 autoexamples = false
 
 [dependencies]
-cosmic-text = "0.19.0"
+cosmic-text = { version = "0.19.0", default-features = false, features = ["no_std", "swash"] }
 thiserror = "2.0.18"
 ui_layout = "0.9.8"
 image = {

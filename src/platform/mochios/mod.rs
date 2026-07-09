@@ -1,5 +1,4 @@
 use std::cell::Cell;
-use std::time::Instant;
 
 use mochi_user_syscall as syscall;
 
@@ -76,7 +75,7 @@ where
         let mut display_list = DisplayList::new();
 
         loop {
-            if window.take_redraw_requested() || redraw_deadline_reached(&self.app) {
+            if window.take_redraw_requested() {
                 display_list.clear();
                 let _ = self.app.draw(window.viewport(), &mut display_list);
                 let buffer = render_display_list(window.viewport(), &display_list)?;
@@ -95,19 +94,8 @@ where
             for _ in 0..EVENT_LOOP_IDLE_YIELDS {
                 let _ = syscall::call0(syscall::SyscallNumber::ThreadYield);
             }
-
-            if let Some(deadline) = self.app.next_redraw_at() {
-                if Instant::now() >= deadline {
-                    window.request_redraw();
-                }
-            }
         }
     }
-}
-
-fn redraw_deadline_reached(app: &dyn PlatformApplication) -> bool {
-    app.next_redraw_at()
-        .is_some_and(|deadline| Instant::now() >= deadline)
 }
 
 struct MochiOsWindow {
@@ -280,26 +268,36 @@ impl SharedBuffer {
 }
 
 unsafe fn zero_raw(ptr: *mut u8, len: usize) {
-    core::ptr::write_bytes(ptr, 0, len);
+    unsafe {
+        core::ptr::write_bytes(ptr, 0, len);
+    }
 }
 
 unsafe fn put_u32_raw(ptr: *mut u8, offset: usize, value: u32) {
-    core::ptr::copy_nonoverlapping(value.to_le_bytes().as_ptr(), ptr.add(offset), 4);
+    unsafe {
+        core::ptr::copy_nonoverlapping(value.to_le_bytes().as_ptr(), ptr.add(offset), 4);
+    }
 }
 
 unsafe fn put_u64_raw(ptr: *mut u8, offset: usize, value: u64) {
-    core::ptr::copy_nonoverlapping(value.to_le_bytes().as_ptr(), ptr.add(offset), 8);
+    unsafe {
+        core::ptr::copy_nonoverlapping(value.to_le_bytes().as_ptr(), ptr.add(offset), 8);
+    }
 }
 
 unsafe fn read_u32_raw(ptr: *const u8, offset: usize) -> u32 {
     let mut bytes = [0u8; 4];
-    core::ptr::copy_nonoverlapping(ptr.add(offset), bytes.as_mut_ptr(), 4);
+    unsafe {
+        core::ptr::copy_nonoverlapping(ptr.add(offset), bytes.as_mut_ptr(), 4);
+    }
     u32::from_le_bytes(bytes)
 }
 
 unsafe fn read_u64_raw(ptr: *const u8, offset: usize) -> u64 {
     let mut bytes = [0u8; 8];
-    core::ptr::copy_nonoverlapping(ptr.add(offset), bytes.as_mut_ptr(), 8);
+    unsafe {
+        core::ptr::copy_nonoverlapping(ptr.add(offset), bytes.as_mut_ptr(), 8);
+    }
     u64::from_le_bytes(bytes)
 }
 
