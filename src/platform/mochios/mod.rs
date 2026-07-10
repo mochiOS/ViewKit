@@ -2,6 +2,10 @@ use std::cell::Cell;
 use std::time::Instant;
 
 use mochi_user_syscall as syscall;
+use tiny_skia::{
+    Color as SkiaColor, FillRule, Mask, Paint, Path, PathBuilder, Pixmap, Rect as SkiaRect, Stroke,
+    Transform,
+};
 
 use crate::draw_command::{DisplayList, DrawCommand};
 use crate::geometry::Rect;
@@ -20,8 +24,7 @@ const OP_COMMIT: u32 = 4;
 const ROLE_TOPLEVEL: u32 = 1;
 const PIXEL_FORMAT_XRGB8888: u32 = 1;
 const PAGE_SIZE: usize = 4096;
-const MAX_IPC_PAGE_CHUNK: usize = 128;
-const MAX_SURFACE_EXTENT: u32 = 4096;
+const MAX_SURFACE_EXTENT: u32 = 16_384;
 const ERRNO_EAGAIN: u64 = 11;
 const EVENT_POINTER_ENTER: u32 = 2;
 const EVENT_POINTER_LEAVE: u32 = 3;
@@ -430,7 +433,7 @@ impl SharedBuffer {
             .checked_add(PAGE_SIZE - 1)
             .map(|len| len / PAGE_SIZE)
             .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
-        let page_count = page_count.min(MAX_IPC_PAGE_CHUNK).max(1);
+        let page_count = page_count.max(1);
         let byte_capacity = page_count
             .checked_mul(PAGE_SIZE)
             .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
@@ -448,20 +451,17 @@ impl SharedBuffer {
             .checked_mul(4)
             .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
         let src = unsafe { std::slice::from_raw_parts(buffer.as_ptr().cast::<u8>(), bytes_len) };
+        if bytes_len > self.byte_capacity {
+            return Err(MochiOsBackendError::InvalidWindowSize);
+        }
         let dst =
             unsafe { std::slice::from_raw_parts_mut(self.virt as *mut u8, self.byte_capacity) };
-        let mut offset = 0usize;
-        while offset < src.len() {
-            let remaining = src.len() - offset;
-            let chunk_len = remaining.min(self.byte_capacity);
-            dst[..chunk_len].copy_from_slice(&src[offset..offset + chunk_len]);
-            let page_count = chunk_len
-                .checked_add(PAGE_SIZE - 1)
-                .map(|len| len / PAGE_SIZE)
-                .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
-            send_pages(compositor, page_count, self.virt)?;
-            offset += chunk_len;
-        }
+        dst[..bytes_len].copy_from_slice(src);
+        let page_count = bytes_len
+            .checked_add(PAGE_SIZE - 1)
+            .map(|len| len / PAGE_SIZE)
+            .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
+        send_pages(compositor, page_count, self.virt)?;
         Ok(())
     }
 }
@@ -657,68 +657,142 @@ fn render_display_list(
     viewport: Viewport,
     display_list: &DisplayList,
 ) -> Result<Vec<u32>, MochiOsBackendError> {
-    let width = viewport.physical_width as usize;
-    let height = viewport.physical_height as usize;
-    let pixel_count = width
-        .checked_mul(height)
-        .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
-    let mut buffer = vec![0xff00_0000; pixel_count];
+    let width = viewport.physical_width;
+    let height = viewport.physical_height;
+    let mut pixmap = Pixmap::new(width, height).ok_or(MochiOsBackendError::InvalidWindowSize)?;
+    pixmap.fill(SkiaColor::from_rgba8(0, 0, 0, 0));
+    let mut clear_color = Color::BLACK;
+
+    let transform = Transform::identity();
     let bounds = Rect::new(0.0, 0.0, width as f32, height as f32);
-    let mut clips = vec![bounds];
+    let mut clip_stack = vec![create_clip_mask(bounds, None, width, height, transform)?];
 
     for command in display_list.commands() {
         match command {
             DrawCommand::Clear { color } => {
-                fill_pixels(&mut buffer, *color);
+                clear_color = *color;
+                pixmap.fill(SkiaColor::from_rgba8(
+                    color.red,
+                    color.green,
+                    color.blue,
+                    color.alpha,
+                ));
             }
-            DrawCommand::FillRect { rect, color }
-            | DrawCommand::FillRoundedRect { rect, color, .. }
-            | DrawCommand::FillEllipse { rect, color } => {
-                fill_rect(
-                    &mut buffer,
-                    width,
-                    height,
-                    *rect,
-                    *color,
-                    *clips.last().unwrap_or(&bounds),
+            DrawCommand::FillRect { rect, color } => {
+                let Some(rect) = to_skia_rect(*rect) else {
+                    continue;
+                };
+                let paint = solid_paint(*color);
+                pixmap.fill_rect(rect, &paint, transform, clip_stack.last());
+            }
+            DrawCommand::FillRoundedRect {
+                rect,
+                radius,
+                color,
+            } => {
+                let Some(rect) = to_skia_rect(*rect) else {
+                    continue;
+                };
+                let path = rounded_rect_path(rect, *radius);
+                let paint = solid_paint(*color);
+                pixmap.fill_path(
+                    &path,
+                    &paint,
+                    FillRule::Winding,
+                    transform,
+                    clip_stack.last(),
+                );
+            }
+            DrawCommand::FillEllipse { rect, color } => {
+                let Some(rect) = to_skia_rect(*rect) else {
+                    continue;
+                };
+                let path = ellipse_path(rect);
+                let paint = solid_paint(*color);
+                pixmap.fill_path(
+                    &path,
+                    &paint,
+                    FillRule::Winding,
+                    transform,
+                    clip_stack.last(),
                 );
             }
             DrawCommand::StrokeRect {
                 rect,
                 color,
                 width: stroke_width,
+            } => {
+                if !stroke_width.is_finite() || *stroke_width <= 0.0 {
+                    continue;
+                }
+                let Some(rect) = to_skia_rect(*rect) else {
+                    continue;
+                };
+                let path = PathBuilder::from_rect(rect);
+                let paint = solid_paint(*color);
+                let stroke = Stroke {
+                    width: *stroke_width,
+                    ..Stroke::default()
+                };
+                pixmap.stroke_path(&path, &paint, &stroke, transform, clip_stack.last());
             }
-            | DrawCommand::StrokeRoundedRect {
+            DrawCommand::StrokeRoundedRect {
                 rect,
+                radius,
                 color,
                 width: stroke_width,
-                ..
+            } => {
+                if !stroke_width.is_finite() || *stroke_width <= 0.0 {
+                    continue;
+                }
+                let Some(rect) = to_skia_rect(*rect) else {
+                    continue;
+                };
+                let path = rounded_rect_path(rect, *radius);
+                let paint = solid_paint(*color);
+                let stroke = Stroke {
+                    width: *stroke_width,
+                    ..Stroke::default()
+                };
+                pixmap.stroke_path(&path, &paint, &stroke, transform, clip_stack.last());
             }
-            | DrawCommand::StrokeEllipse {
+            DrawCommand::StrokeEllipse {
                 rect,
                 color,
                 width: stroke_width,
             } => {
-                stroke_rect(
-                    &mut buffer,
+                if !stroke_width.is_finite() || *stroke_width <= 0.0 {
+                    continue;
+                }
+                let Some(rect) = to_skia_rect(*rect) else {
+                    continue;
+                };
+                let path = ellipse_path(rect);
+                let paint = solid_paint(*color);
+                let stroke = Stroke {
+                    width: *stroke_width,
+                    ..Stroke::default()
+                };
+                pixmap.stroke_path(&path, &paint, &stroke, transform, clip_stack.last());
+            }
+            DrawCommand::PushClip { rect } => {
+                let mask = create_clip_mask(*rect, clip_stack.last(), width, height, transform)?;
+                clip_stack.push(mask);
+            }
+            DrawCommand::PushRoundedClip { rect, radius } => {
+                let mask = create_rounded_clip_mask(
+                    *rect,
+                    *radius,
+                    clip_stack.last(),
                     width,
                     height,
-                    *rect,
-                    *stroke_width,
-                    *color,
-                    *clips.last().unwrap_or(&bounds),
-                );
-            }
-            DrawCommand::PushClip { rect } | DrawCommand::PushRoundedClip { rect, .. } => {
-                let current = *clips.last().unwrap_or(&bounds);
-                clips.push(
-                    rect.intersection(current)
-                        .unwrap_or(Rect::new(0.0, 0.0, 0.0, 0.0)),
-                );
+                    transform,
+                )?;
+                clip_stack.push(mask);
             }
             DrawCommand::PopClip => {
-                if clips.len() > 1 {
-                    clips.pop();
+                if clip_stack.len() > 1 {
+                    clip_stack.pop();
                 }
             }
             DrawCommand::DrawText { .. }
@@ -727,140 +801,178 @@ fn render_display_list(
         }
     }
 
-    Ok(buffer)
+    Ok(pixmap_to_xrgb(&pixmap, clear_color))
 }
 
-fn fill_pixels(buffer: &mut [u32], color: Color) {
-    let pixel = color_to_xrgb(color);
-    for dst in buffer {
-        *dst = pixel;
-    }
-}
-
-fn fill_rect(
-    buffer: &mut [u32],
-    width: usize,
-    height: usize,
-    rect: Rect,
-    color: Color,
-    clip: Rect,
-) {
-    let Some(rect) = sanitize_rect(rect, width, height).and_then(|r| r.intersection(clip)) else {
-        return;
-    };
-    let (left, top, right, bottom) = rect_to_pixels(rect, width, height);
-    for y in top..bottom {
-        let row = y * width;
-        for x in left..right {
-            blend_pixel(&mut buffer[row + x], color);
-        }
-    }
-}
-
-fn stroke_rect(
-    buffer: &mut [u32],
-    width: usize,
-    height: usize,
-    rect: Rect,
-    stroke_width: f32,
-    color: Color,
-    clip: Rect,
-) {
-    if stroke_width <= 0.0 || !stroke_width.is_finite() {
-        return;
-    }
-    let w = stroke_width.ceil();
-    fill_rect(
-        buffer,
-        width,
-        height,
-        Rect::new(rect.origin.x, rect.origin.y, rect.size.width, w),
-        color,
-        clip,
-    );
-    fill_rect(
-        buffer,
-        width,
-        height,
-        Rect::new(
-            rect.origin.x,
-            rect.origin.y + rect.size.height - w,
-            rect.size.width,
-            w,
-        ),
-        color,
-        clip,
-    );
-    fill_rect(
-        buffer,
-        width,
-        height,
-        Rect::new(rect.origin.x, rect.origin.y, w, rect.size.height),
-        color,
-        clip,
-    );
-    fill_rect(
-        buffer,
-        width,
-        height,
-        Rect::new(
-            rect.origin.x + rect.size.width - w,
-            rect.origin.y,
-            w,
-            rect.size.height,
-        ),
-        color,
-        clip,
-    );
-}
-
-fn sanitize_rect(rect: Rect, width: usize, height: usize) -> Option<Rect> {
+fn to_skia_rect(rect: Rect) -> Option<SkiaRect> {
     if !rect.origin.x.is_finite()
         || !rect.origin.y.is_finite()
         || !rect.size.width.is_finite()
         || !rect.size.height.is_finite()
-        || rect.size.width <= 0.0
-        || rect.size.height <= 0.0
+        || rect.size.width < 0.0
+        || rect.size.height < 0.0
     {
         return None;
     }
-    rect.intersection(Rect::new(0.0, 0.0, width as f32, height as f32))
+    SkiaRect::from_xywh(
+        rect.origin.x,
+        rect.origin.y,
+        rect.size.width,
+        rect.size.height,
+    )
 }
 
-fn rect_to_pixels(rect: Rect, width: usize, height: usize) -> (usize, usize, usize, usize) {
-    let left = rect.origin.x.floor().max(0.0).min(width as f32) as usize;
-    let top = rect.origin.y.floor().max(0.0).min(height as f32) as usize;
-    let right = (rect.origin.x + rect.size.width)
-        .ceil()
-        .max(0.0)
-        .min(width as f32) as usize;
-    let bottom = (rect.origin.y + rect.size.height)
-        .ceil()
-        .max(0.0)
-        .min(height as f32) as usize;
-    (left, top, right, bottom)
-}
-
-fn color_to_xrgb(color: Color) -> u32 {
-    0xff00_0000 | ((color.red as u32) << 16) | ((color.green as u32) << 8) | color.blue as u32
-}
-
-fn blend_pixel(dst: &mut u32, src: Color) {
-    if src.alpha == 255 {
-        *dst = color_to_xrgb(src);
-        return;
-    }
-    if src.alpha == 0 {
-        return;
+fn rounded_rect_path(rect: SkiaRect, radius: f32) -> Path {
+    let radius = if radius.is_finite() {
+        radius.max(0.0).min(rect.width().min(rect.height()) / 2.0)
+    } else {
+        0.0
+    };
+    if radius == 0.0 {
+        return PathBuilder::from_rect(rect);
     }
 
-    let alpha = src.alpha as u32;
-    let inv = 255 - alpha;
-    let dr = (*dst >> 16) & 0xff;
-    let dg = (*dst >> 8) & 0xff;
-    let db = *dst & 0xff;
-    let r = (src.red as u32 * alpha + dr * inv) / 255;
-    let g = (src.green as u32 * alpha + dg * inv) / 255;
-    let b = (src.blue as u32 * alpha + db * inv) / 255;
-    *dst = 0xff00_0000 | (r << 16) | (g << 8) | b;
+    let left = rect.left();
+    let top = rect.top();
+    let right = rect.right();
+    let bottom = rect.bottom();
+    let mut builder = PathBuilder::new();
+    builder.move_to(left + radius, top);
+    builder.line_to(right - radius, top);
+    builder.quad_to(right, top, right, top + radius);
+    builder.line_to(right, bottom - radius);
+    builder.quad_to(right, bottom, right - radius, bottom);
+    builder.line_to(left + radius, bottom);
+    builder.quad_to(left, bottom, left, bottom - radius);
+    builder.line_to(left, top + radius);
+    builder.quad_to(left, top, left + radius, top);
+    builder.close();
+    builder
+        .finish()
+        .unwrap_or_else(|| PathBuilder::from_rect(rect))
+}
+
+fn ellipse_path(rect: SkiaRect) -> Path {
+    const KAPPA: f32 = 0.552_284_8;
+
+    let center_x = (rect.left() + rect.right()) / 2.0;
+    let center_y = (rect.top() + rect.bottom()) / 2.0;
+    let radius_x = rect.width() / 2.0;
+    let radius_y = rect.height() / 2.0;
+    let control_x = radius_x * KAPPA;
+    let control_y = radius_y * KAPPA;
+
+    let mut builder = PathBuilder::new();
+    builder.move_to(center_x + radius_x, center_y);
+    builder.cubic_to(
+        center_x + radius_x,
+        center_y + control_y,
+        center_x + control_x,
+        center_y + radius_y,
+        center_x,
+        center_y + radius_y,
+    );
+    builder.cubic_to(
+        center_x - control_x,
+        center_y + radius_y,
+        center_x - radius_x,
+        center_y + control_y,
+        center_x - radius_x,
+        center_y,
+    );
+    builder.cubic_to(
+        center_x - radius_x,
+        center_y - control_y,
+        center_x - control_x,
+        center_y - radius_y,
+        center_x,
+        center_y - radius_y,
+    );
+    builder.cubic_to(
+        center_x + control_x,
+        center_y - radius_y,
+        center_x + radius_x,
+        center_y - control_y,
+        center_x + radius_x,
+        center_y,
+    );
+    builder.close();
+    builder
+        .finish()
+        .unwrap_or_else(|| PathBuilder::from_rect(rect))
+}
+
+fn create_clip_mask(
+    rect: Rect,
+    previous: Option<&Mask>,
+    width: u32,
+    height: u32,
+    transform: Transform,
+) -> Result<Mask, MochiOsBackendError> {
+    let path = to_skia_rect(rect).map(PathBuilder::from_rect);
+    create_path_clip_mask(path, previous, width, height, transform)
+}
+
+fn create_rounded_clip_mask(
+    rect: Rect,
+    radius: f32,
+    previous: Option<&Mask>,
+    width: u32,
+    height: u32,
+    transform: Transform,
+) -> Result<Mask, MochiOsBackendError> {
+    let path = to_skia_rect(rect).map(|rect| rounded_rect_path(rect, radius));
+    create_path_clip_mask(path, previous, width, height, transform)
+}
+
+fn create_path_clip_mask(
+    path: Option<Path>,
+    previous: Option<&Mask>,
+    width: u32,
+    height: u32,
+    transform: Transform,
+) -> Result<Mask, MochiOsBackendError> {
+    let has_previous = previous.is_some();
+    let mut mask = match previous {
+        Some(previous) => previous.clone(),
+        None => Mask::new(width, height).ok_or(MochiOsBackendError::InvalidWindowSize)?,
+    };
+
+    let Some(path) = path else {
+        mask.clear();
+        return Ok(mask);
+    };
+
+    if has_previous {
+        mask.intersect_path(&path, FillRule::Winding, true, transform);
+    } else {
+        mask.clear();
+        mask.fill_path(&path, FillRule::Winding, true, transform);
+    }
+
+    Ok(mask)
+}
+
+fn solid_paint(color: Color) -> Paint<'static> {
+    let mut paint = Paint::default();
+    paint.set_color_rgba8(color.red, color.green, color.blue, color.alpha);
+    paint.anti_alias = true;
+    paint
+}
+
+fn pixmap_to_xrgb(pixmap: &Pixmap, background: Color) -> Vec<u32> {
+    let mut output = Vec::with_capacity(pixmap.width() as usize * pixmap.height() as usize);
+    for pixel in pixmap.data().chunks_exact(4) {
+        let alpha = pixel[3] as u32;
+        let inv_alpha = 255_u32.saturating_sub(alpha);
+
+        // tiny-skia stores premultiplied RGBA. The compositor surface is XRGB,
+        // so each pixel must be flattened explicitly instead of dropping alpha.
+        let red = pixel[0] as u32 + (background.red as u32 * inv_alpha + 127) / 255;
+        let green = pixel[1] as u32 + (background.green as u32 * inv_alpha + 127) / 255;
+        let blue = pixel[2] as u32 + (background.blue as u32 * inv_alpha + 127) / 255;
+
+        output.push(0xff00_0000 | (red.min(255) << 16) | (green.min(255) << 8) | blue.min(255));
+    }
+    output
 }
