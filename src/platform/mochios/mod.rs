@@ -1,13 +1,18 @@
 use std::cell::Cell;
+use std::collections::HashMap;
 use std::time::Instant;
 
+use cosmic_text::{
+    Attrs, Buffer, Color as CosmicColor, Family, FontSystem, Metrics, Shaping, SwashCache, Weight,
+};
 use mochi_user_syscall as syscall;
 use tiny_skia::{
     Color as SkiaColor, FillRule, Mask, Paint, Path, PathBuilder, Pixmap, Rect as SkiaRect, Stroke,
     Transform,
 };
 
-use crate::draw_command::{DisplayList, DrawCommand};
+use crate::draw_command::{DisplayList, DrawCommand, TextCommand};
+use crate::font::create_font_system;
 use crate::geometry::Rect;
 use crate::platform::{
     ButtonState, CursorIcon, PlatformApplication, PlatformEvent, PlatformWindow, PointerButton,
@@ -47,6 +52,53 @@ const KEY_PAGE_UP: u16 = 86;
 const KEY_PAGE_DOWN: u16 = 87;
 const INPUT_FLAG_PRESS: u32 = 1 << 0;
 const INPUT_FLAG_RELEASE: u32 = 1 << 1;
+const TEXT_LAYOUT_CACHE_CAPACITY: usize = 1024;
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct TextLayoutKey {
+    text: String,
+    font_family: String,
+    font_size_bits: u32,
+    line_height_bits: u32,
+    width_bits: u32,
+    height_bits: u32,
+    scale_bits: u32,
+    weight: u16,
+    alignment: u8,
+}
+
+impl TextLayoutKey {
+    fn new(command: &TextCommand, scale: f32) -> Self {
+        Self {
+            text: command.text.clone(),
+            font_family: command.font_family.clone(),
+            font_size_bits: canonical_f32_bits(command.font_size),
+            line_height_bits: canonical_f32_bits(command.line_height),
+            width_bits: canonical_f32_bits(command.bounds.size.width),
+            height_bits: canonical_f32_bits(command.bounds.size.height),
+            scale_bits: canonical_f32_bits(scale),
+            weight: command.weight.clamp(1, 1000),
+            alignment: alignment_key(command.alignment),
+        }
+    }
+}
+
+fn canonical_f32_bits(value: f32) -> u32 {
+    if value == 0.0 {
+        0.0_f32.to_bits()
+    } else {
+        value.to_bits()
+    }
+}
+
+const fn alignment_key(alignment: crate::typography::TextAlignment) -> u8 {
+    match alignment {
+        crate::typography::TextAlignment::Start => 0,
+        crate::typography::TextAlignment::Center => 1,
+        crate::typography::TextAlignment::End => 2,
+        crate::typography::TextAlignment::Justified => 3,
+    }
+}
 
 static mut CREATE_SURFACE_REQ: [u8; 24] = [0; 24];
 static mut ATTACH_BUFFER_REQ: [u8; 28] = [0; 28];
@@ -82,6 +134,9 @@ where
     app: A,
     config: WindowConfig,
     pressed_buttons: Vec<u16>,
+    font_system: FontSystem,
+    swash_cache: SwashCache,
+    text_layout_cache: HashMap<TextLayoutKey, Buffer>,
 }
 
 impl<A> MochiOsBackend<A>
@@ -93,6 +148,9 @@ where
             app,
             config,
             pressed_buttons: Vec::new(),
+            font_system: create_font_system(),
+            swash_cache: SwashCache::new(),
+            text_layout_cache: HashMap::new(),
         }
     }
 
@@ -127,7 +185,13 @@ where
             if window.take_redraw_requested() || redraw_due {
                 display_list.clear();
                 let _ = self.app.draw(window.viewport(), &mut display_list);
-                let buffer = render_display_list(window.viewport(), &display_list)?;
+                let buffer = render_display_list(
+                    window.viewport(),
+                    &display_list,
+                    &mut self.font_system,
+                    &mut self.swash_cache,
+                    &mut self.text_layout_cache,
+                )?;
                 attach_buffer(
                     compositor,
                     token,
@@ -656,6 +720,9 @@ fn simple_token_request(
 fn render_display_list(
     viewport: Viewport,
     display_list: &DisplayList,
+    font_system: &mut FontSystem,
+    swash_cache: &mut SwashCache,
+    text_layout_cache: &mut HashMap<TextLayoutKey, Buffer>,
 ) -> Result<Vec<u32>, MochiOsBackendError> {
     let width = viewport.physical_width;
     let height = viewport.physical_height;
@@ -663,8 +730,9 @@ fn render_display_list(
     pixmap.fill(SkiaColor::from_rgba8(0, 0, 0, 0));
     let mut clear_color = Color::BLACK;
 
-    let transform = Transform::identity();
-    let bounds = Rect::new(0.0, 0.0, width as f32, height as f32);
+    let scale = valid_scale_factor(viewport.scale_factor);
+    let transform = Transform::from_scale(scale, scale);
+    let bounds = viewport.logical_bounds();
     let mut clip_stack = vec![create_clip_mask(bounds, None, width, height, transform)?];
 
     for command in display_list.commands() {
@@ -795,13 +863,151 @@ fn render_display_list(
                     clip_stack.pop();
                 }
             }
-            DrawCommand::DrawText { .. }
-            | DrawCommand::DrawImage { .. }
-            | DrawCommand::DrawSvg { .. } => {}
+            DrawCommand::DrawText { command } => {
+                if command.bounds.intersection(bounds).is_none() {
+                    continue;
+                }
+                draw_text_command(
+                    &mut pixmap,
+                    font_system,
+                    swash_cache,
+                    text_layout_cache,
+                    command,
+                    scale,
+                    clip_stack.last(),
+                );
+            }
+            DrawCommand::DrawImage { .. } | DrawCommand::DrawSvg { .. } => {}
         }
     }
 
     Ok(pixmap_to_xrgb(&pixmap, clear_color))
+}
+
+fn valid_scale_factor(scale_factor: f64) -> f32 {
+    if scale_factor.is_finite() && scale_factor > 0.0 {
+        scale_factor as f32
+    } else {
+        1.0
+    }
+}
+
+fn draw_text_command(
+    pixmap: &mut Pixmap,
+    font_system: &mut FontSystem,
+    swash_cache: &mut SwashCache,
+    layout_cache: &mut HashMap<TextLayoutKey, Buffer>,
+    command: &TextCommand,
+    scale: f32,
+    clip: Option<&Mask>,
+) {
+    if command.text.is_empty()
+        || command.bounds.size.width <= 0.0
+        || command.bounds.size.height <= 0.0
+    {
+        return;
+    }
+
+    let scale = if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    };
+
+    let font_size = (command.font_size * scale).max(1.0);
+    let line_height = (command.line_height * scale).max(font_size);
+    let width = (command.bounds.size.width * scale).max(0.0);
+    let height = (command.bounds.size.height * scale).max(0.0);
+    let origin_x = (command.bounds.origin.x * scale).round();
+    let origin_y = command.bounds.origin.y * scale;
+    let key = TextLayoutKey::new(command, scale);
+
+    if !layout_cache.contains_key(&key) {
+        if layout_cache.len() >= TEXT_LAYOUT_CACHE_CAPACITY {
+            layout_cache.clear();
+        }
+
+        let metrics = Metrics::new(font_size, line_height);
+        let mut buffer = Buffer::new(font_system, metrics);
+        {
+            let mut buffer_with_font_system = buffer.borrow_with(font_system);
+            buffer_with_font_system.set_size(Some(width), Some(height));
+
+            let attrs = Attrs::new()
+                .family(Family::Name(command.font_family.as_str()))
+                .weight(Weight(command.weight.clamp(1, 1000)));
+
+            buffer_with_font_system.set_text(
+                command.text.as_str(),
+                &attrs,
+                Shaping::Advanced,
+                command.alignment.to_cosmic(),
+            );
+        }
+
+        layout_cache.insert(key.clone(), buffer);
+    }
+
+    let Some(buffer) = layout_cache.get_mut(&key) else {
+        return;
+    };
+    let mut buffer = buffer.borrow_with(font_system);
+    let text_color = CosmicColor::rgba(
+        command.color.red,
+        command.color.green,
+        command.color.blue,
+        command.color.alpha,
+    );
+    let Some(text_clip) = SkiaRect::from_xywh(origin_x, origin_y, width, height) else {
+        return;
+    };
+
+    let mut physical_glyphs = Vec::new();
+    for run in buffer.layout_runs() {
+        let baseline_y = (origin_y + run.line_y).round();
+        for glyph in run.glyphs {
+            physical_glyphs.push(glyph.physical((origin_x, baseline_y), 1.0));
+        }
+    }
+    drop(buffer);
+
+    for physical_glyph in physical_glyphs {
+        swash_cache.with_pixels(
+            font_system,
+            physical_glyph.cache_key,
+            text_color,
+            |x, y, color| {
+                let draw_x = physical_glyph.x + x;
+                let draw_y = physical_glyph.y + y;
+                let Some(pixel_rect) = SkiaRect::from_xywh(draw_x as f32, draw_y as f32, 1.0, 1.0)
+                else {
+                    return;
+                };
+                let Some(rect) = intersect_rect(pixel_rect, text_clip) else {
+                    return;
+                };
+                let (red, green, blue, alpha) = color.as_rgba_tuple();
+                if alpha == 0 {
+                    return;
+                }
+                let mut paint = Paint::default();
+                paint.set_color_rgba8(red, green, blue, alpha);
+                paint.anti_alias = false;
+                pixmap.fill_rect(rect, &paint, Transform::identity(), clip);
+            },
+        );
+    }
+}
+
+fn intersect_rect(first: SkiaRect, second: SkiaRect) -> Option<SkiaRect> {
+    let left = first.left().max(second.left());
+    let top = first.top().max(second.top());
+    let right = first.right().min(second.right());
+    let bottom = first.bottom().min(second.bottom());
+    if right <= left || bottom <= top {
+        return None;
+    }
+    SkiaRect::from_xywh(left, top, right - left, bottom - top)
 }
 
 fn to_skia_rect(rect: Rect) -> Option<SkiaRect> {
