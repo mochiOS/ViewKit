@@ -22,6 +22,7 @@ const PIXEL_FORMAT_XRGB8888: u32 = 1;
 const PAGE_SIZE: usize = 4096;
 const MAX_IPC_PAGE_CHUNK: usize = 128;
 const MAX_SURFACE_EXTENT: u32 = 4096;
+const ERRNO_EAGAIN: u64 = 11;
 const EVENT_POINTER_ENTER: u32 = 2;
 const EVENT_POINTER_LEAVE: u32 = 3;
 const EVENT_POINTER_MOTION: u32 = 4;
@@ -34,13 +35,15 @@ const KEY_BACKSPACE: u16 = 2;
 const KEY_TAB: u16 = 3;
 const KEY_ENTER: u16 = 4;
 const KEY_SPACE: u16 = 5;
-const KEY_DELETE: u16 = 76;
-const KEY_HOME: u16 = 71;
-const KEY_END: u16 = 79;
-const KEY_LEFT: u16 = 75;
-const KEY_RIGHT: u16 = 77;
-const KEY_PAGE_UP: u16 = 73;
-const KEY_PAGE_DOWN: u16 = 81;
+const KEY_DELETE: u16 = 79;
+const KEY_HOME: u16 = 80;
+const KEY_END: u16 = 81;
+const KEY_LEFT: u16 = 82;
+const KEY_RIGHT: u16 = 83;
+const KEY_PAGE_UP: u16 = 86;
+const KEY_PAGE_DOWN: u16 = 87;
+const INPUT_FLAG_PRESS: u32 = 1 << 0;
+const INPUT_FLAG_RELEASE: u32 = 1 << 1;
 
 static mut CREATE_SURFACE_REQ: [u8; 24] = [0; 24];
 static mut ATTACH_BUFFER_REQ: [u8; 28] = [0; 28];
@@ -171,23 +174,30 @@ where
                 self.app.handle_event(PlatformEvent::PointerLeft, window);
             }
             EVENT_POINTER_BUTTON => {
-                let button = match c as u16 {
+                let button_id = (c & 0xffff) as u16;
+                let flags = c >> 16;
+                let button = match button_id {
                     1 => PointerButton::Primary,
                     2 => PointerButton::Secondary,
                     3 => PointerButton::Middle,
                     other => PointerButton::Other(other),
                 };
-                let button_id = c as u16;
-                let state = if let Some(pos) = self
-                    .pressed_buttons
-                    .iter()
-                    .position(|pressed| *pressed == button_id)
-                {
-                    self.pressed_buttons.swap_remove(pos);
+                let state = if flags & INPUT_FLAG_PRESS != 0 {
+                    if !self.pressed_buttons.contains(&button_id) {
+                        self.pressed_buttons.push(button_id);
+                    }
+                    ButtonState::Pressed
+                } else if flags & INPUT_FLAG_RELEASE != 0 {
+                    if let Some(pos) = self
+                        .pressed_buttons
+                        .iter()
+                        .position(|pressed| *pressed == button_id)
+                    {
+                        self.pressed_buttons.swap_remove(pos);
+                    }
                     ButtonState::Released
                 } else {
-                    self.pressed_buttons.push(button_id);
-                    ButtonState::Pressed
+                    self.toggle_button_state(button_id)
                 };
                 self.app
                     .handle_event(PlatformEvent::PointerButton { button, state }, window);
@@ -242,6 +252,20 @@ where
             KEY_PAGE_DOWN => PlatformEvent::SelectEnd,
             _ => return None,
         })
+    }
+
+    fn toggle_button_state(&mut self, button_id: u16) -> ButtonState {
+        if let Some(pos) = self
+            .pressed_buttons
+            .iter()
+            .position(|pressed| *pressed == button_id)
+        {
+            self.pressed_buttons.swap_remove(pos);
+            ButtonState::Released
+        } else {
+            self.pressed_buttons.push(button_id);
+            ButtonState::Pressed
+        }
     }
 }
 
@@ -500,7 +524,7 @@ fn try_recv_event() -> Result<Option<[u8; 32]>, MochiOsBackendError> {
     let event = core::ptr::addr_of_mut!(EVENT_BUF).cast::<u8>();
     let len = match ipc_wait_raw(0, event, 32) {
         Ok(len) => len,
-        Err(MochiOsBackendError::Syscall(err)) if err == syscall::EAGAIN => return Ok(None),
+        Err(MochiOsBackendError::Syscall(ERRNO_EAGAIN)) => return Ok(None),
         Err(err) => return Err(err),
     };
     if len < 16 {
