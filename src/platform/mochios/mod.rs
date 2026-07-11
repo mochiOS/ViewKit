@@ -134,7 +134,7 @@ where
     app: A,
     config: WindowConfig,
     pressed_buttons: Vec<u16>,
-    font_system: FontSystem,
+    font_system: Option<FontSystem>,
     swash_cache: SwashCache,
     text_layout_cache: HashMap<TextLayoutKey, Buffer>,
 }
@@ -148,7 +148,7 @@ where
             app,
             config,
             pressed_buttons: Vec::new(),
-            font_system: create_font_system(),
+            font_system: None,
             swash_cache: SwashCache::new(),
             text_layout_cache: HashMap::new(),
         }
@@ -183,12 +183,17 @@ where
                 .is_some_and(|deadline| deadline <= Instant::now());
 
             if window.take_redraw_requested() || redraw_due {
+                if self.font_system.is_none() {
+                    self.font_system = Some(create_font_system());
+                }
                 display_list.clear();
                 let _ = self.app.draw(window.viewport(), &mut display_list);
                 let buffer = render_display_list(
                     window.viewport(),
                     &display_list,
-                    &mut self.font_system,
+                    self.font_system
+                        .as_mut()
+                        .ok_or(MochiOsBackendError::InvalidWindowSize)?,
                     &mut self.swash_cache,
                     &mut self.text_layout_cache,
                 )?;
@@ -632,7 +637,11 @@ fn wait_until_deadline<A: PlatformApplication>(
 
 fn read_event_blocking(endpoint: u64) -> Result<Option<[u8; 32]>, MochiOsBackendError> {
     let event = core::ptr::addr_of_mut!(EVENT_BUF).cast::<u8>();
-    let len = ipc_wait_raw(endpoint, event, 32)?;
+    let len = match ipc_wait_raw(endpoint, event, 32) {
+        Ok(len) => len,
+        Err(MochiOsBackendError::Syscall(ERRNO_EAGAIN)) => return Ok(None),
+        Err(err) => return Err(err),
+    };
     if len < 16 {
         return Err(MochiOsBackendError::InvalidEvent);
     }
@@ -881,7 +890,7 @@ fn render_display_list(
         }
     }
 
-    Ok(pixmap_to_xrgb(&pixmap, clear_color))
+    pixmap_to_xrgb(&pixmap, clear_color)
 }
 
 fn valid_scale_factor(scale_factor: f64) -> f32 {
@@ -1166,8 +1175,14 @@ fn solid_paint(color: Color) -> Paint<'static> {
     paint
 }
 
-fn pixmap_to_xrgb(pixmap: &Pixmap, background: Color) -> Vec<u32> {
-    let mut output = Vec::with_capacity(pixmap.width() as usize * pixmap.height() as usize);
+fn pixmap_to_xrgb(pixmap: &Pixmap, background: Color) -> Result<Vec<u32>, MochiOsBackendError> {
+    let pixel_count = (pixmap.width() as usize)
+        .checked_mul(pixmap.height() as usize)
+        .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
+    let mut output = Vec::new();
+    output
+        .try_reserve_exact(pixel_count)
+        .map_err(|_| MochiOsBackendError::InvalidWindowSize)?;
     for pixel in pixmap.data().chunks_exact(4) {
         let alpha = pixel[3] as u32;
         let inv_alpha = 255_u32.saturating_sub(alpha);
@@ -1180,5 +1195,5 @@ fn pixmap_to_xrgb(pixmap: &Pixmap, background: Color) -> Vec<u32> {
 
         output.push(0xff00_0000 | (red.min(255) << 16) | (green.min(255) << 8) | blue.min(255));
     }
-    output
+    Ok(output)
 }
