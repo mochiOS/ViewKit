@@ -191,6 +191,7 @@ where
                 title: options.title().to_owned(),
                 size: options.initial_size(),
                 resizable: options.is_resizable(),
+                fullscreen: options.is_fullscreen(),
             },
         );
 
@@ -209,6 +210,7 @@ where
                 title: options.title().to_owned(),
                 size: options.initial_size(),
                 resizable: options.is_resizable(),
+                fullscreen: options.is_fullscreen(),
             },
         );
 

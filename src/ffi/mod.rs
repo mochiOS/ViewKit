@@ -1283,6 +1283,7 @@ pub extern "C" fn vk_runtime_run_window(
                     title,
                     size: Size::new(width, height),
                     resizable: resizable != 0,
+                    fullscreen: false,
                 },
             );
 

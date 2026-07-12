@@ -1,5 +1,6 @@
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::env;
 use std::time::Instant;
 
 use cosmic_text::{
@@ -22,6 +23,10 @@ use crate::renderer::Viewport;
 use crate::theme::Color;
 
 const COMPOSITOR_SERVICE_NAME: &str = "compositor.service";
+const DISPLAY_SERVICE_NAME: &str = "display.driver";
+const WINDOW_OVERLAY_CAPABILITY: &str = "window.overlay";
+const CAPABILITY_PROMPT_OPCODE: u32 = 0x4350_5251;
+const DISPLAY_GET_INFO_OPCODE: u32 = 1;
 const OP_CREATE_SURFACE: u32 = 1;
 const OP_ATTACH_BUFFER: u32 = 2;
 const OP_DAMAGE: u32 = 3;
@@ -105,6 +110,8 @@ static mut ATTACH_BUFFER_REQ: [u8; 28] = [0; 28];
 static mut TOKEN_REQ: [u8; 12] = [0; 12];
 static mut IPC_REPLY: [u8; 16] = [0; 16];
 static mut EVENT_BUF: [u8; 32] = [0; 32];
+static mut DISPLAY_REQ: [u8; 20] = [0; 20];
+static mut DISPLAY_REPLY: [u8; 32] = [0; 32];
 
 #[derive(Debug, thiserror::Error)]
 pub enum MochiOsBackendError {
@@ -127,6 +134,78 @@ pub enum MochiOsBackendError {
     InvalidEvent,
 }
 
+#[repr(u32)]
+#[derive(Clone, Copy)]
+enum CapabilityClass {
+    UserGrantable = 1,
+}
+
+#[repr(u32)]
+#[derive(Clone, Copy)]
+enum CapabilityDecision {
+    AllowOnce = 1,
+    AllowForProcess = 2,
+    AllowPersistently = 3,
+    AllowAllUserGrantable = 4,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CapabilityExecutableIdentity {
+    path_len: u16,
+    reserved: u16,
+    digest: [u8; 32],
+    path: [u8; 256],
+}
+
+impl Default for CapabilityExecutableIdentity {
+    fn default() -> Self {
+        Self {
+            path_len: 0,
+            reserved: 0,
+            digest: [0; 32],
+            path: [0; 256],
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CapabilityResourceDescriptor {
+    kind: u32,
+    path_len: u16,
+    reserved: u16,
+    path: [u8; 256],
+}
+
+impl Default for CapabilityResourceDescriptor {
+    fn default() -> Self {
+        Self {
+            kind: 0,
+            path_len: 0,
+            reserved: 0,
+            path: [0; 256],
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CapabilityRequest {
+    opcode: u32,
+    process_id: u64,
+    executable: CapabilityExecutableIdentity,
+    capability_class: CapabilityClass,
+    capability_len: u16,
+    resource: CapabilityResourceDescriptor,
+    reason_len: u16,
+    interactive: u8,
+    decision_scope: u8,
+    reserved0: u16,
+    capability: [u8; 64],
+    reason: [u8; 128],
+}
+
 pub struct MochiOsBackend<A>
 where
     A: PlatformApplication,
@@ -137,6 +216,8 @@ where
     font_system: Option<FontSystem>,
     swash_cache: SwashCache,
     text_layout_cache: HashMap<TextLayoutKey, Buffer>,
+    pixmap: Option<Pixmap>,
+    xrgb_buffer: Vec<u32>,
 }
 
 impl<A> MochiOsBackend<A>
@@ -151,14 +232,29 @@ where
             font_system: None,
             swash_cache: SwashCache::new(),
             text_layout_cache: HashMap::new(),
+            pixmap: None,
+            xrgb_buffer: Vec::new(),
         }
     }
 
     pub fn run(mut self) -> Result<(), MochiOsBackendError> {
         let compositor = find_compositor()?;
         let event_endpoint = create_event_endpoint()?;
-        let size = checked_surface_size(self.config.size)?;
-        let viewport = Viewport::new(self.config.size, size.0, size.1, 1.0);
+        if self.config.fullscreen {
+            require_window_overlay_capability()?;
+        }
+        let requested_size = if self.config.fullscreen {
+            display_surface_size().unwrap_or_else(|| self.config.size)
+        } else {
+            self.config.size
+        };
+        let size = checked_surface_size(requested_size)?;
+        let logical_size = if self.config.fullscreen {
+            requested_size
+        } else {
+            self.config.size
+        };
+        let viewport = Viewport::new(logical_size, size.0, size.1, 1.0);
         let window = MochiOsWindow::new(viewport);
         let token = create_surface(compositor, event_endpoint, size.0, size.1)?;
         let mut shared_buffer = SharedBuffer::new(size.0 as usize, size.1 as usize)?;
@@ -188,7 +284,7 @@ where
                 }
                 display_list.clear();
                 let _ = self.app.draw(window.viewport(), &mut display_list);
-                let buffer = render_display_list(
+                render_display_list(
                     window.viewport(),
                     &display_list,
                     self.font_system
@@ -196,13 +292,15 @@ where
                         .ok_or(MochiOsBackendError::InvalidWindowSize)?,
                     &mut self.swash_cache,
                     &mut self.text_layout_cache,
+                    &mut self.pixmap,
+                    &mut self.xrgb_buffer,
                 )?;
                 attach_buffer(
                     compositor,
                     token,
                     window.width() as usize,
                     window.height() as usize,
-                    &buffer,
+                    &self.xrgb_buffer,
                     &mut shared_buffer,
                 )?;
                 simple_token_request(compositor, OP_DAMAGE, token)?;
@@ -426,6 +524,142 @@ fn find_compositor() -> Result<u64, MochiOsBackendError> {
         let _ = syscall::call0(syscall::SyscallNumber::ThreadYield);
     }
     Err(MochiOsBackendError::CompositorNotFound)
+}
+
+fn find_display_driver() -> Result<u64, MochiOsBackendError> {
+    let name = DISPLAY_SERVICE_NAME.as_bytes();
+    for _ in 0..64 {
+        let tid = syscall_result(syscall::call2(
+            syscall::SyscallNumber::FindProcessByName,
+            name.as_ptr() as u64,
+            name.len() as u64,
+        ))?;
+        if tid != 0 {
+            return Ok(tid);
+        }
+        let _ = syscall::call0(syscall::SyscallNumber::ThreadYield);
+    }
+    Err(MochiOsBackendError::InvalidReply)
+}
+
+fn require_window_overlay_capability() -> Result<(), MochiOsBackendError> {
+    if query_capability(WINDOW_OVERLAY_CAPABILITY) {
+        return Ok(());
+    }
+    request_capability_from_shell(
+        WINDOW_OVERLAY_CAPABILITY,
+        Some("fullscreen desktop surface"),
+    )?;
+    if query_capability(WINDOW_OVERLAY_CAPABILITY) {
+        Ok(())
+    } else {
+        Err(MochiOsBackendError::Syscall(mochi_user_syscall::EACCES))
+    }
+}
+
+fn query_capability(capability: &str) -> bool {
+    let bytes = capability.as_bytes();
+    matches!(
+        syscall::call2(
+            syscall::SyscallNumber::CapQuery,
+            bytes.as_ptr() as u64,
+            bytes.len() as u64,
+        ),
+        Ok(1)
+    )
+}
+
+fn request_capability_from_shell(
+    capability: &str,
+    reason: Option<&str>,
+) -> Result<(), MochiOsBackendError> {
+    let prompt_mode = env::var("MOCHI_PROMPT_MODE")
+        .map_err(|_| MochiOsBackendError::Syscall(mochi_user_syscall::EACCES))?;
+    if prompt_mode != "interactive" {
+        return Err(MochiOsBackendError::Syscall(mochi_user_syscall::EACCES));
+    }
+    let shell_endpoint = env::var("MOCHI_SHELL_ENDPOINT")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|endpoint| *endpoint != 0)
+        .ok_or(MochiOsBackendError::Syscall(mochi_user_syscall::EACCES))?;
+    let executable = env::var("MOCHI_EXECUTABLE_PATH")
+        .or_else(|_| env::args().next().ok_or(env::VarError::NotPresent))
+        .map_err(|_| MochiOsBackendError::Syscall(mochi_user_syscall::EACCES))?;
+    let process_id = syscall_result(syscall::call0(syscall::SyscallNumber::GetPid))?;
+    let exec_bytes = executable.as_bytes();
+    let cap_bytes = capability.as_bytes();
+    let reason_bytes = reason.unwrap_or("").as_bytes();
+    if exec_bytes.len() > 256 || cap_bytes.len() > 64 || reason_bytes.len() > 128 {
+        return Err(MochiOsBackendError::InvalidWindowSize);
+    }
+
+    let mut request = CapabilityRequest {
+        opcode: CAPABILITY_PROMPT_OPCODE,
+        process_id,
+        executable: CapabilityExecutableIdentity::default(),
+        capability_class: CapabilityClass::UserGrantable,
+        capability_len: cap_bytes.len() as u16,
+        resource: CapabilityResourceDescriptor::default(),
+        reason_len: reason_bytes.len() as u16,
+        interactive: 1,
+        decision_scope: 0,
+        reserved0: 0,
+        capability: [0; 64],
+        reason: [0; 128],
+    };
+    request.executable.path_len = exec_bytes.len() as u16;
+    request.executable.path[..exec_bytes.len()].copy_from_slice(exec_bytes);
+    request.capability[..cap_bytes.len()].copy_from_slice(cap_bytes);
+    request.reason[..reason_bytes.len()].copy_from_slice(reason_bytes);
+
+    let mut reply = [0u8; 8];
+    let msg = syscall_result(syscall::call5(
+        syscall::SyscallNumber::IpcCall,
+        shell_endpoint,
+        (&request as *const CapabilityRequest) as u64,
+        core::mem::size_of::<CapabilityRequest>() as u64,
+        reply.as_mut_ptr() as u64,
+        reply.len() as u64,
+    ))?;
+    if (msg & 0xffff_ffff) < 4 {
+        return Err(MochiOsBackendError::InvalidReply);
+    }
+    let decision = u32::from_le_bytes([reply[0], reply[1], reply[2], reply[3]]);
+    if decision == CapabilityDecision::AllowOnce as u32
+        || decision == CapabilityDecision::AllowForProcess as u32
+        || decision == CapabilityDecision::AllowPersistently as u32
+        || decision == CapabilityDecision::AllowAllUserGrantable as u32
+    {
+        Ok(())
+    } else {
+        Err(MochiOsBackendError::Syscall(mochi_user_syscall::EACCES))
+    }
+}
+
+fn display_surface_size() -> Option<crate::geometry::Size> {
+    let display = find_display_driver().ok()?;
+    let request = core::ptr::addr_of_mut!(DISPLAY_REQ).cast::<u8>();
+    let reply = core::ptr::addr_of_mut!(DISPLAY_REPLY).cast::<u8>();
+    unsafe {
+        zero_raw(request, 20);
+        zero_raw(reply, 32);
+        put_u32_raw(request, 0, DISPLAY_GET_INFO_OPCODE);
+    }
+    let len = ipc_call_raw(display, request, 20, reply, 32).ok()?;
+    if len < 20 {
+        return None;
+    }
+    let status = unsafe { read_u32_raw(reply.cast_const(), 0) };
+    if status != 0 {
+        return None;
+    }
+    let width = unsafe { read_u32_raw(reply.cast_const(), 4) };
+    let height = unsafe { read_u32_raw(reply.cast_const(), 8) };
+    match (width, height) {
+        (w, h) if w > 0 && h > 0 => Some(crate::geometry::Size::new(w as f32, h as f32)),
+        _ => None,
+    }
 }
 
 fn ipc_call_raw(
@@ -732,10 +966,12 @@ fn render_display_list(
     font_system: &mut FontSystem,
     swash_cache: &mut SwashCache,
     text_layout_cache: &mut HashMap<TextLayoutKey, Buffer>,
-) -> Result<Vec<u32>, MochiOsBackendError> {
+    pixmap: &mut Option<Pixmap>,
+    output: &mut Vec<u32>,
+) -> Result<(), MochiOsBackendError> {
     let width = viewport.physical_width;
     let height = viewport.physical_height;
-    let mut pixmap = Pixmap::new(width, height).ok_or(MochiOsBackendError::InvalidWindowSize)?;
+    let pixmap = reusable_pixmap(pixmap, width, height)?;
     pixmap.fill(SkiaColor::from_rgba8(0, 0, 0, 0));
     let mut clear_color = Color::BLACK;
 
@@ -877,7 +1113,7 @@ fn render_display_list(
                     continue;
                 }
                 draw_text_command(
-                    &mut pixmap,
+                    &mut *pixmap,
                     font_system,
                     swash_cache,
                     text_layout_cache,
@@ -890,7 +1126,23 @@ fn render_display_list(
         }
     }
 
-    pixmap_to_xrgb(&pixmap, clear_color)
+    pixmap_to_xrgb(&pixmap, clear_color, output)
+}
+
+fn reusable_pixmap(
+    pixmap: &mut Option<Pixmap>,
+    width: u32,
+    height: u32,
+) -> Result<&mut Pixmap, MochiOsBackendError> {
+    let needs_allocate = pixmap
+        .as_ref()
+        .is_none_or(|current| current.width() != width || current.height() != height);
+    if needs_allocate {
+        *pixmap = Some(Pixmap::new(width, height).ok_or(MochiOsBackendError::InvalidWindowSize)?);
+    }
+    pixmap
+        .as_mut()
+        .ok_or(MochiOsBackendError::InvalidWindowSize)
 }
 
 fn valid_scale_factor(scale_factor: f64) -> f32 {
@@ -1175,14 +1427,20 @@ fn solid_paint(color: Color) -> Paint<'static> {
     paint
 }
 
-fn pixmap_to_xrgb(pixmap: &Pixmap, background: Color) -> Result<Vec<u32>, MochiOsBackendError> {
+fn pixmap_to_xrgb(
+    pixmap: &Pixmap,
+    background: Color,
+    output: &mut Vec<u32>,
+) -> Result<(), MochiOsBackendError> {
     let pixel_count = (pixmap.width() as usize)
         .checked_mul(pixmap.height() as usize)
         .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
-    let mut output = Vec::new();
-    output
-        .try_reserve_exact(pixel_count)
-        .map_err(|_| MochiOsBackendError::InvalidWindowSize)?;
+    output.clear();
+    if output.capacity() < pixel_count {
+        output
+            .try_reserve_exact(pixel_count - output.capacity())
+            .map_err(|_| MochiOsBackendError::InvalidWindowSize)?;
+    }
     for pixel in pixmap.data().chunks_exact(4) {
         let alpha = pixel[3] as u32;
         let inv_alpha = 255_u32.saturating_sub(alpha);
@@ -1195,5 +1453,5 @@ fn pixmap_to_xrgb(pixmap: &Pixmap, background: Color) -> Result<Vec<u32>, MochiO
 
         output.push(0xff00_0000 | (red.min(255) << 16) | (green.min(255) << 8) | blue.min(255));
     }
-    Ok(output)
+    Ok(())
 }
