@@ -217,7 +217,6 @@ where
     swash_cache: SwashCache,
     text_layout_cache: HashMap<TextLayoutKey, Buffer>,
     pixmap: Option<Pixmap>,
-    xrgb_buffer: Vec<u32>,
 }
 
 impl<A> MochiOsBackend<A>
@@ -233,7 +232,6 @@ where
             swash_cache: SwashCache::new(),
             text_layout_cache: HashMap::new(),
             pixmap: None,
-            xrgb_buffer: Vec::new(),
         }
     }
 
@@ -284,7 +282,7 @@ where
                 }
                 display_list.clear();
                 let _ = self.app.draw(window.viewport(), &mut display_list);
-                render_display_list(
+                let clear_color = render_display_list(
                     window.viewport(),
                     &display_list,
                     self.font_system
@@ -293,14 +291,18 @@ where
                     &mut self.swash_cache,
                     &mut self.text_layout_cache,
                     &mut self.pixmap,
-                    &mut self.xrgb_buffer,
                 )?;
+                let pixmap = self
+                    .pixmap
+                    .as_ref()
+                    .ok_or(MochiOsBackendError::InvalidWindowSize)?;
                 attach_buffer(
                     compositor,
                     token,
                     window.width() as usize,
                     window.height() as usize,
-                    &self.xrgb_buffer,
+                    pixmap,
+                    clear_color,
                     &mut shared_buffer,
                 )?;
                 simple_token_request(compositor, OP_DAMAGE, token)?;
@@ -748,18 +750,40 @@ impl SharedBuffer {
         })
     }
 
-    fn send_to(&mut self, compositor: u64, buffer: &[u32]) -> Result<(), MochiOsBackendError> {
-        let bytes_len = buffer
-            .len()
+    fn send_pixmap_to(
+        &mut self,
+        compositor: u64,
+        pixmap: &Pixmap,
+        background: Color,
+    ) -> Result<(), MochiOsBackendError> {
+        let pixel_count = (pixmap.width() as usize)
+            .checked_mul(pixmap.height() as usize)
+            .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
+        let bytes_len = pixel_count
             .checked_mul(4)
             .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
-        let src = unsafe { std::slice::from_raw_parts(buffer.as_ptr().cast::<u8>(), bytes_len) };
         if bytes_len > self.byte_capacity {
             return Err(MochiOsBackendError::InvalidWindowSize);
         }
         let dst =
             unsafe { std::slice::from_raw_parts_mut(self.virt as *mut u8, self.byte_capacity) };
-        dst[..bytes_len].copy_from_slice(src);
+        for (pixel, out) in pixmap
+            .data()
+            .chunks_exact(4)
+            .zip(dst[..bytes_len].chunks_exact_mut(4))
+        {
+            let alpha = pixel[3] as u32;
+            let inv_alpha = 255_u32.saturating_sub(alpha);
+
+            // tiny-skia stores premultiplied RGBA. The compositor surface is XRGB,
+            // so each pixel is flattened into the configured clear color.
+            let red = pixel[0] as u32 + (background.red as u32 * inv_alpha + 127) / 255;
+            let green = pixel[1] as u32 + (background.green as u32 * inv_alpha + 127) / 255;
+            let blue = pixel[2] as u32 + (background.blue as u32 * inv_alpha + 127) / 255;
+            let value = 0xff00_0000 | (red.min(255) << 16) | (green.min(255) << 8) | blue.min(255);
+
+            out.copy_from_slice(&value.to_le_bytes());
+        }
         let page_count = bytes_len
             .checked_add(PAGE_SIZE - 1)
             .map(|len| len / PAGE_SIZE)
@@ -917,13 +941,20 @@ fn attach_buffer(
     token: u64,
     width: usize,
     height: usize,
-    buffer: &[u32],
+    pixmap: &Pixmap,
+    background: Color,
     shared_buffer: &mut SharedBuffer,
 ) -> Result<(), MochiOsBackendError> {
     let pixel_count = width
         .checked_mul(height)
         .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
-    if buffer.len() < pixel_count {
+    let pixmap_pixel_count = (pixmap.width() as usize)
+        .checked_mul(pixmap.height() as usize)
+        .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
+    if pixmap.width() as usize != width || pixmap.height() as usize != height {
+        return Err(MochiOsBackendError::InvalidWindowSize);
+    }
+    if pixmap_pixel_count < pixel_count {
         return Err(MochiOsBackendError::InvalidWindowSize);
     }
     let request = core::ptr::addr_of_mut!(ATTACH_BUFFER_REQ).cast::<u8>();
@@ -940,7 +971,7 @@ fn attach_buffer(
     }
     let len = ipc_call_raw(compositor, request, 28, reply, 16)?;
     status_from_raw(reply, len)?;
-    shared_buffer.send_to(compositor, &buffer[..pixel_count])
+    shared_buffer.send_pixmap_to(compositor, pixmap, background)
 }
 
 fn simple_token_request(
@@ -967,8 +998,7 @@ fn render_display_list(
     swash_cache: &mut SwashCache,
     text_layout_cache: &mut HashMap<TextLayoutKey, Buffer>,
     pixmap: &mut Option<Pixmap>,
-    output: &mut Vec<u32>,
-) -> Result<(), MochiOsBackendError> {
+) -> Result<Color, MochiOsBackendError> {
     let width = viewport.physical_width;
     let height = viewport.physical_height;
     let pixmap = reusable_pixmap(pixmap, width, height)?;
@@ -1126,7 +1156,7 @@ fn render_display_list(
         }
     }
 
-    pixmap_to_xrgb(&pixmap, clear_color, output)
+    Ok(clear_color)
 }
 
 fn reusable_pixmap(
@@ -1425,33 +1455,4 @@ fn solid_paint(color: Color) -> Paint<'static> {
     paint.set_color_rgba8(color.red, color.green, color.blue, color.alpha);
     paint.anti_alias = true;
     paint
-}
-
-fn pixmap_to_xrgb(
-    pixmap: &Pixmap,
-    background: Color,
-    output: &mut Vec<u32>,
-) -> Result<(), MochiOsBackendError> {
-    let pixel_count = (pixmap.width() as usize)
-        .checked_mul(pixmap.height() as usize)
-        .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
-    output.clear();
-    if output.capacity() < pixel_count {
-        output
-            .try_reserve_exact(pixel_count - output.capacity())
-            .map_err(|_| MochiOsBackendError::InvalidWindowSize)?;
-    }
-    for pixel in pixmap.data().chunks_exact(4) {
-        let alpha = pixel[3] as u32;
-        let inv_alpha = 255_u32.saturating_sub(alpha);
-
-        // tiny-skia stores premultiplied RGBA. The compositor surface is XRGB,
-        // so each pixel must be flattened explicitly instead of dropping alpha.
-        let red = pixel[0] as u32 + (background.red as u32 * inv_alpha + 127) / 255;
-        let green = pixel[1] as u32 + (background.green as u32 * inv_alpha + 127) / 255;
-        let blue = pixel[2] as u32 + (background.blue as u32 * inv_alpha + 127) / 255;
-
-        output.push(0xff00_0000 | (red.min(255) << 16) | (green.min(255) << 8) | blue.min(255));
-    }
-    Ok(())
 }
