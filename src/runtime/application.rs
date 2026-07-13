@@ -52,11 +52,15 @@ where
     }
 
     fn rebuild_root(&mut self, viewport: Viewport) {
+        self.rebuild_root_with_redraw(viewport, RedrawRequest::Full);
+    }
+
+    fn rebuild_root_with_redraw(&mut self, viewport: Viewport, redraw: RedrawRequest) {
         let context = ViewContext::new(viewport);
 
         self.root = Some(self.app.body(&context));
         self.viewport = Some(viewport);
-        self.pending_redraw = RedrawRequest::Full;
+        self.pending_redraw = redraw;
 
         let _ = take_state_changed();
     }
@@ -116,7 +120,12 @@ where
         let state_changed = take_state_changed();
 
         if state_changed {
-            self.rebuild_root(viewport);
+            let redraw = if redraw_request.is_requested() {
+                redraw_request
+            } else {
+                RedrawRequest::Full
+            };
+            self.rebuild_root_with_redraw(viewport, redraw);
         } else {
             self.pending_redraw = self.pending_redraw.merge(redraw_request);
         }
