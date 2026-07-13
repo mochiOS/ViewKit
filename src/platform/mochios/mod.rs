@@ -1,6 +1,5 @@
 use std::cell::Cell;
 use std::collections::HashMap;
-use std::fmt::Write as _;
 use std::time::{Duration, Instant};
 
 use cosmic_text::{
@@ -29,7 +28,6 @@ use crate::theme::Color;
 const COMPOSITOR_SERVICE_NAME: &str = "compositor.service";
 const DISPLAY_SERVICE_NAME: &str = "display.driver";
 const INPUT_SERVICE_NAME: &str = "input.service";
-const LOGGER_SERVICE_NAME: &str = "logger.service";
 const WINDOW_OVERLAY_CAPABILITY: &str = "window.overlay";
 const DISPLAY_GET_INFO_OPCODE: u32 = 1;
 const OP_CREATE_SURFACE: u32 = 1;
@@ -533,7 +531,17 @@ where
             return;
         }
 
-        log_stats(&self.metrics);
+        eprintln!(
+            "viewkit/mochios stats: full={} cursor={} input={} coalesced={} draw={}ms render={}ms attach={}ms commit={}ms",
+            self.metrics.full_frames,
+            self.metrics.cursor_frames,
+            self.metrics.input_events,
+            self.metrics.coalesced_pointer_events,
+            self.metrics.draw_time.as_millis(),
+            self.metrics.render_time.as_millis(),
+            self.metrics.attach_time.as_millis(),
+            self.metrics.commit_time.as_millis(),
+        );
 
         self.metrics.full_frames = 0;
         self.metrics.cursor_frames = 0;
@@ -813,45 +821,6 @@ fn find_input_service() -> Result<u64, MochiOsBackendError> {
         let _ = syscall::call0(syscall::SyscallNumber::ThreadYield);
     }
     Err(MochiOsBackendError::InvalidReply)
-}
-
-fn find_logger_service() -> Option<u64> {
-    let name = LOGGER_SERVICE_NAME.as_bytes();
-    syscall::call2(
-        syscall::SyscallNumber::FindProcessByName,
-        name.as_ptr() as u64,
-        name.len() as u64,
-    )
-    .ok()
-    .filter(|endpoint| *endpoint != 0)
-}
-
-fn log_stats(metrics: &BackendMetrics) {
-    let Some(endpoint) = find_logger_service() else {
-        return;
-    };
-    let mut line = String::new();
-    let _ = writeln!(
-        line,
-        "viewkit/mochios stats: full={} cursor={} input={} coalesced={} draw={}ms render={}ms attach={}ms commit={}ms",
-        metrics.full_frames,
-        metrics.cursor_frames,
-        metrics.input_events,
-        metrics.coalesced_pointer_events,
-        metrics.draw_time.as_millis(),
-        metrics.render_time.as_millis(),
-        metrics.attach_time.as_millis(),
-        metrics.commit_time.as_millis(),
-    );
-    if line.is_empty() {
-        return;
-    }
-    let _ = syscall::call3(
-        syscall::SyscallNumber::IpcSend,
-        endpoint,
-        line.as_ptr() as u64,
-        line.len() as u64,
-    );
 }
 
 fn subscribe_input_events(endpoint: u64) -> bool {
