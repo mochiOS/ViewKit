@@ -71,10 +71,11 @@ const TEXT_LAYOUT_CACHE_CAPACITY: usize = 1024;
 const SVG_SMALL_RENDER_LIMIT: f32 = 256.0;
 const SVG_SMALL_RENDER_SUPERSAMPLE: f32 = 2.0;
 const CURSOR_SVG_PATH: &str = "/system/icons/cursor.svg";
-const CURSOR_WIDTH: u32 = 35;
-const CURSOR_HEIGHT: u32 = 60;
+const CURSOR_WIDTH: u32 = 12;
+const CURSOR_HEIGHT: u32 = 20;
 const CURSOR_HOTSPOT_X: f32 = 1.0;
 const CURSOR_HOTSPOT_Y: f32 = 1.0;
+const PERF_LOG_ENABLED: bool = false;
 const METRICS_INTERVAL_TICKS: u64 = 500;
 const SLOW_FRAME_THRESHOLD_TICKS: u64 = 16;
 const INITIAL_FRAME_LOGS: u64 = 8;
@@ -562,6 +563,9 @@ where
     }
 
     fn report_metrics_if_due(&mut self) {
+        if !PERF_LOG_ENABLED {
+            return;
+        }
         let now = perf_tick();
         if self.metrics.next_report_tick == 0 {
             self.metrics.next_report_tick = now.saturating_add(METRICS_INTERVAL_TICKS);
@@ -607,6 +611,9 @@ where
         commit_cycles: u64,
         dirty_bounds: Rect,
     ) {
+        if !PERF_LOG_ENABLED {
+            return;
+        }
         let force_initial = self.metrics.frame_logs_emitted < INITIAL_FRAME_LOGS;
         if !force_initial && total_ticks < SLOW_FRAME_THRESHOLD_TICKS {
             return;
@@ -638,6 +645,9 @@ where
     }
 
     fn log_backend_started(&self, size: (u32, u32)) {
+        if !PERF_LOG_ENABLED {
+            return;
+        }
         let mut line = String::new();
         let _ = write!(
             line,
