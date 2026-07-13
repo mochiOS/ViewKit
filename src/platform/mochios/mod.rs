@@ -16,11 +16,13 @@ use crate::draw_command::{
 };
 use crate::font::create_font_system;
 use crate::geometry::Rect;
+use crate::image::ImageData;
 use crate::platform::{
     ButtonState, CursorIcon, PlatformApplication, PlatformEvent, PlatformWindow, PointerButton,
     WindowConfig,
 };
 use crate::renderer::Viewport;
+use crate::svg::SvgData;
 use crate::theme::Color;
 
 const COMPOSITOR_SERVICE_NAME: &str = "compositor.service";
@@ -67,6 +69,11 @@ const INPUT_FLAG_RELEASE: u16 = 1 << 1;
 const TEXT_LAYOUT_CACHE_CAPACITY: usize = 1024;
 const SVG_SMALL_RENDER_LIMIT: f32 = 256.0;
 const SVG_SMALL_RENDER_SUPERSAMPLE: f32 = 2.0;
+const CURSOR_SVG_PATH: &str = "/system/icons/cursor.svg";
+const CURSOR_WIDTH: u32 = 35;
+const CURSOR_HEIGHT: u32 = 60;
+const CURSOR_HOTSPOT_X: f32 = 1.0;
+const CURSOR_HOTSPOT_Y: f32 = 1.0;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct TextLayoutKey {
@@ -160,6 +167,9 @@ where
     direct_input: bool,
     pointer_x: f32,
     pointer_y: f32,
+    cursor_image: Option<ImageData>,
+    cursor_dirty: Option<Rect>,
+    clear_color: Color,
 }
 
 impl<A> MochiOsBackend<A>
@@ -178,6 +188,9 @@ where
             direct_input: false,
             pointer_x: 0.0,
             pointer_y: 0.0,
+            cursor_image: None,
+            cursor_dirty: None,
+            clear_color: Color::BLACK,
         }
     }
 
@@ -210,6 +223,9 @@ where
         self.pointer_x = (viewport.logical_size.width / 2.0).max(0.0);
         self.pointer_y = (viewport.logical_size.height / 2.0).max(0.0);
         self.direct_input = self.config.fullscreen && subscribe_input_events(event_endpoint);
+        if self.direct_input {
+            self.cursor_image = load_cursor_image();
+        }
 
         self.app
             .handle_event(PlatformEvent::Resumed { viewport }, &window);
@@ -229,12 +245,17 @@ where
                 .next_redraw_at()
                 .is_some_and(|deadline| deadline <= Instant::now());
 
-            if window.take_redraw_requested() || redraw_due {
+            let redraw_requested = window.take_redraw_requested();
+            if redraw_requested || redraw_due {
                 if self.font_system.is_none() {
                     self.font_system = Some(create_font_system());
                 }
                 display_list.clear();
-                let dirty_bounds = self.app.draw(window.viewport(), &mut display_list);
+                let mut dirty_bounds = self.app.draw(window.viewport(), &mut display_list);
+                if let Some(cursor_rect) = self.current_cursor_rect(window.viewport()) {
+                    dirty_bounds = dirty_bounds.union(cursor_rect);
+                }
+                self.cursor_dirty = None;
                 let clear_color = render_display_list(
                     window.viewport(),
                     dirty_bounds,
@@ -246,6 +267,7 @@ where
                     &mut self.text_layout_cache,
                     &mut self.pixmap,
                 )?;
+                self.clear_color = clear_color;
                 let pixmap = self
                     .pixmap
                     .as_ref()
@@ -260,10 +282,31 @@ where
                     &mut shared_buffer,
                     window.viewport(),
                     dirty_bounds,
+                    self.cursor_blit(),
                 )?;
                 damage_token_request(compositor, token, window.viewport(), dirty_bounds)?;
                 simple_token_request(compositor, OP_COMMIT, token)?;
                 handled_work = true;
+            } else if let Some(dirty_bounds) = self.cursor_dirty.take() {
+                if let (Some(pixmap), Some(_cursor)) =
+                    (self.pixmap.as_ref(), self.cursor_image.as_ref())
+                {
+                    attach_buffer(
+                        compositor,
+                        token,
+                        window.width() as usize,
+                        window.height() as usize,
+                        pixmap,
+                        self.clear_color,
+                        &mut shared_buffer,
+                        window.viewport(),
+                        dirty_bounds,
+                        self.cursor_blit(),
+                    )?;
+                    damage_token_request(compositor, token, window.viewport(), dirty_bounds)?;
+                    simple_token_request(compositor, OP_COMMIT, token)?;
+                    handled_work = true;
+                }
             }
 
             if !handled_work {
@@ -295,6 +338,7 @@ where
         let kind = u16::from_le_bytes([event[0], event[1]]);
         match kind {
             INPUT_EVENT_KIND_POINTER_MOVE => {
+                let previous = self.current_cursor_rect(window.viewport());
                 let dx = i32::from_le_bytes([event[12], event[13], event[14], event[15]]) as f32;
                 let dy = i32::from_le_bytes([event[16], event[17], event[18], event[19]]) as f32;
                 let bounds = window.viewport().logical_bounds();
@@ -309,9 +353,11 @@ where
                     },
                     window,
                 );
+                self.mark_cursor_dirty(window.viewport(), previous);
                 true
             }
             INPUT_EVENT_KIND_POINTER_ABSOLUTE => {
+                let previous = self.current_cursor_rect(window.viewport());
                 let raw_x = i32::from_le_bytes([event[12], event[13], event[14], event[15]])
                     .clamp(0, 32_767) as f32;
                 let raw_y = i32::from_le_bytes([event[16], event[17], event[18], event[19]])
@@ -326,6 +372,7 @@ where
                     },
                     window,
                 );
+                self.mark_cursor_dirty(window.viewport(), previous);
                 true
             }
             INPUT_EVENT_KIND_POINTER_BUTTON => {
@@ -350,6 +397,39 @@ where
             }
             _ => false,
         }
+    }
+
+    fn current_cursor_rect(&self, viewport: Viewport) -> Option<Rect> {
+        self.cursor_image.as_ref()?;
+        let bounds = viewport.logical_bounds();
+        Some(
+            Rect::new(
+                self.pointer_x - CURSOR_HOTSPOT_X,
+                self.pointer_y - CURSOR_HOTSPOT_Y,
+                CURSOR_WIDTH as f32,
+                CURSOR_HEIGHT as f32,
+            )
+            .intersection(bounds)
+            .unwrap_or_else(|| Rect::new(self.pointer_x, self.pointer_y, 1.0, 1.0)),
+        )
+    }
+
+    fn mark_cursor_dirty(&mut self, viewport: Viewport, previous: Option<Rect>) {
+        let Some(current) = self.current_cursor_rect(viewport) else {
+            return;
+        };
+        let dirty = previous
+            .map_or(current, |previous| previous.union(current))
+            .expanded(2.0);
+        self.cursor_dirty = Some(self.cursor_dirty.map_or(dirty, |old| old.union(dirty)));
+    }
+
+    fn cursor_blit(&self) -> Option<CursorBlit<'_>> {
+        Some(CursorBlit {
+            image: self.cursor_image.as_ref()?,
+            x: self.pointer_x - CURSOR_HOTSPOT_X,
+            y: self.pointer_y - CURSOR_HOTSPOT_Y,
+        })
     }
 
     fn handle_compositor_event(
@@ -647,6 +727,11 @@ fn display_surface_size() -> Option<crate::geometry::Size> {
     }
 }
 
+fn load_cursor_image() -> Option<ImageData> {
+    let svg = SvgData::from_path(CURSOR_SVG_PATH).ok()?;
+    ImageData::from_svg(&svg, CURSOR_WIDTH, CURSOR_HEIGHT).ok()
+}
+
 fn ipc_call_raw(
     dest: u64,
     req_ptr: *const u8,
@@ -718,6 +803,13 @@ struct PhysicalDirtyRect {
     height: usize,
 }
 
+#[derive(Clone, Copy)]
+struct CursorBlit<'a> {
+    image: &'a ImageData,
+    x: f32,
+    y: f32,
+}
+
 impl SharedBuffer {
     fn new(width: usize, height: usize) -> Result<Self, MochiOsBackendError> {
         let pixel_count = width
@@ -749,6 +841,7 @@ impl SharedBuffer {
         pixmap: &Pixmap,
         background: Color,
         dirty_rect: PhysicalDirtyRect,
+        cursor: Option<CursorBlit<'_>>,
     ) -> Result<(), MochiOsBackendError> {
         let pixel_count = (pixmap.width() as usize)
             .checked_mul(pixmap.height() as usize)
@@ -800,7 +893,10 @@ impl SharedBuffer {
                 let Some(out) = dst.get_mut(byte_index..byte_index + 4) else {
                     return Err(MochiOsBackendError::InvalidWindowSize);
                 };
-                let value = flatten_premultiplied_pixel(pixel, background);
+                let mut value = flatten_premultiplied_pixel(pixel, background);
+                if let Some(cursor) = cursor {
+                    value = blend_cursor_pixel(value, cursor, x, y);
+                }
                 out.copy_from_slice(&value.to_le_bytes());
             }
         }
@@ -826,6 +922,53 @@ fn flatten_premultiplied_pixel(pixel: &[u8], background: Color) -> u32 {
     let red = pixel[0] as u32 + (background.red as u32 * inv_alpha + 127) / 255;
     let green = pixel[1] as u32 + (background.green as u32 * inv_alpha + 127) / 255;
     let blue = pixel[2] as u32 + (background.blue as u32 * inv_alpha + 127) / 255;
+
+    0xff00_0000 | (red.min(255) << 16) | (green.min(255) << 8) | blue.min(255)
+}
+
+fn blend_cursor_pixel(base: u32, cursor: CursorBlit<'_>, x: usize, y: usize) -> u32 {
+    let cursor_x = x as i32 - cursor.x.round() as i32;
+    let cursor_y = y as i32 - cursor.y.round() as i32;
+    if cursor_x < 0
+        || cursor_y < 0
+        || cursor_x >= cursor.image.width() as i32
+        || cursor_y >= cursor.image.height() as i32
+    {
+        return base;
+    }
+
+    let cursor_x = cursor_x as usize;
+    let cursor_y = cursor_y as usize;
+    let width = cursor.image.width() as usize;
+    let Some(pixel_index) = cursor_y
+        .checked_mul(width)
+        .and_then(|row| row.checked_add(cursor_x))
+    else {
+        return base;
+    };
+    let Some(byte_index) = pixel_index.checked_mul(4) else {
+        return base;
+    };
+    let Some(pixel) = cursor
+        .image
+        .premultiplied_rgba8()
+        .get(byte_index..byte_index + 4)
+    else {
+        return base;
+    };
+
+    let alpha = pixel[3] as u32;
+    if alpha == 0 {
+        return base;
+    }
+
+    let inv_alpha = 255_u32.saturating_sub(alpha);
+    let base_red = (base >> 16) & 0xff;
+    let base_green = (base >> 8) & 0xff;
+    let base_blue = base & 0xff;
+    let red = pixel[0] as u32 + (base_red * inv_alpha + 127) / 255;
+    let green = pixel[1] as u32 + (base_green * inv_alpha + 127) / 255;
+    let blue = pixel[2] as u32 + (base_blue * inv_alpha + 127) / 255;
 
     0xff00_0000 | (red.min(255) << 16) | (green.min(255) << 8) | blue.min(255)
 }
@@ -984,6 +1127,7 @@ fn attach_buffer(
     shared_buffer: &mut SharedBuffer,
     viewport: Viewport,
     dirty_bounds: Rect,
+    cursor: Option<CursorBlit<'_>>,
 ) -> Result<(), MochiOsBackendError> {
     let pixel_count = width
         .checked_mul(height)
@@ -1012,7 +1156,7 @@ fn attach_buffer(
     let len = ipc_call_raw(compositor, request, 28, reply, 16)?;
     status_from_raw(reply, len)?;
     let dirty_rect = physical_dirty_rect(viewport, dirty_bounds);
-    shared_buffer.send_pixmap_to(compositor, pixmap, background, dirty_rect)
+    shared_buffer.send_pixmap_to(compositor, pixmap, background, dirty_rect, cursor)
 }
 
 fn simple_token_request(
