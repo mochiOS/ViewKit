@@ -77,6 +77,7 @@ const CURSOR_HOTSPOT_X: f32 = 1.0;
 const CURSOR_HOTSPOT_Y: f32 = 1.0;
 const METRICS_INTERVAL: Duration = Duration::from_secs(1);
 const SLOW_FRAME_THRESHOLD: Duration = Duration::from_millis(32);
+const INITIAL_FRAME_LOGS: u64 = 8;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct TextLayoutKey {
@@ -190,6 +191,7 @@ struct BackendMetrics {
     next_report: Option<Instant>,
     full_frames: u64,
     cursor_frames: u64,
+    frame_logs_emitted: u64,
     input_events: u64,
     coalesced_pointer_events: u64,
     draw_time: Duration,
@@ -254,6 +256,7 @@ where
         if self.direct_input {
             self.cursor_image = load_cursor_image();
         }
+        self.log_backend_started(size);
 
         self.app
             .handle_event(PlatformEvent::Resumed { viewport }, &window);
@@ -331,7 +334,7 @@ where
                 let commit_time = commit_start.elapsed();
                 self.metrics.commit_time += commit_time;
                 self.metrics.full_frames = self.metrics.full_frames.saturating_add(1);
-                self.report_slow_frame_if_needed(
+                self.report_frame_timing(
                     "full",
                     frame_start.elapsed(),
                     draw_time,
@@ -368,7 +371,7 @@ where
                     let commit_time = commit_start.elapsed();
                     self.metrics.commit_time += commit_time;
                     self.metrics.cursor_frames = self.metrics.cursor_frames.saturating_add(1);
-                    self.report_slow_frame_if_needed(
+                    self.report_frame_timing(
                         "cursor",
                         frame_start.elapsed(),
                         Duration::ZERO,
@@ -585,8 +588,8 @@ where
         self.metrics.next_report = Some(now + METRICS_INTERVAL);
     }
 
-    fn report_slow_frame_if_needed(
-        &self,
+    fn report_frame_timing(
+        &mut self,
         kind: &str,
         total: Duration,
         draw: Duration,
@@ -595,13 +598,21 @@ where
         commit: Duration,
         dirty_bounds: Rect,
     ) {
-        if total < SLOW_FRAME_THRESHOLD {
+        let force_initial = self.metrics.frame_logs_emitted < INITIAL_FRAME_LOGS;
+        if !force_initial && total < SLOW_FRAME_THRESHOLD {
             return;
         }
+        self.metrics.frame_logs_emitted = self.metrics.frame_logs_emitted.saturating_add(1);
+        let label = if total < SLOW_FRAME_THRESHOLD {
+            "frame"
+        } else {
+            "slow-frame"
+        };
         let mut line = String::new();
         let _ = write!(
             line,
-            "viewkit/mochios slow-frame kind={} total={}ms draw={}ms render={}ms attach={}ms commit={}ms dirty=({:.0},{:.0} {:.0}x{:.0})\n",
+            "viewkit/mochios {} kind={} total={}ms draw={}ms render={}ms attach={}ms commit={}ms dirty=({:.0},{:.0} {:.0}x{:.0})\n",
+            label,
             kind,
             total.as_millis(),
             draw.as_millis(),
@@ -612,6 +623,16 @@ where
             dirty_bounds.origin.y,
             dirty_bounds.size.width,
             dirty_bounds.size.height,
+        );
+        perf_log(&line);
+    }
+
+    fn log_backend_started(&self, size: (u32, u32)) {
+        let mut line = String::new();
+        let _ = write!(
+            line,
+            "viewkit/mochios perf-start fullscreen={} size={}x{} direct_input={}\n",
+            self.config.fullscreen, size.0, size.1, self.direct_input,
         );
         perf_log(&line);
     }
