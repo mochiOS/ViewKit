@@ -1,5 +1,6 @@
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::time::{Duration, Instant};
 
 use cosmic_text::{
@@ -74,7 +75,8 @@ const CURSOR_WIDTH: u32 = 35;
 const CURSOR_HEIGHT: u32 = 60;
 const CURSOR_HOTSPOT_X: f32 = 1.0;
 const CURSOR_HOTSPOT_Y: f32 = 1.0;
-const METRICS_INTERVAL: Duration = Duration::from_secs(5);
+const METRICS_INTERVAL: Duration = Duration::from_secs(1);
+const SLOW_FRAME_THRESHOLD: Duration = Duration::from_millis(32);
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct TextLayoutKey {
@@ -280,9 +282,11 @@ where
                     self.font_system = Some(create_font_system());
                 }
                 display_list.clear();
+                let frame_start = Instant::now();
                 let draw_start = Instant::now();
                 let mut dirty_bounds = self.app.draw(window.viewport(), &mut display_list);
-                self.metrics.draw_time += draw_start.elapsed();
+                let draw_time = draw_start.elapsed();
+                self.metrics.draw_time += draw_time;
                 if let Some(cursor_rect) = self.current_cursor_rect(window.viewport()) {
                     dirty_bounds = dirty_bounds.union(cursor_rect);
                 }
@@ -299,7 +303,8 @@ where
                     &mut self.text_layout_cache,
                     &mut self.pixmap,
                 )?;
-                self.metrics.render_time += render_start.elapsed();
+                let render_time = render_start.elapsed();
+                self.metrics.render_time += render_time;
                 self.clear_color = clear_color;
                 let pixmap = self
                     .pixmap
@@ -318,18 +323,30 @@ where
                     dirty_bounds,
                     self.cursor_blit(),
                 )?;
-                self.metrics.attach_time += attach_start.elapsed();
+                let attach_time = attach_start.elapsed();
+                self.metrics.attach_time += attach_time;
                 let commit_start = Instant::now();
                 damage_token_request(compositor, token, window.viewport(), dirty_bounds)?;
                 simple_token_request(compositor, OP_COMMIT, token)?;
-                self.metrics.commit_time += commit_start.elapsed();
+                let commit_time = commit_start.elapsed();
+                self.metrics.commit_time += commit_time;
                 self.metrics.full_frames = self.metrics.full_frames.saturating_add(1);
+                self.report_slow_frame_if_needed(
+                    "full",
+                    frame_start.elapsed(),
+                    draw_time,
+                    render_time,
+                    attach_time,
+                    commit_time,
+                    dirty_bounds,
+                );
                 self.report_metrics_if_due();
                 handled_work = true;
             } else if let Some(dirty_bounds) = self.cursor_dirty.take() {
                 if let (Some(pixmap), Some(_cursor)) =
                     (self.pixmap.as_ref(), self.cursor_image.as_ref())
                 {
+                    let frame_start = Instant::now();
                     let attach_start = Instant::now();
                     attach_buffer(
                         compositor,
@@ -343,12 +360,23 @@ where
                         dirty_bounds,
                         self.cursor_blit(),
                     )?;
-                    self.metrics.attach_time += attach_start.elapsed();
+                    let attach_time = attach_start.elapsed();
+                    self.metrics.attach_time += attach_time;
                     let commit_start = Instant::now();
                     damage_token_request(compositor, token, window.viewport(), dirty_bounds)?;
                     simple_token_request(compositor, OP_COMMIT, token)?;
-                    self.metrics.commit_time += commit_start.elapsed();
+                    let commit_time = commit_start.elapsed();
+                    self.metrics.commit_time += commit_time;
                     self.metrics.cursor_frames = self.metrics.cursor_frames.saturating_add(1);
+                    self.report_slow_frame_if_needed(
+                        "cursor",
+                        frame_start.elapsed(),
+                        Duration::ZERO,
+                        Duration::ZERO,
+                        attach_time,
+                        commit_time,
+                        dirty_bounds,
+                    );
                     self.report_metrics_if_due();
                     handled_work = true;
                 }
@@ -531,8 +559,10 @@ where
             return;
         }
 
-        eprintln!(
-            "viewkit/mochios stats: full={} cursor={} input={} coalesced={} draw={}ms render={}ms attach={}ms commit={}ms",
+        let mut line = String::new();
+        let _ = write!(
+            line,
+            "viewkit/mochios stats: full={} cursor={} input={} coalesced={} draw={}ms render={}ms attach={}ms commit={}ms\n",
             self.metrics.full_frames,
             self.metrics.cursor_frames,
             self.metrics.input_events,
@@ -542,6 +572,7 @@ where
             self.metrics.attach_time.as_millis(),
             self.metrics.commit_time.as_millis(),
         );
+        perf_log(&line);
 
         self.metrics.full_frames = 0;
         self.metrics.cursor_frames = 0;
@@ -552,6 +583,37 @@ where
         self.metrics.attach_time = Duration::ZERO;
         self.metrics.commit_time = Duration::ZERO;
         self.metrics.next_report = Some(now + METRICS_INTERVAL);
+    }
+
+    fn report_slow_frame_if_needed(
+        &self,
+        kind: &str,
+        total: Duration,
+        draw: Duration,
+        render: Duration,
+        attach: Duration,
+        commit: Duration,
+        dirty_bounds: Rect,
+    ) {
+        if total < SLOW_FRAME_THRESHOLD {
+            return;
+        }
+        let mut line = String::new();
+        let _ = write!(
+            line,
+            "viewkit/mochios slow-frame kind={} total={}ms draw={}ms render={}ms attach={}ms commit={}ms dirty=({:.0},{:.0} {:.0}x{:.0})\n",
+            kind,
+            total.as_millis(),
+            draw.as_millis(),
+            render.as_millis(),
+            attach.as_millis(),
+            commit.as_millis(),
+            dirty_bounds.origin.x,
+            dirty_bounds.origin.y,
+            dirty_bounds.size.width,
+            dirty_bounds.size.height,
+        );
+        perf_log(&line);
     }
 
     fn current_cursor_rect(&self, viewport: Viewport) -> Option<Rect> {
@@ -769,6 +831,15 @@ fn checked_surface_size(size: crate::geometry::Size) -> Result<(u32, u32), Mochi
 
 fn syscall_result<T>(result: syscall::SysResult<T>) -> Result<T, MochiOsBackendError> {
     result.map_err(|err| MochiOsBackendError::Syscall(err.errno().unwrap_or(5)))
+}
+
+fn perf_log(line: &str) {
+    let _ = syscall::call3(
+        syscall::SyscallNumber::Write,
+        2,
+        line.as_ptr() as u64,
+        line.len() as u64,
+    );
 }
 
 fn create_event_endpoint() -> Result<u64, MochiOsBackendError> {
