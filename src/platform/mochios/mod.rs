@@ -793,6 +793,7 @@ struct SharedBuffer {
     virt: u64,
     byte_capacity: usize,
     sent_pages: bool,
+    attached: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -832,6 +833,7 @@ impl SharedBuffer {
             virt,
             byte_capacity,
             sent_pages: false,
+            attached: false,
         })
     }
 
@@ -910,6 +912,14 @@ impl SharedBuffer {
         send_pages(compositor, page_count, self.virt)?;
         self.sent_pages = true;
         Ok(())
+    }
+
+    fn is_attached(&self) -> bool {
+        self.attached
+    }
+
+    fn mark_attached(&mut self) {
+        self.attached = true;
     }
 }
 
@@ -1141,20 +1151,23 @@ fn attach_buffer(
     if pixmap_pixel_count < pixel_count {
         return Err(MochiOsBackendError::InvalidWindowSize);
     }
-    let request = core::ptr::addr_of_mut!(ATTACH_BUFFER_REQ).cast::<u8>();
-    let reply = core::ptr::addr_of_mut!(IPC_REPLY).cast::<u8>();
-    unsafe {
-        zero_raw(request, 28);
-        put_u32_raw(request, 0, OP_ATTACH_BUFFER);
-        put_u64_raw(request, 4, token);
-        put_u32_raw(request, 12, width as u32);
-        put_u32_raw(request, 16, height as u32);
-        put_u32_raw(request, 20, width as u32);
-        put_u32_raw(request, 24, PIXEL_FORMAT_XRGB8888);
-        zero_raw(reply, 16);
+    if !shared_buffer.is_attached() {
+        let request = core::ptr::addr_of_mut!(ATTACH_BUFFER_REQ).cast::<u8>();
+        let reply = core::ptr::addr_of_mut!(IPC_REPLY).cast::<u8>();
+        unsafe {
+            zero_raw(request, 28);
+            put_u32_raw(request, 0, OP_ATTACH_BUFFER);
+            put_u64_raw(request, 4, token);
+            put_u32_raw(request, 12, width as u32);
+            put_u32_raw(request, 16, height as u32);
+            put_u32_raw(request, 20, width as u32);
+            put_u32_raw(request, 24, PIXEL_FORMAT_XRGB8888);
+            zero_raw(reply, 16);
+        }
+        let len = ipc_call_raw(compositor, request, 28, reply, 16)?;
+        status_from_raw(reply, len)?;
+        shared_buffer.mark_attached();
     }
-    let len = ipc_call_raw(compositor, request, 28, reply, 16)?;
-    status_from_raw(reply, len)?;
     let dirty_rect = physical_dirty_rect(viewport, dirty_bounds);
     shared_buffer.send_pixmap_to(compositor, pixmap, background, dirty_rect, cursor)
 }
