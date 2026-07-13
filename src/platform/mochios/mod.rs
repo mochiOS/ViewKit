@@ -180,15 +180,10 @@ where
     }
 
     pub fn run(mut self) -> Result<(), MochiOsBackendError> {
-        eprintln!(
-            "viewkit/mochios: run begin fullscreen={}",
-            self.config.fullscreen
-        );
         let compositor = find_compositor()?;
         let event_endpoint = create_event_endpoint()?;
         if self.config.fullscreen {
             require_window_overlay_capability()?;
-            eprintln!("viewkit/mochios: window.overlay ok");
         }
         let requested_size = if self.config.fullscreen {
             display_surface_size().unwrap_or_else(|| self.config.size)
@@ -209,10 +204,6 @@ where
             ROLE_TOPLEVEL
         };
         let token = create_surface(compositor, event_endpoint, role, size.0, size.1)?;
-        eprintln!(
-            "viewkit/mochios: surface role={} token=0x{:016x} size={}x{}",
-            role, token, size.0, size.1
-        );
         let mut shared_buffer = SharedBuffer::new(size.0 as usize, size.1 as usize)?;
         self.pointer_x = (viewport.logical_size.width / 2.0).max(0.0);
         self.pointer_y = (viewport.logical_size.height / 2.0).max(0.0);
@@ -223,8 +214,6 @@ where
         window.request_redraw();
 
         let mut display_list = DisplayList::new();
-        let mut logged_first_commit = false;
-
         loop {
             let mut handled_work = false;
 
@@ -272,10 +261,6 @@ where
                 )?;
                 damage_token_request(compositor, token, window.viewport(), dirty_bounds)?;
                 simple_token_request(compositor, OP_COMMIT, token)?;
-                if !logged_first_commit {
-                    eprintln!("viewkit/mochios: first commit done");
-                    logged_first_commit = true;
-                }
                 handled_work = true;
             }
 
