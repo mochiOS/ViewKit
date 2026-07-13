@@ -1,6 +1,6 @@
 use std::cell::Cell;
 use std::collections::HashMap;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use cosmic_text::{
     Attrs, Buffer, Color as CosmicColor, Family, FontSystem, Metrics, Shaping, SwashCache, Weight,
@@ -74,6 +74,7 @@ const CURSOR_WIDTH: u32 = 35;
 const CURSOR_HEIGHT: u32 = 60;
 const CURSOR_HOTSPOT_X: f32 = 1.0;
 const CURSOR_HOTSPOT_Y: f32 = 1.0;
+const METRICS_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct TextLayoutKey {
@@ -170,6 +171,29 @@ where
     cursor_image: Option<ImageData>,
     cursor_dirty: Option<Rect>,
     clear_color: Color,
+    pending_pointer_motion: PendingPointerMotion,
+    metrics: BackendMetrics,
+}
+
+#[derive(Default)]
+struct PendingPointerMotion {
+    absolute: Option<(f32, f32)>,
+    relative_dx: f32,
+    relative_dy: f32,
+    pending: bool,
+}
+
+#[derive(Default)]
+struct BackendMetrics {
+    next_report: Option<Instant>,
+    full_frames: u64,
+    cursor_frames: u64,
+    input_events: u64,
+    coalesced_pointer_events: u64,
+    draw_time: Duration,
+    render_time: Duration,
+    attach_time: Duration,
+    commit_time: Duration,
 }
 
 impl<A> MochiOsBackend<A>
@@ -191,6 +215,8 @@ where
             cursor_image: None,
             cursor_dirty: None,
             clear_color: Color::BLACK,
+            pending_pointer_motion: PendingPointerMotion::default(),
+            metrics: BackendMetrics::default(),
         }
     }
 
@@ -236,7 +262,10 @@ where
             let mut handled_work = false;
 
             while let Some((len, event)) = try_recv_event()? {
-                self.handle_event_message(len, event, &window)?;
+                self.handle_or_queue_event_message(len, event, &window)?;
+                handled_work = true;
+            }
+            if self.flush_pending_pointer_motion(&window) {
                 handled_work = true;
             }
 
@@ -251,11 +280,14 @@ where
                     self.font_system = Some(create_font_system());
                 }
                 display_list.clear();
+                let draw_start = Instant::now();
                 let mut dirty_bounds = self.app.draw(window.viewport(), &mut display_list);
+                self.metrics.draw_time += draw_start.elapsed();
                 if let Some(cursor_rect) = self.current_cursor_rect(window.viewport()) {
                     dirty_bounds = dirty_bounds.union(cursor_rect);
                 }
                 self.cursor_dirty = None;
+                let render_start = Instant::now();
                 let clear_color = render_display_list(
                     window.viewport(),
                     dirty_bounds,
@@ -267,11 +299,13 @@ where
                     &mut self.text_layout_cache,
                     &mut self.pixmap,
                 )?;
+                self.metrics.render_time += render_start.elapsed();
                 self.clear_color = clear_color;
                 let pixmap = self
                     .pixmap
                     .as_ref()
                     .ok_or(MochiOsBackendError::InvalidWindowSize)?;
+                let attach_start = Instant::now();
                 attach_buffer(
                     compositor,
                     token,
@@ -284,13 +318,19 @@ where
                     dirty_bounds,
                     self.cursor_blit(),
                 )?;
+                self.metrics.attach_time += attach_start.elapsed();
+                let commit_start = Instant::now();
                 damage_token_request(compositor, token, window.viewport(), dirty_bounds)?;
                 simple_token_request(compositor, OP_COMMIT, token)?;
+                self.metrics.commit_time += commit_start.elapsed();
+                self.metrics.full_frames = self.metrics.full_frames.saturating_add(1);
+                self.report_metrics_if_due();
                 handled_work = true;
             } else if let Some(dirty_bounds) = self.cursor_dirty.take() {
                 if let (Some(pixmap), Some(_cursor)) =
                     (self.pixmap.as_ref(), self.cursor_image.as_ref())
                 {
+                    let attach_start = Instant::now();
                     attach_buffer(
                         compositor,
                         token,
@@ -303,8 +343,13 @@ where
                         dirty_bounds,
                         self.cursor_blit(),
                     )?;
+                    self.metrics.attach_time += attach_start.elapsed();
+                    let commit_start = Instant::now();
                     damage_token_request(compositor, token, window.viewport(), dirty_bounds)?;
                     simple_token_request(compositor, OP_COMMIT, token)?;
+                    self.metrics.commit_time += commit_start.elapsed();
+                    self.metrics.cursor_frames = self.metrics.cursor_frames.saturating_add(1);
+                    self.report_metrics_if_due();
                     handled_work = true;
                 }
             }
@@ -332,6 +377,83 @@ where
         }
 
         self.handle_compositor_event(event, window)
+    }
+
+    fn handle_or_queue_event_message(
+        &mut self,
+        len: usize,
+        event: [u8; 32],
+        window: &MochiOsWindow,
+    ) -> Result<(), MochiOsBackendError> {
+        if self.direct_input && len == INPUT_EVENT_SIZE && self.queue_pointer_motion(event) {
+            self.metrics.input_events = self.metrics.input_events.saturating_add(1);
+            self.metrics.coalesced_pointer_events =
+                self.metrics.coalesced_pointer_events.saturating_add(1);
+            return Ok(());
+        }
+
+        self.flush_pending_pointer_motion(window);
+        self.metrics.input_events = self.metrics.input_events.saturating_add(1);
+        self.handle_event_message(len, event, window)
+    }
+
+    fn queue_pointer_motion(&mut self, event: [u8; 32]) -> bool {
+        let kind = u16::from_le_bytes([event[0], event[1]]);
+        match kind {
+            INPUT_EVENT_KIND_POINTER_MOVE => {
+                let dx = i32::from_le_bytes([event[12], event[13], event[14], event[15]]) as f32;
+                let dy = i32::from_le_bytes([event[16], event[17], event[18], event[19]]) as f32;
+                self.pending_pointer_motion.relative_dx += dx;
+                self.pending_pointer_motion.relative_dy += dy;
+                self.pending_pointer_motion.pending = true;
+                true
+            }
+            INPUT_EVENT_KIND_POINTER_ABSOLUTE => {
+                let raw_x = i32::from_le_bytes([event[12], event[13], event[14], event[15]])
+                    .clamp(0, 32_767) as f32;
+                let raw_y = i32::from_le_bytes([event[16], event[17], event[18], event[19]])
+                    .clamp(0, 32_767) as f32;
+                self.pending_pointer_motion.absolute = Some((raw_x, raw_y));
+                self.pending_pointer_motion.relative_dx = 0.0;
+                self.pending_pointer_motion.relative_dy = 0.0;
+                self.pending_pointer_motion.pending = true;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn flush_pending_pointer_motion(&mut self, window: &MochiOsWindow) -> bool {
+        if !self.pending_pointer_motion.pending {
+            return false;
+        }
+
+        let previous = self.current_cursor_rect(window.viewport());
+        let bounds = window.viewport().logical_bounds();
+        if let Some((raw_x, raw_y)) = self.pending_pointer_motion.absolute.take() {
+            self.pointer_x = bounds.origin.x + (raw_x / 32_767.0) * bounds.size.width;
+            self.pointer_y = bounds.origin.y + (raw_y / 32_767.0) * bounds.size.height;
+        }
+        let max_x = (bounds.origin.x + bounds.size.width).max(bounds.origin.x);
+        let max_y = (bounds.origin.y + bounds.size.height).max(bounds.origin.y);
+        self.pointer_x = (self.pointer_x + self.pending_pointer_motion.relative_dx)
+            .clamp(bounds.origin.x, max_x);
+        self.pointer_y = (self.pointer_y + self.pending_pointer_motion.relative_dy)
+            .clamp(bounds.origin.y, max_y);
+
+        self.pending_pointer_motion.relative_dx = 0.0;
+        self.pending_pointer_motion.relative_dy = 0.0;
+        self.pending_pointer_motion.pending = false;
+
+        self.app.handle_event(
+            PlatformEvent::PointerMoved {
+                x: self.pointer_x,
+                y: self.pointer_y,
+            },
+            window,
+        );
+        self.mark_cursor_dirty(window.viewport(), previous);
+        true
     }
 
     fn handle_input_event(&mut self, event: [u8; 32], window: &MochiOsWindow) -> bool {
@@ -397,6 +519,39 @@ where
             }
             _ => false,
         }
+    }
+
+    fn report_metrics_if_due(&mut self) {
+        let now = Instant::now();
+        let next_report = self
+            .metrics
+            .next_report
+            .get_or_insert_with(|| now + METRICS_INTERVAL);
+        if now < *next_report {
+            return;
+        }
+
+        eprintln!(
+            "viewkit/mochios stats: full={} cursor={} input={} coalesced={} draw={}ms render={}ms attach={}ms commit={}ms",
+            self.metrics.full_frames,
+            self.metrics.cursor_frames,
+            self.metrics.input_events,
+            self.metrics.coalesced_pointer_events,
+            self.metrics.draw_time.as_millis(),
+            self.metrics.render_time.as_millis(),
+            self.metrics.attach_time.as_millis(),
+            self.metrics.commit_time.as_millis(),
+        );
+
+        self.metrics.full_frames = 0;
+        self.metrics.cursor_frames = 0;
+        self.metrics.input_events = 0;
+        self.metrics.coalesced_pointer_events = 0;
+        self.metrics.draw_time = Duration::ZERO;
+        self.metrics.render_time = Duration::ZERO;
+        self.metrics.attach_time = Duration::ZERO;
+        self.metrics.commit_time = Duration::ZERO;
+        self.metrics.next_report = Some(now + METRICS_INTERVAL);
     }
 
     fn current_cursor_rect(&self, viewport: Viewport) -> Option<Rect> {
@@ -1061,7 +1216,8 @@ fn wait_for_event<A: PlatformApplication>(
     backend: &mut MochiOsBackend<A>,
 ) -> Result<(), MochiOsBackendError> {
     if let Some((len, event)) = read_event_blocking(endpoint)? {
-        backend.handle_event_message(len, event, window)?;
+        backend.handle_or_queue_event_message(len, event, window)?;
+        backend.flush_pending_pointer_motion(window);
     }
     Ok(())
 }
@@ -1073,7 +1229,8 @@ fn wait_until_deadline<A: PlatformApplication>(
 ) -> Result<bool, MochiOsBackendError> {
     loop {
         if let Some((len, event)) = try_recv_event()? {
-            backend.handle_event_message(len, event, window)?;
+            backend.handle_or_queue_event_message(len, event, window)?;
+            backend.flush_pending_pointer_motion(window);
             return Ok(true);
         }
         if Instant::now() >= deadline {
