@@ -8,11 +8,11 @@ use cosmic_text::{
 };
 use mochi_user_syscall as syscall;
 use tiny_skia::{
-    Color as SkiaColor, FillRule, Mask, Paint, Path, PathBuilder, Pixmap, Rect as SkiaRect, Stroke,
-    Transform,
+    Color as SkiaColor, FillRule, FilterQuality, Mask, Paint, Path, PathBuilder, Pixmap,
+    PixmapPaint, Rect as SkiaRect, Stroke, Transform,
 };
 
-use crate::draw_command::{DisplayList, DrawCommand, TextCommand};
+use crate::draw_command::{DisplayList, DrawCommand, SvgCommand, TextCommand};
 use crate::font::create_font_system;
 use crate::geometry::Rect;
 use crate::platform::{
@@ -24,6 +24,7 @@ use crate::theme::Color;
 
 const COMPOSITOR_SERVICE_NAME: &str = "compositor.service";
 const DISPLAY_SERVICE_NAME: &str = "display.driver";
+const INPUT_SERVICE_NAME: &str = "input.service";
 const WINDOW_OVERLAY_CAPABILITY: &str = "window.overlay";
 const CAPABILITY_PROMPT_OPCODE: u32 = 0x4350_5251;
 const DISPLAY_GET_INFO_OPCODE: u32 = 1;
@@ -44,6 +45,11 @@ const EVENT_KEY: u32 = 6;
 const EVENT_FOCUS_GAINED: u32 = 8;
 const EVENT_FOCUS_LOST: u32 = 9;
 const EVENT_FRAME_DONE: u32 = 10;
+const INPUT_SUBSCRIBE_OPCODE: u32 = 0x5355_4253;
+const INPUT_EVENT_SIZE: usize = 32;
+const INPUT_EVENT_KIND_POINTER_MOVE: u16 = 2;
+const INPUT_EVENT_KIND_POINTER_BUTTON: u16 = 3;
+const INPUT_EVENT_KIND_POINTER_ABSOLUTE: u16 = 5;
 const KEY_BACKSPACE: u16 = 2;
 const KEY_TAB: u16 = 3;
 const KEY_ENTER: u16 = 4;
@@ -55,9 +61,11 @@ const KEY_LEFT: u16 = 82;
 const KEY_RIGHT: u16 = 83;
 const KEY_PAGE_UP: u16 = 86;
 const KEY_PAGE_DOWN: u16 = 87;
-const INPUT_FLAG_PRESS: u32 = 1 << 0;
-const INPUT_FLAG_RELEASE: u32 = 1 << 1;
+const INPUT_FLAG_PRESS: u16 = 1 << 0;
+const INPUT_FLAG_RELEASE: u16 = 1 << 1;
 const TEXT_LAYOUT_CACHE_CAPACITY: usize = 1024;
+const SVG_SMALL_RENDER_LIMIT: f32 = 256.0;
+const SVG_SMALL_RENDER_SUPERSAMPLE: f32 = 2.0;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct TextLayoutKey {
@@ -108,10 +116,13 @@ const fn alignment_key(alignment: crate::typography::TextAlignment) -> u8 {
 static mut CREATE_SURFACE_REQ: [u8; 24] = [0; 24];
 static mut ATTACH_BUFFER_REQ: [u8; 28] = [0; 28];
 static mut TOKEN_REQ: [u8; 12] = [0; 12];
+static mut DAMAGE_REQ: [u8; 28] = [0; 28];
 static mut IPC_REPLY: [u8; 16] = [0; 16];
 static mut EVENT_BUF: [u8; 32] = [0; 32];
 static mut DISPLAY_REQ: [u8; 20] = [0; 20];
 static mut DISPLAY_REPLY: [u8; 32] = [0; 32];
+static mut INPUT_SUBSCRIBE_REQ: [u8; 16] = [0; 16];
+static mut INPUT_SUBSCRIBE_REPLY: [u8; 1] = [0; 1];
 
 #[derive(Debug, thiserror::Error)]
 pub enum MochiOsBackendError {
@@ -217,6 +228,9 @@ where
     swash_cache: SwashCache,
     text_layout_cache: HashMap<TextLayoutKey, Buffer>,
     pixmap: Option<Pixmap>,
+    direct_input: bool,
+    pointer_x: f32,
+    pointer_y: f32,
 }
 
 impl<A> MochiOsBackend<A>
@@ -232,6 +246,9 @@ where
             swash_cache: SwashCache::new(),
             text_layout_cache: HashMap::new(),
             pixmap: None,
+            direct_input: false,
+            pointer_x: 0.0,
+            pointer_y: 0.0,
         }
     }
 
@@ -256,6 +273,9 @@ where
         let window = MochiOsWindow::new(viewport);
         let token = create_surface(compositor, event_endpoint, size.0, size.1)?;
         let mut shared_buffer = SharedBuffer::new(size.0 as usize, size.1 as usize)?;
+        self.pointer_x = (viewport.logical_size.width / 2.0).max(0.0);
+        self.pointer_y = (viewport.logical_size.height / 2.0).max(0.0);
+        self.direct_input = self.config.fullscreen && subscribe_input_events(event_endpoint);
 
         self.app
             .handle_event(PlatformEvent::Resumed { viewport }, &window);
@@ -266,8 +286,8 @@ where
         loop {
             let mut handled_work = false;
 
-            while let Some(event) = try_recv_event()? {
-                self.handle_compositor_event(event, &window)?;
+            while let Some((len, event)) = try_recv_event()? {
+                self.handle_event_message(len, event, &window)?;
                 handled_work = true;
             }
 
@@ -281,9 +301,10 @@ where
                     self.font_system = Some(create_font_system());
                 }
                 display_list.clear();
-                let _ = self.app.draw(window.viewport(), &mut display_list);
+                let dirty_bounds = self.app.draw(window.viewport(), &mut display_list);
                 let clear_color = render_display_list(
                     window.viewport(),
+                    dirty_bounds,
                     &display_list,
                     self.font_system
                         .as_mut()
@@ -304,8 +325,10 @@ where
                     pixmap,
                     clear_color,
                     &mut shared_buffer,
+                    window.viewport(),
+                    dirty_bounds,
                 )?;
-                simple_token_request(compositor, OP_DAMAGE, token)?;
+                damage_token_request(compositor, token, window.viewport(), dirty_bounds)?;
                 simple_token_request(compositor, OP_COMMIT, token)?;
                 handled_work = true;
             }
@@ -319,6 +342,80 @@ where
                     wait_for_event(event_endpoint, &window, &mut self)?;
                 }
             }
+        }
+    }
+
+    fn handle_event_message(
+        &mut self,
+        len: usize,
+        event: [u8; 32],
+        window: &MochiOsWindow,
+    ) -> Result<(), MochiOsBackendError> {
+        if self.direct_input && len == INPUT_EVENT_SIZE && self.handle_input_event(event, window) {
+            return Ok(());
+        }
+
+        self.handle_compositor_event(event, window)
+    }
+
+    fn handle_input_event(&mut self, event: [u8; 32], window: &MochiOsWindow) -> bool {
+        let kind = u16::from_le_bytes([event[0], event[1]]);
+        match kind {
+            INPUT_EVENT_KIND_POINTER_MOVE => {
+                let dx = i32::from_le_bytes([event[12], event[13], event[14], event[15]]) as f32;
+                let dy = i32::from_le_bytes([event[16], event[17], event[18], event[19]]) as f32;
+                let bounds = window.viewport().logical_bounds();
+                let max_x = (bounds.origin.x + bounds.size.width).max(bounds.origin.x);
+                let max_y = (bounds.origin.y + bounds.size.height).max(bounds.origin.y);
+                self.pointer_x = (self.pointer_x + dx).clamp(bounds.origin.x, max_x);
+                self.pointer_y = (self.pointer_y + dy).clamp(bounds.origin.y, max_y);
+                self.app.handle_event(
+                    PlatformEvent::PointerMoved {
+                        x: self.pointer_x,
+                        y: self.pointer_y,
+                    },
+                    window,
+                );
+                true
+            }
+            INPUT_EVENT_KIND_POINTER_ABSOLUTE => {
+                let raw_x = i32::from_le_bytes([event[12], event[13], event[14], event[15]])
+                    .clamp(0, 32_767) as f32;
+                let raw_y = i32::from_le_bytes([event[16], event[17], event[18], event[19]])
+                    .clamp(0, 32_767) as f32;
+                let bounds = window.viewport().logical_bounds();
+                self.pointer_x = bounds.origin.x + (raw_x / 32_767.0) * bounds.size.width;
+                self.pointer_y = bounds.origin.y + (raw_y / 32_767.0) * bounds.size.height;
+                self.app.handle_event(
+                    PlatformEvent::PointerMoved {
+                        x: self.pointer_x,
+                        y: self.pointer_y,
+                    },
+                    window,
+                );
+                true
+            }
+            INPUT_EVENT_KIND_POINTER_BUTTON => {
+                let flags = u16::from_le_bytes([event[2], event[3]]);
+                let detail = u16::from_le_bytes([event[6], event[7]]);
+                let button = match detail {
+                    1 => PointerButton::Primary,
+                    2 => PointerButton::Secondary,
+                    3 => PointerButton::Middle,
+                    other => PointerButton::Other(other),
+                };
+                let state = if flags & INPUT_FLAG_PRESS != 0 {
+                    ButtonState::Pressed
+                } else if flags & INPUT_FLAG_RELEASE != 0 {
+                    ButtonState::Released
+                } else {
+                    return true;
+                };
+                self.app
+                    .handle_event(PlatformEvent::PointerButton { button, state }, window);
+                true
+            }
+            _ => false,
         }
     }
 
@@ -354,12 +451,12 @@ where
                     3 => PointerButton::Middle,
                     other => PointerButton::Other(other),
                 };
-                let state = if flags & INPUT_FLAG_PRESS != 0 {
+                let state = if flags & u32::from(INPUT_FLAG_PRESS) != 0 {
                     if !self.pressed_buttons.contains(&button_id) {
                         self.pressed_buttons.push(button_id);
                     }
                     ButtonState::Pressed
-                } else if flags & INPUT_FLAG_RELEASE != 0 {
+                } else if flags & u32::from(INPUT_FLAG_RELEASE) != 0 {
                     if let Some(pos) = self
                         .pressed_buttons
                         .iter()
@@ -387,9 +484,7 @@ where
             EVENT_FOCUS_LOST => {
                 self.app.handle_event(PlatformEvent::Focused(false), window);
             }
-            EVENT_FRAME_DONE => {
-                window.request_redraw();
-            }
+            EVENT_FRAME_DONE => {}
             _ => {}
         }
 
@@ -542,6 +637,37 @@ fn find_display_driver() -> Result<u64, MochiOsBackendError> {
         let _ = syscall::call0(syscall::SyscallNumber::ThreadYield);
     }
     Err(MochiOsBackendError::InvalidReply)
+}
+
+fn find_input_service() -> Result<u64, MochiOsBackendError> {
+    let name = INPUT_SERVICE_NAME.as_bytes();
+    for _ in 0..64 {
+        let tid = syscall_result(syscall::call2(
+            syscall::SyscallNumber::FindProcessByName,
+            name.as_ptr() as u64,
+            name.len() as u64,
+        ))?;
+        if tid != 0 {
+            return Ok(tid);
+        }
+        let _ = syscall::call0(syscall::SyscallNumber::ThreadYield);
+    }
+    Err(MochiOsBackendError::InvalidReply)
+}
+
+fn subscribe_input_events(endpoint: u64) -> bool {
+    let Ok(input) = find_input_service() else {
+        return false;
+    };
+    let request = core::ptr::addr_of_mut!(INPUT_SUBSCRIBE_REQ).cast::<u8>();
+    let reply = core::ptr::addr_of_mut!(INPUT_SUBSCRIBE_REPLY).cast::<u8>();
+    unsafe {
+        zero_raw(request, 16);
+        put_u32_raw(request, 0, INPUT_SUBSCRIBE_OPCODE);
+        put_u64_raw(request, 8, endpoint);
+        zero_raw(reply, 1);
+    }
+    matches!(ipc_call_raw(input, request, 16, reply, 1), Ok(1))
 }
 
 fn require_window_overlay_capability() -> Result<(), MochiOsBackendError> {
@@ -724,6 +850,15 @@ fn send_pages(dest: u64, page_count: usize, local_base: u64) -> Result<(), Mochi
 struct SharedBuffer {
     virt: u64,
     byte_capacity: usize,
+    sent_pages: bool,
+}
+
+#[derive(Clone, Copy)]
+struct PhysicalDirtyRect {
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
 }
 
 impl SharedBuffer {
@@ -747,6 +882,7 @@ impl SharedBuffer {
         Ok(Self {
             virt,
             byte_capacity,
+            sent_pages: false,
         })
     }
 
@@ -755,6 +891,7 @@ impl SharedBuffer {
         compositor: u64,
         pixmap: &Pixmap,
         background: Color,
+        dirty_rect: PhysicalDirtyRect,
     ) -> Result<(), MochiOsBackendError> {
         let pixel_count = (pixmap.width() as usize)
             .checked_mul(pixmap.height() as usize)
@@ -767,30 +904,73 @@ impl SharedBuffer {
         }
         let dst =
             unsafe { std::slice::from_raw_parts_mut(self.virt as *mut u8, self.byte_capacity) };
-        for (pixel, out) in pixmap
-            .data()
-            .chunks_exact(4)
-            .zip(dst[..bytes_len].chunks_exact_mut(4))
-        {
-            let alpha = pixel[3] as u32;
-            let inv_alpha = 255_u32.saturating_sub(alpha);
 
-            // tiny-skia stores premultiplied RGBA. The compositor surface is XRGB,
-            // so each pixel is flattened into the configured clear color.
-            let red = pixel[0] as u32 + (background.red as u32 * inv_alpha + 127) / 255;
-            let green = pixel[1] as u32 + (background.green as u32 * inv_alpha + 127) / 255;
-            let blue = pixel[2] as u32 + (background.blue as u32 * inv_alpha + 127) / 255;
-            let value = 0xff00_0000 | (red.min(255) << 16) | (green.min(255) << 8) | blue.min(255);
-
-            out.copy_from_slice(&value.to_le_bytes());
+        let pixmap_width = pixmap.width() as usize;
+        let pixmap_height = pixmap.height() as usize;
+        let copy_rect = if self.sent_pages {
+            dirty_rect
+        } else {
+            PhysicalDirtyRect {
+                x: 0,
+                y: 0,
+                width: pixmap_width,
+                height: pixmap_height,
+            }
+        };
+        let right = copy_rect
+            .x
+            .saturating_add(copy_rect.width)
+            .min(pixmap_width);
+        let bottom = copy_rect
+            .y
+            .saturating_add(copy_rect.height)
+            .min(pixmap_height);
+        let src = pixmap.data();
+        for y in copy_rect.y..bottom {
+            let Some(row_start) = y.checked_mul(pixmap_width) else {
+                return Err(MochiOsBackendError::ArithmeticOverflow);
+            };
+            for x in copy_rect.x..right {
+                let Some(pixel_index) = row_start.checked_add(x) else {
+                    return Err(MochiOsBackendError::ArithmeticOverflow);
+                };
+                let Some(byte_index) = pixel_index.checked_mul(4) else {
+                    return Err(MochiOsBackendError::ArithmeticOverflow);
+                };
+                let Some(pixel) = src.get(byte_index..byte_index + 4) else {
+                    return Err(MochiOsBackendError::InvalidWindowSize);
+                };
+                let Some(out) = dst.get_mut(byte_index..byte_index + 4) else {
+                    return Err(MochiOsBackendError::InvalidWindowSize);
+                };
+                let value = flatten_premultiplied_pixel(pixel, background);
+                out.copy_from_slice(&value.to_le_bytes());
+            }
         }
         let page_count = bytes_len
             .checked_add(PAGE_SIZE - 1)
             .map(|len| len / PAGE_SIZE)
             .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
+        if self.sent_pages {
+            return Ok(());
+        }
         send_pages(compositor, page_count, self.virt)?;
+        self.sent_pages = true;
         Ok(())
     }
+}
+
+fn flatten_premultiplied_pixel(pixel: &[u8], background: Color) -> u32 {
+    let alpha = pixel[3] as u32;
+    let inv_alpha = 255_u32.saturating_sub(alpha);
+
+    // tiny-skia stores premultiplied RGBA. The compositor surface is XRGB,
+    // so each pixel is flattened into the configured clear color.
+    let red = pixel[0] as u32 + (background.red as u32 * inv_alpha + 127) / 255;
+    let green = pixel[1] as u32 + (background.green as u32 * inv_alpha + 127) / 255;
+    let blue = pixel[2] as u32 + (background.blue as u32 * inv_alpha + 127) / 255;
+
+    0xff00_0000 | (red.min(255) << 16) | (green.min(255) << 8) | blue.min(255)
 }
 
 unsafe fn zero_raw(ptr: *mut u8, len: usize) {
@@ -847,7 +1027,7 @@ fn status_from_raw(ptr: *const u8, len: usize) -> Result<(), MochiOsBackendError
     }
 }
 
-fn try_recv_event() -> Result<Option<[u8; 32]>, MochiOsBackendError> {
+fn try_recv_event() -> Result<Option<(usize, [u8; 32])>, MochiOsBackendError> {
     let event = core::ptr::addr_of_mut!(EVENT_BUF).cast::<u8>();
     let len = match ipc_wait_raw(0, event, 32) {
         Ok(len) => len,
@@ -862,7 +1042,7 @@ fn try_recv_event() -> Result<Option<[u8; 32]>, MochiOsBackendError> {
     unsafe {
         core::ptr::copy_nonoverlapping(event, out.as_mut_ptr(), copy_len);
     }
-    Ok(Some(out))
+    Ok(Some((len, out)))
 }
 
 fn wait_for_event<A: PlatformApplication>(
@@ -870,8 +1050,8 @@ fn wait_for_event<A: PlatformApplication>(
     window: &MochiOsWindow,
     backend: &mut MochiOsBackend<A>,
 ) -> Result<(), MochiOsBackendError> {
-    if let Some(event) = read_event_blocking(endpoint)? {
-        backend.handle_compositor_event(event, window)?;
+    if let Some((len, event)) = read_event_blocking(endpoint)? {
+        backend.handle_event_message(len, event, window)?;
     }
     Ok(())
 }
@@ -882,8 +1062,8 @@ fn wait_until_deadline<A: PlatformApplication>(
     backend: &mut MochiOsBackend<A>,
 ) -> Result<bool, MochiOsBackendError> {
     loop {
-        if let Some(event) = try_recv_event()? {
-            backend.handle_compositor_event(event, window)?;
+        if let Some((len, event)) = try_recv_event()? {
+            backend.handle_event_message(len, event, window)?;
             return Ok(true);
         }
         if Instant::now() >= deadline {
@@ -893,7 +1073,7 @@ fn wait_until_deadline<A: PlatformApplication>(
     }
 }
 
-fn read_event_blocking(endpoint: u64) -> Result<Option<[u8; 32]>, MochiOsBackendError> {
+fn read_event_blocking(endpoint: u64) -> Result<Option<(usize, [u8; 32])>, MochiOsBackendError> {
     let event = core::ptr::addr_of_mut!(EVENT_BUF).cast::<u8>();
     let len = match ipc_wait_raw(endpoint, event, 32) {
         Ok(len) => len,
@@ -908,7 +1088,7 @@ fn read_event_blocking(endpoint: u64) -> Result<Option<[u8; 32]>, MochiOsBackend
     unsafe {
         core::ptr::copy_nonoverlapping(event, out.as_mut_ptr(), copy_len);
     }
-    Ok(Some(out))
+    Ok(Some((len, out)))
 }
 
 fn create_surface(
@@ -944,6 +1124,8 @@ fn attach_buffer(
     pixmap: &Pixmap,
     background: Color,
     shared_buffer: &mut SharedBuffer,
+    viewport: Viewport,
+    dirty_bounds: Rect,
 ) -> Result<(), MochiOsBackendError> {
     let pixel_count = width
         .checked_mul(height)
@@ -971,7 +1153,8 @@ fn attach_buffer(
     }
     let len = ipc_call_raw(compositor, request, 28, reply, 16)?;
     status_from_raw(reply, len)?;
-    shared_buffer.send_pixmap_to(compositor, pixmap, background)
+    let dirty_rect = physical_dirty_rect(viewport, dirty_bounds);
+    shared_buffer.send_pixmap_to(compositor, pixmap, background, dirty_rect)
 }
 
 fn simple_token_request(
@@ -991,8 +1174,58 @@ fn simple_token_request(
     status_from_raw(reply, len)
 }
 
+fn physical_dirty_rect(viewport: Viewport, dirty_bounds: Rect) -> PhysicalDirtyRect {
+    let viewport_bounds = viewport.logical_bounds();
+    let dirty = dirty_bounds
+        .intersection(viewport_bounds)
+        .unwrap_or(viewport_bounds);
+    let scale = valid_scale_factor(viewport.scale_factor);
+    let x = (dirty.origin.x * scale).floor().max(0.0);
+    let y = (dirty.origin.y * scale).floor().max(0.0);
+    let right = ((dirty.origin.x + dirty.size.width) * scale)
+        .ceil()
+        .min(viewport.physical_width as f32);
+    let bottom = ((dirty.origin.y + dirty.size.height) * scale)
+        .ceil()
+        .min(viewport.physical_height as f32);
+    let width = (right - x).max(1.0);
+    let height = (bottom - y).max(1.0);
+
+    PhysicalDirtyRect {
+        x: x as usize,
+        y: y as usize,
+        width: width as usize,
+        height: height as usize,
+    }
+}
+
+fn damage_token_request(
+    compositor: u64,
+    token: u64,
+    viewport: Viewport,
+    dirty_bounds: Rect,
+) -> Result<(), MochiOsBackendError> {
+    let dirty = physical_dirty_rect(viewport, dirty_bounds);
+
+    let request = core::ptr::addr_of_mut!(DAMAGE_REQ).cast::<u8>();
+    let reply = core::ptr::addr_of_mut!(IPC_REPLY).cast::<u8>();
+    unsafe {
+        zero_raw(request, 28);
+        put_u32_raw(request, 0, OP_DAMAGE);
+        put_u64_raw(request, 4, token);
+        put_u32_raw(request, 12, dirty.x as u32);
+        put_u32_raw(request, 16, dirty.y as u32);
+        put_u32_raw(request, 20, dirty.width as u32);
+        put_u32_raw(request, 24, dirty.height as u32);
+        zero_raw(reply, 16);
+    }
+    let len = ipc_call_raw(compositor, request, 28, reply, 16)?;
+    status_from_raw(reply, len)
+}
+
 fn render_display_list(
     viewport: Viewport,
+    dirty_bounds: Rect,
     display_list: &DisplayList,
     font_system: &mut FontSystem,
     swash_cache: &mut SwashCache,
@@ -1002,24 +1235,28 @@ fn render_display_list(
     let width = viewport.physical_width;
     let height = viewport.physical_height;
     let pixmap = reusable_pixmap(pixmap, width, height)?;
-    pixmap.fill(SkiaColor::from_rgba8(0, 0, 0, 0));
     let mut clear_color = Color::BLACK;
 
     let scale = valid_scale_factor(viewport.scale_factor);
     let transform = Transform::from_scale(scale, scale);
     let bounds = viewport.logical_bounds();
-    let mut clip_stack = vec![create_clip_mask(bounds, None, width, height, transform)?];
+    let dirty_bounds = dirty_bounds.intersection(bounds).unwrap_or(bounds);
+    let mut clip_stack = vec![create_clip_mask(
+        dirty_bounds,
+        None,
+        width,
+        height,
+        transform,
+    )?];
 
     for command in display_list.commands() {
         match command {
             DrawCommand::Clear { color } => {
                 clear_color = *color;
-                pixmap.fill(SkiaColor::from_rgba8(
-                    color.red,
-                    color.green,
-                    color.blue,
-                    color.alpha,
-                ));
+                if let Some(rect) = to_skia_rect(dirty_bounds) {
+                    let paint = solid_paint(*color);
+                    pixmap.fill_rect(rect, &paint, transform, clip_stack.last());
+                }
             }
             DrawCommand::FillRect { rect, color } => {
                 let Some(rect) = to_skia_rect(*rect) else {
@@ -1152,7 +1389,13 @@ fn render_display_list(
                     clip_stack.last(),
                 );
             }
-            DrawCommand::DrawImage { .. } | DrawCommand::DrawSvg { .. } => {}
+            DrawCommand::DrawSvg { command } => {
+                if command.bounds.intersection(bounds).is_none() {
+                    continue;
+                }
+                draw_svg_command(pixmap, command, scale, clip_stack.last())?;
+            }
+            DrawCommand::DrawImage { .. } => {}
         }
     }
 
@@ -1181,6 +1424,124 @@ fn valid_scale_factor(scale_factor: f64) -> f32 {
     } else {
         1.0
     }
+}
+
+fn draw_svg_command(
+    target: &mut Pixmap,
+    command: &SvgCommand,
+    display_scale: f32,
+    clip: Option<&Mask>,
+) -> Result<(), MochiOsBackendError> {
+    let bounds = command.bounds;
+    if !is_valid_image_bounds(bounds) {
+        return Ok(());
+    }
+
+    let svg_width = command.svg.width();
+    let svg_height = command.svg.height();
+    if !svg_width.is_finite() || !svg_height.is_finite() || svg_width <= 0.0 || svg_height <= 0.0 {
+        return Ok(());
+    }
+
+    let destination_width = bounds.size.width * display_scale;
+    let destination_height = bounds.size.height * display_scale;
+    if !destination_width.is_finite()
+        || !destination_height.is_finite()
+        || destination_width <= 0.0
+        || destination_height <= 0.0
+    {
+        return Ok(());
+    }
+
+    let raster_width = destination_width.ceil() as u32;
+    let raster_height = destination_height.ceil() as u32;
+    if raster_width == 0 || raster_height == 0 {
+        return Ok(());
+    }
+
+    let mut raster =
+        Pixmap::new(raster_width, raster_height).ok_or(MochiOsBackendError::InvalidWindowSize)?;
+    let render_transform = Transform::from_scale(
+        raster_width as f32 / svg_width,
+        raster_height as f32 / svg_height,
+    );
+    resvg::render(command.svg.tree(), render_transform, &mut raster.as_mut());
+
+    if let Some(tint) = command.tint {
+        tint_svg_pixmap(&mut raster, tint);
+    }
+
+    let translate_x = bounds.origin.x * display_scale;
+    let translate_y = bounds.origin.y * display_scale;
+    if !translate_x.is_finite() || !translate_y.is_finite() {
+        return Ok(());
+    }
+
+    let paint = PixmapPaint {
+        opacity: sanitize_image_opacity(command.opacity),
+        quality: FilterQuality::Bicubic,
+        ..PixmapPaint::default()
+    };
+    target.draw_pixmap(
+        translate_x.round() as i32,
+        translate_y.round() as i32,
+        raster.as_ref(),
+        &paint,
+        Transform::identity(),
+        clip,
+    );
+
+    Ok(())
+}
+
+fn svg_supersample_scale(destination_width: f32, destination_height: f32) -> f32 {
+    if !destination_width.is_finite()
+        || !destination_height.is_finite()
+        || destination_width <= 0.0
+        || destination_height <= 0.0
+    {
+        return 1.0;
+    }
+
+    if destination_width.max(destination_height) <= SVG_SMALL_RENDER_LIMIT {
+        SVG_SMALL_RENDER_SUPERSAMPLE
+    } else {
+        1.0
+    }
+}
+
+fn is_valid_image_bounds(bounds: Rect) -> bool {
+    bounds.origin.x.is_finite()
+        && bounds.origin.y.is_finite()
+        && bounds.size.width.is_finite()
+        && bounds.size.height.is_finite()
+        && bounds.size.width > 0.0
+        && bounds.size.height > 0.0
+}
+
+fn sanitize_image_opacity(opacity: f32) -> f32 {
+    if opacity.is_finite() {
+        opacity.clamp(0.0, 1.0)
+    } else {
+        1.0
+    }
+}
+
+fn tint_svg_pixmap(pixmap: &mut Pixmap, tint: Color) {
+    for pixel in pixmap.data_mut().chunks_exact_mut(4) {
+        let alpha = multiply_channel(pixel[3], tint.alpha);
+
+        pixel[0] = multiply_channel(tint.red, alpha);
+        pixel[1] = multiply_channel(tint.green, alpha);
+        pixel[2] = multiply_channel(tint.blue, alpha);
+        pixel[3] = alpha;
+    }
+}
+
+fn multiply_channel(first: u8, second: u8) -> u8 {
+    let value = u16::from(first) * u16::from(second);
+
+    ((value + 127) / 255) as u8
 }
 
 fn draw_text_command(
