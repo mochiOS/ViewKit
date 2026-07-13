@@ -1,7 +1,7 @@
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::fmt::Write as _;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use cosmic_text::{
     Attrs, Buffer, Color as CosmicColor, Family, FontSystem, Metrics, Shaping, SwashCache, Weight,
@@ -75,8 +75,8 @@ const CURSOR_WIDTH: u32 = 35;
 const CURSOR_HEIGHT: u32 = 60;
 const CURSOR_HOTSPOT_X: f32 = 1.0;
 const CURSOR_HOTSPOT_Y: f32 = 1.0;
-const METRICS_INTERVAL: Duration = Duration::from_secs(1);
-const SLOW_FRAME_THRESHOLD: Duration = Duration::from_millis(32);
+const METRICS_INTERVAL_TICKS: u64 = 500;
+const SLOW_FRAME_THRESHOLD_TICKS: u64 = 16;
 const INITIAL_FRAME_LOGS: u64 = 8;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -188,16 +188,16 @@ struct PendingPointerMotion {
 
 #[derive(Default)]
 struct BackendMetrics {
-    next_report: Option<Instant>,
+    next_report_tick: u64,
     full_frames: u64,
     cursor_frames: u64,
     frame_logs_emitted: u64,
     input_events: u64,
     coalesced_pointer_events: u64,
-    draw_time: Duration,
-    render_time: Duration,
-    attach_time: Duration,
-    commit_time: Duration,
+    draw_cycles: u64,
+    render_cycles: u64,
+    attach_cycles: u64,
+    commit_cycles: u64,
 }
 
 impl<A> MochiOsBackend<A>
@@ -285,16 +285,17 @@ where
                     self.font_system = Some(create_font_system());
                 }
                 display_list.clear();
-                let frame_start = Instant::now();
-                let draw_start = Instant::now();
+                let frame_start = perf_counter();
+                let frame_tick_start = perf_tick();
+                let draw_start = perf_counter();
                 let mut dirty_bounds = self.app.draw(window.viewport(), &mut display_list);
-                let draw_time = draw_start.elapsed();
-                self.metrics.draw_time += draw_time;
+                let draw_cycles = perf_counter_elapsed(draw_start);
+                self.metrics.draw_cycles = self.metrics.draw_cycles.saturating_add(draw_cycles);
                 if let Some(cursor_rect) = self.current_cursor_rect(window.viewport()) {
                     dirty_bounds = dirty_bounds.union(cursor_rect);
                 }
                 self.cursor_dirty = None;
-                let render_start = Instant::now();
+                let render_start = perf_counter();
                 let clear_color = render_display_list(
                     window.viewport(),
                     dirty_bounds,
@@ -306,14 +307,15 @@ where
                     &mut self.text_layout_cache,
                     &mut self.pixmap,
                 )?;
-                let render_time = render_start.elapsed();
-                self.metrics.render_time += render_time;
+                let render_cycles = perf_counter_elapsed(render_start);
+                self.metrics.render_cycles =
+                    self.metrics.render_cycles.saturating_add(render_cycles);
                 self.clear_color = clear_color;
                 let pixmap = self
                     .pixmap
                     .as_ref()
                     .ok_or(MochiOsBackendError::InvalidWindowSize)?;
-                let attach_start = Instant::now();
+                let attach_start = perf_counter();
                 attach_buffer(
                     compositor,
                     token,
@@ -326,21 +328,24 @@ where
                     dirty_bounds,
                     self.cursor_blit(),
                 )?;
-                let attach_time = attach_start.elapsed();
-                self.metrics.attach_time += attach_time;
-                let commit_start = Instant::now();
+                let attach_cycles = perf_counter_elapsed(attach_start);
+                self.metrics.attach_cycles =
+                    self.metrics.attach_cycles.saturating_add(attach_cycles);
+                let commit_start = perf_counter();
                 damage_token_request(compositor, token, window.viewport(), dirty_bounds)?;
                 simple_token_request(compositor, OP_COMMIT, token)?;
-                let commit_time = commit_start.elapsed();
-                self.metrics.commit_time += commit_time;
+                let commit_cycles = perf_counter_elapsed(commit_start);
+                self.metrics.commit_cycles =
+                    self.metrics.commit_cycles.saturating_add(commit_cycles);
                 self.metrics.full_frames = self.metrics.full_frames.saturating_add(1);
                 self.report_frame_timing(
                     "full",
-                    frame_start.elapsed(),
-                    draw_time,
-                    render_time,
-                    attach_time,
-                    commit_time,
+                    perf_counter_elapsed(frame_start),
+                    perf_tick_elapsed(frame_tick_start),
+                    draw_cycles,
+                    render_cycles,
+                    attach_cycles,
+                    commit_cycles,
                     dirty_bounds,
                 );
                 self.report_metrics_if_due();
@@ -349,8 +354,9 @@ where
                 if let (Some(pixmap), Some(_cursor)) =
                     (self.pixmap.as_ref(), self.cursor_image.as_ref())
                 {
-                    let frame_start = Instant::now();
-                    let attach_start = Instant::now();
+                    let frame_start = perf_counter();
+                    let frame_tick_start = perf_tick();
+                    let attach_start = perf_counter();
                     attach_buffer(
                         compositor,
                         token,
@@ -363,21 +369,24 @@ where
                         dirty_bounds,
                         self.cursor_blit(),
                     )?;
-                    let attach_time = attach_start.elapsed();
-                    self.metrics.attach_time += attach_time;
-                    let commit_start = Instant::now();
+                    let attach_cycles = perf_counter_elapsed(attach_start);
+                    self.metrics.attach_cycles =
+                        self.metrics.attach_cycles.saturating_add(attach_cycles);
+                    let commit_start = perf_counter();
                     damage_token_request(compositor, token, window.viewport(), dirty_bounds)?;
                     simple_token_request(compositor, OP_COMMIT, token)?;
-                    let commit_time = commit_start.elapsed();
-                    self.metrics.commit_time += commit_time;
+                    let commit_cycles = perf_counter_elapsed(commit_start);
+                    self.metrics.commit_cycles =
+                        self.metrics.commit_cycles.saturating_add(commit_cycles);
                     self.metrics.cursor_frames = self.metrics.cursor_frames.saturating_add(1);
                     self.report_frame_timing(
                         "cursor",
-                        frame_start.elapsed(),
-                        Duration::ZERO,
-                        Duration::ZERO,
-                        attach_time,
-                        commit_time,
+                        perf_counter_elapsed(frame_start),
+                        perf_tick_elapsed(frame_tick_start),
+                        0,
+                        0,
+                        attach_cycles,
+                        commit_cycles,
                         dirty_bounds,
                     );
                     self.report_metrics_if_due();
@@ -553,27 +562,26 @@ where
     }
 
     fn report_metrics_if_due(&mut self) {
-        let now = Instant::now();
-        let next_report = self
-            .metrics
-            .next_report
-            .get_or_insert_with(|| now + METRICS_INTERVAL);
-        if now < *next_report {
+        let now = perf_tick();
+        if self.metrics.next_report_tick == 0 {
+            self.metrics.next_report_tick = now.saturating_add(METRICS_INTERVAL_TICKS);
+        }
+        if now < self.metrics.next_report_tick {
             return;
         }
 
         let mut line = String::new();
         let _ = write!(
             line,
-            "viewkit/mochios stats: full={} cursor={} input={} coalesced={} draw={}ms render={}ms attach={}ms commit={}ms\n",
+            "viewkit/mochios stats: full={} cursor={} input={} coalesced={} draw={}cy render={}cy attach={}cy commit={}cy\n",
             self.metrics.full_frames,
             self.metrics.cursor_frames,
             self.metrics.input_events,
             self.metrics.coalesced_pointer_events,
-            self.metrics.draw_time.as_millis(),
-            self.metrics.render_time.as_millis(),
-            self.metrics.attach_time.as_millis(),
-            self.metrics.commit_time.as_millis(),
+            self.metrics.draw_cycles,
+            self.metrics.render_cycles,
+            self.metrics.attach_cycles,
+            self.metrics.commit_cycles,
         );
         perf_log(&line);
 
@@ -581,29 +589,30 @@ where
         self.metrics.cursor_frames = 0;
         self.metrics.input_events = 0;
         self.metrics.coalesced_pointer_events = 0;
-        self.metrics.draw_time = Duration::ZERO;
-        self.metrics.render_time = Duration::ZERO;
-        self.metrics.attach_time = Duration::ZERO;
-        self.metrics.commit_time = Duration::ZERO;
-        self.metrics.next_report = Some(now + METRICS_INTERVAL);
+        self.metrics.draw_cycles = 0;
+        self.metrics.render_cycles = 0;
+        self.metrics.attach_cycles = 0;
+        self.metrics.commit_cycles = 0;
+        self.metrics.next_report_tick = now.saturating_add(METRICS_INTERVAL_TICKS);
     }
 
     fn report_frame_timing(
         &mut self,
         kind: &str,
-        total: Duration,
-        draw: Duration,
-        render: Duration,
-        attach: Duration,
-        commit: Duration,
+        total_cycles: u64,
+        total_ticks: u64,
+        draw_cycles: u64,
+        render_cycles: u64,
+        attach_cycles: u64,
+        commit_cycles: u64,
         dirty_bounds: Rect,
     ) {
         let force_initial = self.metrics.frame_logs_emitted < INITIAL_FRAME_LOGS;
-        if !force_initial && total < SLOW_FRAME_THRESHOLD {
+        if !force_initial && total_ticks < SLOW_FRAME_THRESHOLD_TICKS {
             return;
         }
         self.metrics.frame_logs_emitted = self.metrics.frame_logs_emitted.saturating_add(1);
-        let label = if total < SLOW_FRAME_THRESHOLD {
+        let label = if total_ticks < SLOW_FRAME_THRESHOLD_TICKS {
             "frame"
         } else {
             "slow-frame"
@@ -611,14 +620,15 @@ where
         let mut line = String::new();
         let _ = write!(
             line,
-            "viewkit/mochios {} kind={} total={}ms draw={}ms render={}ms attach={}ms commit={}ms dirty=({:.0},{:.0} {:.0}x{:.0})\n",
+            "viewkit/mochios {} kind={} total={}cy ticks={} draw={}cy render={}cy attach={}cy commit={}cy dirty=({:.0},{:.0} {:.0}x{:.0})\n",
             label,
             kind,
-            total.as_millis(),
-            draw.as_millis(),
-            render.as_millis(),
-            attach.as_millis(),
-            commit.as_millis(),
+            total_cycles,
+            total_ticks,
+            draw_cycles,
+            render_cycles,
+            attach_cycles,
+            commit_cycles,
             dirty_bounds.origin.x,
             dirty_bounds.origin.y,
             dirty_bounds.size.width,
@@ -861,6 +871,30 @@ fn perf_log(line: &str) {
         line.as_ptr() as u64,
         line.len() as u64,
     );
+}
+
+fn perf_counter() -> u64 {
+    #[cfg(target_arch = "x86_64")]
+    {
+        // SAFETY: rdtsc is a userspace-readable counter on the current x86_64 target.
+        unsafe { core::arch::x86_64::_rdtsc() }
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        perf_tick()
+    }
+}
+
+fn perf_counter_elapsed(start: u64) -> u64 {
+    perf_counter().saturating_sub(start)
+}
+
+fn perf_tick() -> u64 {
+    syscall::call0(syscall::SyscallNumber::TimeNow).unwrap_or(0)
+}
+
+fn perf_tick_elapsed(start: u64) -> u64 {
+    perf_tick().saturating_sub(start)
 }
 
 fn create_event_endpoint() -> Result<u64, MochiOsBackendError> {
