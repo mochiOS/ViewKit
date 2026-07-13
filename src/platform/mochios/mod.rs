@@ -1,6 +1,5 @@
 use std::cell::Cell;
 use std::collections::HashMap;
-use std::env;
 use std::time::Instant;
 
 use cosmic_text::{
@@ -26,13 +25,13 @@ const COMPOSITOR_SERVICE_NAME: &str = "compositor.service";
 const DISPLAY_SERVICE_NAME: &str = "display.driver";
 const INPUT_SERVICE_NAME: &str = "input.service";
 const WINDOW_OVERLAY_CAPABILITY: &str = "window.overlay";
-const CAPABILITY_PROMPT_OPCODE: u32 = 0x4350_5251;
 const DISPLAY_GET_INFO_OPCODE: u32 = 1;
 const OP_CREATE_SURFACE: u32 = 1;
 const OP_ATTACH_BUFFER: u32 = 2;
 const OP_DAMAGE: u32 = 3;
 const OP_COMMIT: u32 = 4;
 const ROLE_TOPLEVEL: u32 = 1;
+const ROLE_BACKGROUND: u32 = 3;
 const PIXEL_FORMAT_XRGB8888: u32 = 1;
 const PAGE_SIZE: usize = 4096;
 const MAX_SURFACE_EXTENT: u32 = 16_384;
@@ -145,78 +144,6 @@ pub enum MochiOsBackendError {
     InvalidEvent,
 }
 
-#[repr(u32)]
-#[derive(Clone, Copy)]
-enum CapabilityClass {
-    UserGrantable = 1,
-}
-
-#[repr(u32)]
-#[derive(Clone, Copy)]
-enum CapabilityDecision {
-    AllowOnce = 1,
-    AllowForProcess = 2,
-    AllowPersistently = 3,
-    AllowAllUserGrantable = 4,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct CapabilityExecutableIdentity {
-    path_len: u16,
-    reserved: u16,
-    digest: [u8; 32],
-    path: [u8; 256],
-}
-
-impl Default for CapabilityExecutableIdentity {
-    fn default() -> Self {
-        Self {
-            path_len: 0,
-            reserved: 0,
-            digest: [0; 32],
-            path: [0; 256],
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct CapabilityResourceDescriptor {
-    kind: u32,
-    path_len: u16,
-    reserved: u16,
-    path: [u8; 256],
-}
-
-impl Default for CapabilityResourceDescriptor {
-    fn default() -> Self {
-        Self {
-            kind: 0,
-            path_len: 0,
-            reserved: 0,
-            path: [0; 256],
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct CapabilityRequest {
-    opcode: u32,
-    process_id: u64,
-    executable: CapabilityExecutableIdentity,
-    capability_class: CapabilityClass,
-    capability_len: u16,
-    resource: CapabilityResourceDescriptor,
-    reason_len: u16,
-    interactive: u8,
-    decision_scope: u8,
-    reserved0: u16,
-    capability: [u8; 64],
-    reason: [u8; 128],
-}
-
 pub struct MochiOsBackend<A>
 where
     A: PlatformApplication,
@@ -253,10 +180,15 @@ where
     }
 
     pub fn run(mut self) -> Result<(), MochiOsBackendError> {
+        eprintln!(
+            "viewkit/mochios: run begin fullscreen={}",
+            self.config.fullscreen
+        );
         let compositor = find_compositor()?;
         let event_endpoint = create_event_endpoint()?;
         if self.config.fullscreen {
             require_window_overlay_capability()?;
+            eprintln!("viewkit/mochios: window.overlay ok");
         }
         let requested_size = if self.config.fullscreen {
             display_surface_size().unwrap_or_else(|| self.config.size)
@@ -271,7 +203,16 @@ where
         };
         let viewport = Viewport::new(logical_size, size.0, size.1, 1.0);
         let window = MochiOsWindow::new(viewport);
-        let token = create_surface(compositor, event_endpoint, size.0, size.1)?;
+        let role = if self.config.fullscreen {
+            ROLE_BACKGROUND
+        } else {
+            ROLE_TOPLEVEL
+        };
+        let token = create_surface(compositor, event_endpoint, role, size.0, size.1)?;
+        eprintln!(
+            "viewkit/mochios: surface role={} token=0x{:016x} size={}x{}",
+            role, token, size.0, size.1
+        );
         let mut shared_buffer = SharedBuffer::new(size.0 as usize, size.1 as usize)?;
         self.pointer_x = (viewport.logical_size.width / 2.0).max(0.0);
         self.pointer_y = (viewport.logical_size.height / 2.0).max(0.0);
@@ -282,6 +223,7 @@ where
         window.request_redraw();
 
         let mut display_list = DisplayList::new();
+        let mut logged_first_commit = false;
 
         loop {
             let mut handled_work = false;
@@ -330,6 +272,10 @@ where
                 )?;
                 damage_token_request(compositor, token, window.viewport(), dirty_bounds)?;
                 simple_token_request(compositor, OP_COMMIT, token)?;
+                if !logged_first_commit {
+                    eprintln!("viewkit/mochios: first commit done");
+                    logged_first_commit = true;
+                }
                 handled_work = true;
             }
 
@@ -674,15 +620,7 @@ fn require_window_overlay_capability() -> Result<(), MochiOsBackendError> {
     if query_capability(WINDOW_OVERLAY_CAPABILITY) {
         return Ok(());
     }
-    request_capability_from_shell(
-        WINDOW_OVERLAY_CAPABILITY,
-        Some("fullscreen desktop surface"),
-    )?;
-    if query_capability(WINDOW_OVERLAY_CAPABILITY) {
-        Ok(())
-    } else {
-        Err(MochiOsBackendError::Syscall(mochi_user_syscall::EACCES))
-    }
+    Err(MochiOsBackendError::Syscall(mochi_user_syscall::EACCES))
 }
 
 fn query_capability(capability: &str) -> bool {
@@ -695,74 +633,6 @@ fn query_capability(capability: &str) -> bool {
         ),
         Ok(1)
     )
-}
-
-fn request_capability_from_shell(
-    capability: &str,
-    reason: Option<&str>,
-) -> Result<(), MochiOsBackendError> {
-    let prompt_mode = env::var("MOCHI_PROMPT_MODE")
-        .map_err(|_| MochiOsBackendError::Syscall(mochi_user_syscall::EACCES))?;
-    if prompt_mode != "interactive" {
-        return Err(MochiOsBackendError::Syscall(mochi_user_syscall::EACCES));
-    }
-    let shell_endpoint = env::var("MOCHI_SHELL_ENDPOINT")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .filter(|endpoint| *endpoint != 0)
-        .ok_or(MochiOsBackendError::Syscall(mochi_user_syscall::EACCES))?;
-    let executable = env::var("MOCHI_EXECUTABLE_PATH")
-        .or_else(|_| env::args().next().ok_or(env::VarError::NotPresent))
-        .map_err(|_| MochiOsBackendError::Syscall(mochi_user_syscall::EACCES))?;
-    let process_id = syscall_result(syscall::call0(syscall::SyscallNumber::GetPid))?;
-    let exec_bytes = executable.as_bytes();
-    let cap_bytes = capability.as_bytes();
-    let reason_bytes = reason.unwrap_or("").as_bytes();
-    if exec_bytes.len() > 256 || cap_bytes.len() > 64 || reason_bytes.len() > 128 {
-        return Err(MochiOsBackendError::InvalidWindowSize);
-    }
-
-    let mut request = CapabilityRequest {
-        opcode: CAPABILITY_PROMPT_OPCODE,
-        process_id,
-        executable: CapabilityExecutableIdentity::default(),
-        capability_class: CapabilityClass::UserGrantable,
-        capability_len: cap_bytes.len() as u16,
-        resource: CapabilityResourceDescriptor::default(),
-        reason_len: reason_bytes.len() as u16,
-        interactive: 1,
-        decision_scope: 0,
-        reserved0: 0,
-        capability: [0; 64],
-        reason: [0; 128],
-    };
-    request.executable.path_len = exec_bytes.len() as u16;
-    request.executable.path[..exec_bytes.len()].copy_from_slice(exec_bytes);
-    request.capability[..cap_bytes.len()].copy_from_slice(cap_bytes);
-    request.reason[..reason_bytes.len()].copy_from_slice(reason_bytes);
-
-    let mut reply = [0u8; 8];
-    let msg = syscall_result(syscall::call5(
-        syscall::SyscallNumber::IpcCall,
-        shell_endpoint,
-        (&request as *const CapabilityRequest) as u64,
-        core::mem::size_of::<CapabilityRequest>() as u64,
-        reply.as_mut_ptr() as u64,
-        reply.len() as u64,
-    ))?;
-    if (msg & 0xffff_ffff) < 4 {
-        return Err(MochiOsBackendError::InvalidReply);
-    }
-    let decision = u32::from_le_bytes([reply[0], reply[1], reply[2], reply[3]]);
-    if decision == CapabilityDecision::AllowOnce as u32
-        || decision == CapabilityDecision::AllowForProcess as u32
-        || decision == CapabilityDecision::AllowPersistently as u32
-        || decision == CapabilityDecision::AllowAllUserGrantable as u32
-    {
-        Ok(())
-    } else {
-        Err(MochiOsBackendError::Syscall(mochi_user_syscall::EACCES))
-    }
 }
 
 fn display_surface_size() -> Option<crate::geometry::Size> {
@@ -1094,6 +964,7 @@ fn read_event_blocking(endpoint: u64) -> Result<Option<(usize, [u8; 32])>, Mochi
 fn create_surface(
     compositor: u64,
     event_endpoint: u64,
+    role: u32,
     width: u32,
     height: u32,
 ) -> Result<u64, MochiOsBackendError> {
@@ -1102,7 +973,7 @@ fn create_surface(
     unsafe {
         zero_raw(request, 24);
         put_u32_raw(request, 0, OP_CREATE_SURFACE);
-        put_u32_raw(request, 4, ROLE_TOPLEVEL);
+        put_u32_raw(request, 4, role);
         put_u32_raw(request, 8, width);
         put_u32_raw(request, 12, height);
         put_u64_raw(request, 16, event_endpoint);
