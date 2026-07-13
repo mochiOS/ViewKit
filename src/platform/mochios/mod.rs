@@ -8,10 +8,12 @@ use cosmic_text::{
 use mochi_user_syscall as syscall;
 use tiny_skia::{
     Color as SkiaColor, FillRule, FilterQuality, Mask, Paint, Path, PathBuilder, Pixmap,
-    PixmapPaint, Rect as SkiaRect, Stroke, Transform,
+    PixmapPaint, PixmapRef, Rect as SkiaRect, Stroke, Transform,
 };
 
-use crate::draw_command::{DisplayList, DrawCommand, SvgCommand, TextCommand};
+use crate::draw_command::{
+    DisplayList, DrawCommand, ImageCommand, ImageSampling, SvgCommand, TextCommand,
+};
 use crate::font::create_font_system;
 use crate::geometry::Rect;
 use crate::platform::{
@@ -1281,7 +1283,12 @@ fn render_display_list(
                 }
                 draw_svg_command(pixmap, command, scale, clip_stack.last())?;
             }
-            DrawCommand::DrawImage { .. } => {}
+            DrawCommand::DrawImage { command } => {
+                if command.bounds.intersection(dirty_bounds).is_none() {
+                    continue;
+                }
+                draw_image_command(pixmap, command, scale, clip_stack.last())?;
+            }
         }
     }
 
@@ -1309,6 +1316,69 @@ fn valid_scale_factor(scale_factor: f64) -> f32 {
         scale_factor as f32
     } else {
         1.0
+    }
+}
+
+fn draw_image_command(
+    target: &mut Pixmap,
+    command: &ImageCommand,
+    display_scale: f32,
+    clip: Option<&Mask>,
+) -> Result<(), MochiOsBackendError> {
+    let bounds = command.bounds;
+    if !is_valid_image_bounds(bounds) {
+        return Ok(());
+    }
+
+    let image_width = command.image.width();
+    let image_height = command.image.height();
+    if image_width == 0 || image_height == 0 {
+        return Ok(());
+    }
+
+    let Some(source) = PixmapRef::from_bytes(
+        command.image.premultiplied_rgba8(),
+        image_width,
+        image_height,
+    ) else {
+        return Ok(());
+    };
+
+    let destination_width = bounds.size.width * display_scale;
+    let destination_height = bounds.size.height * display_scale;
+    let translate_x = bounds.origin.x * display_scale;
+    let translate_y = bounds.origin.y * display_scale;
+    if !destination_width.is_finite()
+        || !destination_height.is_finite()
+        || !translate_x.is_finite()
+        || !translate_y.is_finite()
+        || destination_width <= 0.0
+        || destination_height <= 0.0
+    {
+        return Ok(());
+    }
+
+    let scale_x = destination_width / image_width as f32;
+    let scale_y = destination_height / image_height as f32;
+    if !scale_x.is_finite() || !scale_y.is_finite() || scale_x <= 0.0 || scale_y <= 0.0 {
+        return Ok(());
+    }
+
+    let transform = Transform::from_row(scale_x, 0.0, 0.0, scale_y, translate_x, translate_y);
+    let paint = PixmapPaint {
+        opacity: sanitize_image_opacity(command.opacity),
+        quality: image_filter_quality(command.sampling),
+        ..PixmapPaint::default()
+    };
+    target.draw_pixmap(0, 0, source, &paint, transform, clip);
+    Ok(())
+}
+
+fn image_filter_quality(sampling: ImageSampling) -> FilterQuality {
+    match sampling {
+        ImageSampling::Nearest => FilterQuality::Nearest,
+        ImageSampling::Bilinear => FilterQuality::Bilinear,
+        ImageSampling::Bicubic => FilterQuality::Bicubic,
     }
 }
 
