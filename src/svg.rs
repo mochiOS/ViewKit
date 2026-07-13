@@ -2,6 +2,7 @@
 
 use std::fmt;
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -87,6 +88,12 @@ impl PartialEq for SvgData {
 }
 
 impl Eq for SvgData {}
+
+impl Hash for SvgData {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        Arc::as_ptr(&self.inner).hash(state);
+    }
+}
 
 impl fmt::Debug for SvgData {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {

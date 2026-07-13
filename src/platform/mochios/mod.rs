@@ -63,6 +63,7 @@ const KEY_PAGE_DOWN: u16 = 87;
 const INPUT_FLAG_PRESS: u16 = 1 << 0;
 const INPUT_FLAG_RELEASE: u16 = 1 << 1;
 const TEXT_LAYOUT_CACHE_CAPACITY: usize = 1024;
+const SVG_RASTER_CACHE_CAPACITY: usize = 128;
 const SVG_SMALL_RENDER_LIMIT: f32 = 256.0;
 const SVG_SMALL_RENDER_SUPERSAMPLE: f32 = 2.0;
 
@@ -77,6 +78,14 @@ struct TextLayoutKey {
     scale_bits: u32,
     weight: u16,
     alignment: u8,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct SvgRasterKey {
+    svg: crate::svg::SvgData,
+    width: u32,
+    height: u32,
+    tint: Option<Color>,
 }
 
 impl TextLayoutKey {
@@ -154,6 +163,7 @@ where
     font_system: Option<FontSystem>,
     swash_cache: SwashCache,
     text_layout_cache: HashMap<TextLayoutKey, Buffer>,
+    svg_raster_cache: HashMap<SvgRasterKey, Pixmap>,
     pixmap: Option<Pixmap>,
     direct_input: bool,
     pointer_x: f32,
@@ -172,6 +182,7 @@ where
             font_system: None,
             swash_cache: SwashCache::new(),
             text_layout_cache: HashMap::new(),
+            svg_raster_cache: HashMap::new(),
             pixmap: None,
             direct_input: false,
             pointer_x: 0.0,
@@ -242,6 +253,7 @@ where
                         .ok_or(MochiOsBackendError::InvalidWindowSize)?,
                     &mut self.swash_cache,
                     &mut self.text_layout_cache,
+                    &mut self.svg_raster_cache,
                     &mut self.pixmap,
                 )?;
                 let pixmap = self
@@ -1086,6 +1098,7 @@ fn render_display_list(
     font_system: &mut FontSystem,
     swash_cache: &mut SwashCache,
     text_layout_cache: &mut HashMap<TextLayoutKey, Buffer>,
+    svg_raster_cache: &mut HashMap<SvgRasterKey, Pixmap>,
     pixmap: &mut Option<Pixmap>,
 ) -> Result<Color, MochiOsBackendError> {
     let width = viewport.physical_width;
@@ -1115,6 +1128,9 @@ fn render_display_list(
                 }
             }
             DrawCommand::FillRect { rect, color } => {
+                if rect.intersection(dirty_bounds).is_none() {
+                    continue;
+                }
                 let Some(rect) = to_skia_rect(*rect) else {
                     continue;
                 };
@@ -1126,6 +1142,9 @@ fn render_display_list(
                 radius,
                 color,
             } => {
+                if rect.intersection(dirty_bounds).is_none() {
+                    continue;
+                }
                 let Some(rect) = to_skia_rect(*rect) else {
                     continue;
                 };
@@ -1140,6 +1159,9 @@ fn render_display_list(
                 );
             }
             DrawCommand::FillEllipse { rect, color } => {
+                if rect.intersection(dirty_bounds).is_none() {
+                    continue;
+                }
                 let Some(rect) = to_skia_rect(*rect) else {
                     continue;
                 };
@@ -1159,6 +1181,13 @@ fn render_display_list(
                 width: stroke_width,
             } => {
                 if !stroke_width.is_finite() || *stroke_width <= 0.0 {
+                    continue;
+                }
+                if rect
+                    .expanded(*stroke_width * 0.5 + 1.0)
+                    .intersection(dirty_bounds)
+                    .is_none()
+                {
                     continue;
                 }
                 let Some(rect) = to_skia_rect(*rect) else {
@@ -1181,6 +1210,13 @@ fn render_display_list(
                 if !stroke_width.is_finite() || *stroke_width <= 0.0 {
                     continue;
                 }
+                if rect
+                    .expanded(*stroke_width * 0.5 + 1.0)
+                    .intersection(dirty_bounds)
+                    .is_none()
+                {
+                    continue;
+                }
                 let Some(rect) = to_skia_rect(*rect) else {
                     continue;
                 };
@@ -1198,6 +1234,13 @@ fn render_display_list(
                 width: stroke_width,
             } => {
                 if !stroke_width.is_finite() || *stroke_width <= 0.0 {
+                    continue;
+                }
+                if rect
+                    .expanded(*stroke_width * 0.5 + 1.0)
+                    .intersection(dirty_bounds)
+                    .is_none()
+                {
                     continue;
                 }
                 let Some(rect) = to_skia_rect(*rect) else {
@@ -1232,7 +1275,7 @@ fn render_display_list(
                 }
             }
             DrawCommand::DrawText { command } => {
-                if command.bounds.intersection(bounds).is_none() {
+                if command.bounds.intersection(dirty_bounds).is_none() {
                     continue;
                 }
                 draw_text_command(
@@ -1246,10 +1289,10 @@ fn render_display_list(
                 );
             }
             DrawCommand::DrawSvg { command } => {
-                if command.bounds.intersection(bounds).is_none() {
+                if command.bounds.intersection(dirty_bounds).is_none() {
                     continue;
                 }
-                draw_svg_command(pixmap, command, scale, clip_stack.last())?;
+                draw_svg_command(pixmap, command, scale, clip_stack.last(), svg_raster_cache)?;
             }
             DrawCommand::DrawImage { .. } => {}
         }
@@ -1287,6 +1330,7 @@ fn draw_svg_command(
     command: &SvgCommand,
     display_scale: f32,
     clip: Option<&Mask>,
+    svg_raster_cache: &mut HashMap<SvgRasterKey, Pixmap>,
 ) -> Result<(), MochiOsBackendError> {
     let bounds = command.bounds;
     if !is_valid_image_bounds(bounds) {
@@ -1314,18 +1358,32 @@ fn draw_svg_command(
     if raster_width == 0 || raster_height == 0 {
         return Ok(());
     }
+    let cache_key = SvgRasterKey {
+        svg: command.svg.clone(),
+        width: raster_width,
+        height: raster_height,
+        tint: command.tint,
+    };
+    if !svg_raster_cache.contains_key(&cache_key) {
+        if svg_raster_cache.len() >= SVG_RASTER_CACHE_CAPACITY {
+            svg_raster_cache.clear();
+        }
+        let mut raster = Pixmap::new(raster_width, raster_height)
+            .ok_or(MochiOsBackendError::InvalidWindowSize)?;
+        let render_transform = Transform::from_scale(
+            raster_width as f32 / svg_width,
+            raster_height as f32 / svg_height,
+        );
+        resvg::render(command.svg.tree(), render_transform, &mut raster.as_mut());
 
-    let mut raster =
-        Pixmap::new(raster_width, raster_height).ok_or(MochiOsBackendError::InvalidWindowSize)?;
-    let render_transform = Transform::from_scale(
-        raster_width as f32 / svg_width,
-        raster_height as f32 / svg_height,
-    );
-    resvg::render(command.svg.tree(), render_transform, &mut raster.as_mut());
-
-    if let Some(tint) = command.tint {
-        tint_svg_pixmap(&mut raster, tint);
+        if let Some(tint) = command.tint {
+            tint_svg_pixmap(&mut raster, tint);
+        }
+        svg_raster_cache.insert(cache_key.clone(), raster);
     }
+    let Some(raster) = svg_raster_cache.get(&cache_key) else {
+        return Err(MochiOsBackendError::InvalidWindowSize);
+    };
 
     let translate_x = bounds.origin.x * display_scale;
     let translate_y = bounds.origin.y * display_scale;
