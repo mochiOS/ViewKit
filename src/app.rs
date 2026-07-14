@@ -53,6 +53,7 @@ pub struct WindowOptions {
     pub(crate) title: String,
     pub(crate) size: Size,
     pub(crate) resizable: bool,
+    pub(crate) fullscreen: bool,
 }
 
 impl WindowOptions {
@@ -65,6 +66,7 @@ impl WindowOptions {
             title: title.into(),
             size: Size::new(800.0, 600.0),
             resizable: true,
+            fullscreen: false,
         }
     }
 
@@ -79,6 +81,13 @@ impl WindowOptions {
     #[must_use]
     pub fn resizable(mut self, resizable: bool) -> Self {
         self.resizable = resizable;
+        self
+    }
+
+    /// ウィンドウを全画面として扱うか設定します。
+    #[must_use]
+    pub fn fullscreen(mut self, fullscreen: bool) -> Self {
+        self.fullscreen = fullscreen;
         self
     }
 
@@ -100,6 +109,12 @@ impl WindowOptions {
     #[must_use]
     pub const fn is_resizable(&self) -> bool {
         self.resizable
+    }
+
+    /// 全画面表示を要求しているか返します。
+    #[must_use]
+    pub const fn is_fullscreen(&self) -> bool {
+        self.fullscreen
     }
 }
 

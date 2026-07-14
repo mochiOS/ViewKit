@@ -1,5 +1,6 @@
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::time::Instant;
 
 use cosmic_text::{
@@ -7,26 +8,35 @@ use cosmic_text::{
 };
 use mochi_user_syscall as syscall;
 use tiny_skia::{
-    Color as SkiaColor, FillRule, Mask, Paint, Path, PathBuilder, Pixmap, Rect as SkiaRect, Stroke,
-    Transform,
+    Color as SkiaColor, FillRule, FilterQuality, Mask, Paint, Path, PathBuilder, Pixmap,
+    PixmapPaint, PixmapRef, Rect as SkiaRect, Stroke, Transform,
 };
 
-use crate::draw_command::{DisplayList, DrawCommand, TextCommand};
+use crate::draw_command::{
+    DisplayList, DrawCommand, ImageCommand, ImageSampling, SvgCommand, TextCommand,
+};
 use crate::font::create_font_system;
 use crate::geometry::Rect;
+use crate::image::ImageData;
 use crate::platform::{
     ButtonState, CursorIcon, PlatformApplication, PlatformEvent, PlatformWindow, PointerButton,
     WindowConfig,
 };
 use crate::renderer::Viewport;
+use crate::svg::SvgData;
 use crate::theme::Color;
 
 const COMPOSITOR_SERVICE_NAME: &str = "compositor.service";
+const DISPLAY_SERVICE_NAME: &str = "display.driver";
+const INPUT_SERVICE_NAME: &str = "input.service";
+const WINDOW_OVERLAY_CAPABILITY: &str = "window.overlay";
+const DISPLAY_GET_INFO_OPCODE: u32 = 1;
 const OP_CREATE_SURFACE: u32 = 1;
 const OP_ATTACH_BUFFER: u32 = 2;
 const OP_DAMAGE: u32 = 3;
 const OP_COMMIT: u32 = 4;
 const ROLE_TOPLEVEL: u32 = 1;
+const ROLE_BACKGROUND: u32 = 3;
 const PIXEL_FORMAT_XRGB8888: u32 = 1;
 const PAGE_SIZE: usize = 4096;
 const MAX_SURFACE_EXTENT: u32 = 16_384;
@@ -39,6 +49,11 @@ const EVENT_KEY: u32 = 6;
 const EVENT_FOCUS_GAINED: u32 = 8;
 const EVENT_FOCUS_LOST: u32 = 9;
 const EVENT_FRAME_DONE: u32 = 10;
+const INPUT_SUBSCRIBE_OPCODE: u32 = 0x5355_4253;
+const INPUT_EVENT_SIZE: usize = 32;
+const INPUT_EVENT_KIND_POINTER_MOVE: u16 = 2;
+const INPUT_EVENT_KIND_POINTER_BUTTON: u16 = 3;
+const INPUT_EVENT_KIND_POINTER_ABSOLUTE: u16 = 5;
 const KEY_BACKSPACE: u16 = 2;
 const KEY_TAB: u16 = 3;
 const KEY_ENTER: u16 = 4;
@@ -50,9 +65,20 @@ const KEY_LEFT: u16 = 82;
 const KEY_RIGHT: u16 = 83;
 const KEY_PAGE_UP: u16 = 86;
 const KEY_PAGE_DOWN: u16 = 87;
-const INPUT_FLAG_PRESS: u32 = 1 << 0;
-const INPUT_FLAG_RELEASE: u32 = 1 << 1;
+const INPUT_FLAG_PRESS: u16 = 1 << 0;
+const INPUT_FLAG_RELEASE: u16 = 1 << 1;
 const TEXT_LAYOUT_CACHE_CAPACITY: usize = 1024;
+const SVG_SMALL_RENDER_LIMIT: f32 = 256.0;
+const SVG_SMALL_RENDER_SUPERSAMPLE: f32 = 2.0;
+const CURSOR_SVG_PATH: &str = "/system/icons/cursor.svg";
+const CURSOR_WIDTH: u32 = 12;
+const CURSOR_HEIGHT: u32 = 20;
+const CURSOR_HOTSPOT_X: f32 = 1.0;
+const CURSOR_HOTSPOT_Y: f32 = 1.0;
+const PERF_LOG_ENABLED: bool = false;
+const METRICS_INTERVAL_TICKS: u64 = 500;
+const SLOW_FRAME_THRESHOLD_TICKS: u64 = 16;
+const INITIAL_FRAME_LOGS: u64 = 8;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct TextLayoutKey {
@@ -103,8 +129,13 @@ const fn alignment_key(alignment: crate::typography::TextAlignment) -> u8 {
 static mut CREATE_SURFACE_REQ: [u8; 24] = [0; 24];
 static mut ATTACH_BUFFER_REQ: [u8; 28] = [0; 28];
 static mut TOKEN_REQ: [u8; 12] = [0; 12];
+static mut DAMAGE_REQ: [u8; 28] = [0; 28];
 static mut IPC_REPLY: [u8; 16] = [0; 16];
 static mut EVENT_BUF: [u8; 32] = [0; 32];
+static mut DISPLAY_REQ: [u8; 20] = [0; 20];
+static mut DISPLAY_REPLY: [u8; 32] = [0; 32];
+static mut INPUT_SUBSCRIBE_REQ: [u8; 16] = [0; 16];
+static mut INPUT_SUBSCRIBE_REPLY: [u8; 1] = [0; 1];
 
 #[derive(Debug, thiserror::Error)]
 pub enum MochiOsBackendError {
@@ -134,9 +165,40 @@ where
     app: A,
     config: WindowConfig,
     pressed_buttons: Vec<u16>,
-    font_system: FontSystem,
+    font_system: Option<FontSystem>,
     swash_cache: SwashCache,
     text_layout_cache: HashMap<TextLayoutKey, Buffer>,
+    pixmap: Option<Pixmap>,
+    direct_input: bool,
+    pointer_x: f32,
+    pointer_y: f32,
+    cursor_image: Option<ImageData>,
+    cursor_dirty: Option<Rect>,
+    clear_color: Color,
+    pending_pointer_motion: PendingPointerMotion,
+    metrics: BackendMetrics,
+}
+
+#[derive(Default)]
+struct PendingPointerMotion {
+    absolute: Option<(f32, f32)>,
+    relative_dx: f32,
+    relative_dy: f32,
+    pending: bool,
+}
+
+#[derive(Default)]
+struct BackendMetrics {
+    next_report_tick: u64,
+    full_frames: u64,
+    cursor_frames: u64,
+    frame_logs_emitted: u64,
+    input_events: u64,
+    coalesced_pointer_events: u64,
+    draw_cycles: u64,
+    render_cycles: u64,
+    attach_cycles: u64,
+    commit_cycles: u64,
 }
 
 impl<A> MochiOsBackend<A>
@@ -148,32 +210,68 @@ where
             app,
             config,
             pressed_buttons: Vec::new(),
-            font_system: create_font_system(),
+            font_system: None,
             swash_cache: SwashCache::new(),
             text_layout_cache: HashMap::new(),
+            pixmap: None,
+            direct_input: false,
+            pointer_x: 0.0,
+            pointer_y: 0.0,
+            cursor_image: None,
+            cursor_dirty: None,
+            clear_color: Color::BLACK,
+            pending_pointer_motion: PendingPointerMotion::default(),
+            metrics: BackendMetrics::default(),
         }
     }
 
     pub fn run(mut self) -> Result<(), MochiOsBackendError> {
         let compositor = find_compositor()?;
         let event_endpoint = create_event_endpoint()?;
-        let size = checked_surface_size(self.config.size)?;
-        let viewport = Viewport::new(self.config.size, size.0, size.1, 1.0);
+        if self.config.fullscreen {
+            require_window_overlay_capability()?;
+        }
+        let requested_size = if self.config.fullscreen {
+            display_surface_size().unwrap_or_else(|| self.config.size)
+        } else {
+            self.config.size
+        };
+        let size = checked_surface_size(requested_size)?;
+        let logical_size = if self.config.fullscreen {
+            requested_size
+        } else {
+            self.config.size
+        };
+        let viewport = Viewport::new(logical_size, size.0, size.1, 1.0);
         let window = MochiOsWindow::new(viewport);
-        let token = create_surface(compositor, event_endpoint, size.0, size.1)?;
+        let role = if self.config.fullscreen {
+            ROLE_BACKGROUND
+        } else {
+            ROLE_TOPLEVEL
+        };
+        let token = create_surface(compositor, event_endpoint, role, size.0, size.1)?;
         let mut shared_buffer = SharedBuffer::new(size.0 as usize, size.1 as usize)?;
+        self.pointer_x = (viewport.logical_size.width / 2.0).max(0.0);
+        self.pointer_y = (viewport.logical_size.height / 2.0).max(0.0);
+        self.direct_input = self.config.fullscreen && subscribe_input_events(event_endpoint);
+        if self.direct_input {
+            self.cursor_image = load_cursor_image();
+        }
+        self.log_backend_started(size);
 
         self.app
             .handle_event(PlatformEvent::Resumed { viewport }, &window);
         window.request_redraw();
 
         let mut display_list = DisplayList::new();
-
         loop {
             let mut handled_work = false;
 
-            while let Some(event) = try_recv_event()? {
-                self.handle_compositor_event(event, &window)?;
+            while let Some((len, event)) = try_recv_event()? {
+                self.handle_or_queue_event_message(len, event, &window)?;
+                handled_work = true;
+            }
+            if self.flush_pending_pointer_motion(&window) {
                 handled_work = true;
             }
 
@@ -182,27 +280,119 @@ where
                 .next_redraw_at()
                 .is_some_and(|deadline| deadline <= Instant::now());
 
-            if window.take_redraw_requested() || redraw_due {
+            let redraw_requested = window.take_redraw_requested();
+            if redraw_requested || redraw_due {
+                if self.font_system.is_none() {
+                    self.font_system = Some(create_font_system());
+                }
                 display_list.clear();
-                let _ = self.app.draw(window.viewport(), &mut display_list);
-                let buffer = render_display_list(
+                let frame_start = perf_counter();
+                let frame_tick_start = perf_tick();
+                let draw_start = perf_counter();
+                let mut dirty_bounds = self.app.draw(window.viewport(), &mut display_list);
+                let draw_cycles = perf_counter_elapsed(draw_start);
+                self.metrics.draw_cycles = self.metrics.draw_cycles.saturating_add(draw_cycles);
+                if let Some(cursor_rect) = self.current_cursor_rect(window.viewport()) {
+                    dirty_bounds = dirty_bounds.union(cursor_rect);
+                }
+                self.cursor_dirty = None;
+                let render_start = perf_counter();
+                let clear_color = render_display_list(
                     window.viewport(),
+                    dirty_bounds,
                     &display_list,
-                    &mut self.font_system,
+                    self.font_system
+                        .as_mut()
+                        .ok_or(MochiOsBackendError::InvalidWindowSize)?,
                     &mut self.swash_cache,
                     &mut self.text_layout_cache,
+                    &mut self.pixmap,
                 )?;
+                let render_cycles = perf_counter_elapsed(render_start);
+                self.metrics.render_cycles =
+                    self.metrics.render_cycles.saturating_add(render_cycles);
+                self.clear_color = clear_color;
+                let pixmap = self
+                    .pixmap
+                    .as_ref()
+                    .ok_or(MochiOsBackendError::InvalidWindowSize)?;
+                let attach_start = perf_counter();
                 attach_buffer(
                     compositor,
                     token,
                     window.width() as usize,
                     window.height() as usize,
-                    &buffer,
+                    pixmap,
+                    clear_color,
                     &mut shared_buffer,
+                    window.viewport(),
+                    dirty_bounds,
+                    self.cursor_blit(),
                 )?;
-                simple_token_request(compositor, OP_DAMAGE, token)?;
+                let attach_cycles = perf_counter_elapsed(attach_start);
+                self.metrics.attach_cycles =
+                    self.metrics.attach_cycles.saturating_add(attach_cycles);
+                let commit_start = perf_counter();
+                damage_token_request(compositor, token, window.viewport(), dirty_bounds)?;
                 simple_token_request(compositor, OP_COMMIT, token)?;
+                let commit_cycles = perf_counter_elapsed(commit_start);
+                self.metrics.commit_cycles =
+                    self.metrics.commit_cycles.saturating_add(commit_cycles);
+                self.metrics.full_frames = self.metrics.full_frames.saturating_add(1);
+                self.report_frame_timing(
+                    "full",
+                    perf_counter_elapsed(frame_start),
+                    perf_tick_elapsed(frame_tick_start),
+                    draw_cycles,
+                    render_cycles,
+                    attach_cycles,
+                    commit_cycles,
+                    dirty_bounds,
+                );
+                self.report_metrics_if_due();
                 handled_work = true;
+            } else if let Some(dirty_bounds) = self.cursor_dirty.take() {
+                if let (Some(pixmap), Some(_cursor)) =
+                    (self.pixmap.as_ref(), self.cursor_image.as_ref())
+                {
+                    let frame_start = perf_counter();
+                    let frame_tick_start = perf_tick();
+                    let attach_start = perf_counter();
+                    attach_buffer(
+                        compositor,
+                        token,
+                        window.width() as usize,
+                        window.height() as usize,
+                        pixmap,
+                        self.clear_color,
+                        &mut shared_buffer,
+                        window.viewport(),
+                        dirty_bounds,
+                        self.cursor_blit(),
+                    )?;
+                    let attach_cycles = perf_counter_elapsed(attach_start);
+                    self.metrics.attach_cycles =
+                        self.metrics.attach_cycles.saturating_add(attach_cycles);
+                    let commit_start = perf_counter();
+                    damage_token_request(compositor, token, window.viewport(), dirty_bounds)?;
+                    simple_token_request(compositor, OP_COMMIT, token)?;
+                    let commit_cycles = perf_counter_elapsed(commit_start);
+                    self.metrics.commit_cycles =
+                        self.metrics.commit_cycles.saturating_add(commit_cycles);
+                    self.metrics.cursor_frames = self.metrics.cursor_frames.saturating_add(1);
+                    self.report_frame_timing(
+                        "cursor",
+                        perf_counter_elapsed(frame_start),
+                        perf_tick_elapsed(frame_tick_start),
+                        0,
+                        0,
+                        attach_cycles,
+                        commit_cycles,
+                        dirty_bounds,
+                    );
+                    self.report_metrics_if_due();
+                    handled_work = true;
+                }
             }
 
             if !handled_work {
@@ -215,6 +405,289 @@ where
                 }
             }
         }
+    }
+
+    fn handle_event_message(
+        &mut self,
+        len: usize,
+        event: [u8; 32],
+        window: &MochiOsWindow,
+    ) -> Result<(), MochiOsBackendError> {
+        if self.direct_input && len == INPUT_EVENT_SIZE && self.handle_input_event(event, window) {
+            return Ok(());
+        }
+
+        self.handle_compositor_event(event, window)
+    }
+
+    fn handle_or_queue_event_message(
+        &mut self,
+        len: usize,
+        event: [u8; 32],
+        window: &MochiOsWindow,
+    ) -> Result<(), MochiOsBackendError> {
+        if self.direct_input && len == INPUT_EVENT_SIZE && self.queue_pointer_motion(event) {
+            self.metrics.input_events = self.metrics.input_events.saturating_add(1);
+            self.metrics.coalesced_pointer_events =
+                self.metrics.coalesced_pointer_events.saturating_add(1);
+            return Ok(());
+        }
+
+        self.flush_pending_pointer_motion(window);
+        self.metrics.input_events = self.metrics.input_events.saturating_add(1);
+        self.handle_event_message(len, event, window)
+    }
+
+    fn queue_pointer_motion(&mut self, event: [u8; 32]) -> bool {
+        let kind = u16::from_le_bytes([event[0], event[1]]);
+        match kind {
+            INPUT_EVENT_KIND_POINTER_MOVE => {
+                let dx = i32::from_le_bytes([event[12], event[13], event[14], event[15]]) as f32;
+                let dy = i32::from_le_bytes([event[16], event[17], event[18], event[19]]) as f32;
+                self.pending_pointer_motion.relative_dx += dx;
+                self.pending_pointer_motion.relative_dy += dy;
+                self.pending_pointer_motion.pending = true;
+                true
+            }
+            INPUT_EVENT_KIND_POINTER_ABSOLUTE => {
+                let raw_x = i32::from_le_bytes([event[12], event[13], event[14], event[15]])
+                    .clamp(0, 32_767) as f32;
+                let raw_y = i32::from_le_bytes([event[16], event[17], event[18], event[19]])
+                    .clamp(0, 32_767) as f32;
+                self.pending_pointer_motion.absolute = Some((raw_x, raw_y));
+                self.pending_pointer_motion.relative_dx = 0.0;
+                self.pending_pointer_motion.relative_dy = 0.0;
+                self.pending_pointer_motion.pending = true;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn flush_pending_pointer_motion(&mut self, window: &MochiOsWindow) -> bool {
+        if !self.pending_pointer_motion.pending {
+            return false;
+        }
+
+        let previous = self.current_cursor_rect(window.viewport());
+        let bounds = window.viewport().logical_bounds();
+        if let Some((raw_x, raw_y)) = self.pending_pointer_motion.absolute.take() {
+            self.pointer_x = bounds.origin.x + (raw_x / 32_767.0) * bounds.size.width;
+            self.pointer_y = bounds.origin.y + (raw_y / 32_767.0) * bounds.size.height;
+        }
+        let max_x = (bounds.origin.x + bounds.size.width).max(bounds.origin.x);
+        let max_y = (bounds.origin.y + bounds.size.height).max(bounds.origin.y);
+        self.pointer_x = (self.pointer_x + self.pending_pointer_motion.relative_dx)
+            .clamp(bounds.origin.x, max_x);
+        self.pointer_y = (self.pointer_y + self.pending_pointer_motion.relative_dy)
+            .clamp(bounds.origin.y, max_y);
+
+        self.pending_pointer_motion.relative_dx = 0.0;
+        self.pending_pointer_motion.relative_dy = 0.0;
+        self.pending_pointer_motion.pending = false;
+
+        self.app.handle_event(
+            PlatformEvent::PointerMoved {
+                x: self.pointer_x,
+                y: self.pointer_y,
+            },
+            window,
+        );
+        self.mark_cursor_dirty(window.viewport(), previous);
+        true
+    }
+
+    fn handle_input_event(&mut self, event: [u8; 32], window: &MochiOsWindow) -> bool {
+        let kind = u16::from_le_bytes([event[0], event[1]]);
+        match kind {
+            INPUT_EVENT_KIND_POINTER_MOVE => {
+                let previous = self.current_cursor_rect(window.viewport());
+                let dx = i32::from_le_bytes([event[12], event[13], event[14], event[15]]) as f32;
+                let dy = i32::from_le_bytes([event[16], event[17], event[18], event[19]]) as f32;
+                let bounds = window.viewport().logical_bounds();
+                let max_x = (bounds.origin.x + bounds.size.width).max(bounds.origin.x);
+                let max_y = (bounds.origin.y + bounds.size.height).max(bounds.origin.y);
+                self.pointer_x = (self.pointer_x + dx).clamp(bounds.origin.x, max_x);
+                self.pointer_y = (self.pointer_y + dy).clamp(bounds.origin.y, max_y);
+                self.app.handle_event(
+                    PlatformEvent::PointerMoved {
+                        x: self.pointer_x,
+                        y: self.pointer_y,
+                    },
+                    window,
+                );
+                self.mark_cursor_dirty(window.viewport(), previous);
+                true
+            }
+            INPUT_EVENT_KIND_POINTER_ABSOLUTE => {
+                let previous = self.current_cursor_rect(window.viewport());
+                let raw_x = i32::from_le_bytes([event[12], event[13], event[14], event[15]])
+                    .clamp(0, 32_767) as f32;
+                let raw_y = i32::from_le_bytes([event[16], event[17], event[18], event[19]])
+                    .clamp(0, 32_767) as f32;
+                let bounds = window.viewport().logical_bounds();
+                self.pointer_x = bounds.origin.x + (raw_x / 32_767.0) * bounds.size.width;
+                self.pointer_y = bounds.origin.y + (raw_y / 32_767.0) * bounds.size.height;
+                self.app.handle_event(
+                    PlatformEvent::PointerMoved {
+                        x: self.pointer_x,
+                        y: self.pointer_y,
+                    },
+                    window,
+                );
+                self.mark_cursor_dirty(window.viewport(), previous);
+                true
+            }
+            INPUT_EVENT_KIND_POINTER_BUTTON => {
+                let flags = u16::from_le_bytes([event[2], event[3]]);
+                let detail = u16::from_le_bytes([event[6], event[7]]);
+                let button = match detail {
+                    1 => PointerButton::Primary,
+                    2 => PointerButton::Secondary,
+                    3 => PointerButton::Middle,
+                    other => PointerButton::Other(other),
+                };
+                let state = if flags & INPUT_FLAG_PRESS != 0 {
+                    ButtonState::Pressed
+                } else if flags & INPUT_FLAG_RELEASE != 0 {
+                    ButtonState::Released
+                } else {
+                    return true;
+                };
+                self.app
+                    .handle_event(PlatformEvent::PointerButton { button, state }, window);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn report_metrics_if_due(&mut self) {
+        if !PERF_LOG_ENABLED {
+            return;
+        }
+        let now = perf_tick();
+        if self.metrics.next_report_tick == 0 {
+            self.metrics.next_report_tick = now.saturating_add(METRICS_INTERVAL_TICKS);
+        }
+        if now < self.metrics.next_report_tick {
+            return;
+        }
+
+        let mut line = String::new();
+        let _ = write!(
+            line,
+            "viewkit/mochios stats: full={} cursor={} input={} coalesced={} draw={}cy render={}cy attach={}cy commit={}cy\n",
+            self.metrics.full_frames,
+            self.metrics.cursor_frames,
+            self.metrics.input_events,
+            self.metrics.coalesced_pointer_events,
+            self.metrics.draw_cycles,
+            self.metrics.render_cycles,
+            self.metrics.attach_cycles,
+            self.metrics.commit_cycles,
+        );
+        perf_log(&line);
+
+        self.metrics.full_frames = 0;
+        self.metrics.cursor_frames = 0;
+        self.metrics.input_events = 0;
+        self.metrics.coalesced_pointer_events = 0;
+        self.metrics.draw_cycles = 0;
+        self.metrics.render_cycles = 0;
+        self.metrics.attach_cycles = 0;
+        self.metrics.commit_cycles = 0;
+        self.metrics.next_report_tick = now.saturating_add(METRICS_INTERVAL_TICKS);
+    }
+
+    fn report_frame_timing(
+        &mut self,
+        kind: &str,
+        total_cycles: u64,
+        total_ticks: u64,
+        draw_cycles: u64,
+        render_cycles: u64,
+        attach_cycles: u64,
+        commit_cycles: u64,
+        dirty_bounds: Rect,
+    ) {
+        if !PERF_LOG_ENABLED {
+            return;
+        }
+        let force_initial = self.metrics.frame_logs_emitted < INITIAL_FRAME_LOGS;
+        if !force_initial && total_ticks < SLOW_FRAME_THRESHOLD_TICKS {
+            return;
+        }
+        self.metrics.frame_logs_emitted = self.metrics.frame_logs_emitted.saturating_add(1);
+        let label = if total_ticks < SLOW_FRAME_THRESHOLD_TICKS {
+            "frame"
+        } else {
+            "slow-frame"
+        };
+        let mut line = String::new();
+        let _ = write!(
+            line,
+            "viewkit/mochios {} kind={} total={}cy ticks={} draw={}cy render={}cy attach={}cy commit={}cy dirty=({:.0},{:.0} {:.0}x{:.0})\n",
+            label,
+            kind,
+            total_cycles,
+            total_ticks,
+            draw_cycles,
+            render_cycles,
+            attach_cycles,
+            commit_cycles,
+            dirty_bounds.origin.x,
+            dirty_bounds.origin.y,
+            dirty_bounds.size.width,
+            dirty_bounds.size.height,
+        );
+        perf_log(&line);
+    }
+
+    fn log_backend_started(&self, size: (u32, u32)) {
+        if !PERF_LOG_ENABLED {
+            return;
+        }
+        let mut line = String::new();
+        let _ = write!(
+            line,
+            "viewkit/mochios perf-start fullscreen={} size={}x{} direct_input={}\n",
+            self.config.fullscreen, size.0, size.1, self.direct_input,
+        );
+        perf_log(&line);
+    }
+
+    fn current_cursor_rect(&self, viewport: Viewport) -> Option<Rect> {
+        self.cursor_image.as_ref()?;
+        let bounds = viewport.logical_bounds();
+        Some(
+            Rect::new(
+                self.pointer_x - CURSOR_HOTSPOT_X,
+                self.pointer_y - CURSOR_HOTSPOT_Y,
+                CURSOR_WIDTH as f32,
+                CURSOR_HEIGHT as f32,
+            )
+                .intersection(bounds)
+                .unwrap_or_else(|| Rect::new(self.pointer_x, self.pointer_y, 1.0, 1.0)),
+        )
+    }
+
+    fn mark_cursor_dirty(&mut self, viewport: Viewport, previous: Option<Rect>) {
+        let Some(current) = self.current_cursor_rect(viewport) else {
+            return;
+        };
+        let dirty = previous
+            .map_or(current, |previous| previous.union(current))
+            .expanded(2.0);
+        self.cursor_dirty = Some(self.cursor_dirty.map_or(dirty, |old| old.union(dirty)));
+    }
+
+    fn cursor_blit(&self) -> Option<CursorBlit<'_>> {
+        Some(CursorBlit {
+            image: self.cursor_image.as_ref()?,
+            x: self.pointer_x - CURSOR_HOTSPOT_X,
+            y: self.pointer_y - CURSOR_HOTSPOT_Y,
+        })
     }
 
     fn handle_compositor_event(
@@ -249,12 +722,12 @@ where
                     3 => PointerButton::Middle,
                     other => PointerButton::Other(other),
                 };
-                let state = if flags & INPUT_FLAG_PRESS != 0 {
+                let state = if flags & u32::from(INPUT_FLAG_PRESS) != 0 {
                     if !self.pressed_buttons.contains(&button_id) {
                         self.pressed_buttons.push(button_id);
                     }
                     ButtonState::Pressed
-                } else if flags & INPUT_FLAG_RELEASE != 0 {
+                } else if flags & u32::from(INPUT_FLAG_RELEASE) != 0 {
                     if let Some(pos) = self
                         .pressed_buttons
                         .iter()
@@ -282,9 +755,7 @@ where
             EVENT_FOCUS_LOST => {
                 self.app.handle_event(PlatformEvent::Focused(false), window);
             }
-            EVENT_FRAME_DONE => {
-                window.request_redraw();
-            }
+            EVENT_FRAME_DONE => {}
             _ => {}
         }
 
@@ -403,6 +874,39 @@ fn syscall_result<T>(result: syscall::SysResult<T>) -> Result<T, MochiOsBackendE
     result.map_err(|err| MochiOsBackendError::Syscall(err.errno().unwrap_or(5)))
 }
 
+fn perf_log(line: &str) {
+    let _ = syscall::call3(
+        syscall::SyscallNumber::Write,
+        2,
+        line.as_ptr() as u64,
+        line.len() as u64,
+    );
+}
+
+fn perf_counter() -> u64 {
+    #[cfg(target_arch = "x86_64")]
+    {
+        // SAFETY: rdtsc is a userspace-readable counter on the current x86_64 target.
+        unsafe { core::arch::x86_64::_rdtsc() }
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        perf_tick()
+    }
+}
+
+fn perf_counter_elapsed(start: u64) -> u64 {
+    perf_counter().saturating_sub(start)
+}
+
+fn perf_tick() -> u64 {
+    syscall::call0(syscall::SyscallNumber::TimeNow).unwrap_or(0)
+}
+
+fn perf_tick_elapsed(start: u64) -> u64 {
+    perf_tick().saturating_sub(start)
+}
+
 fn create_event_endpoint() -> Result<u64, MochiOsBackendError> {
     syscall_result(syscall::call2(syscall::SyscallNumber::IpcCreate, 0, 0))
 }
@@ -421,6 +925,102 @@ fn find_compositor() -> Result<u64, MochiOsBackendError> {
         let _ = syscall::call0(syscall::SyscallNumber::ThreadYield);
     }
     Err(MochiOsBackendError::CompositorNotFound)
+}
+
+fn find_display_driver() -> Result<u64, MochiOsBackendError> {
+    let name = DISPLAY_SERVICE_NAME.as_bytes();
+    for _ in 0..64 {
+        let tid = syscall_result(syscall::call2(
+            syscall::SyscallNumber::FindProcessByName,
+            name.as_ptr() as u64,
+            name.len() as u64,
+        ))?;
+        if tid != 0 {
+            return Ok(tid);
+        }
+        let _ = syscall::call0(syscall::SyscallNumber::ThreadYield);
+    }
+    Err(MochiOsBackendError::InvalidReply)
+}
+
+fn find_input_service() -> Result<u64, MochiOsBackendError> {
+    let name = INPUT_SERVICE_NAME.as_bytes();
+    for _ in 0..64 {
+        let tid = syscall_result(syscall::call2(
+            syscall::SyscallNumber::FindProcessByName,
+            name.as_ptr() as u64,
+            name.len() as u64,
+        ))?;
+        if tid != 0 {
+            return Ok(tid);
+        }
+        let _ = syscall::call0(syscall::SyscallNumber::ThreadYield);
+    }
+    Err(MochiOsBackendError::InvalidReply)
+}
+
+fn subscribe_input_events(endpoint: u64) -> bool {
+    let Ok(input) = find_input_service() else {
+        return false;
+    };
+    let request = core::ptr::addr_of_mut!(INPUT_SUBSCRIBE_REQ).cast::<u8>();
+    let reply = core::ptr::addr_of_mut!(INPUT_SUBSCRIBE_REPLY).cast::<u8>();
+    unsafe {
+        zero_raw(request, 16);
+        put_u32_raw(request, 0, INPUT_SUBSCRIBE_OPCODE);
+        put_u64_raw(request, 8, endpoint);
+        zero_raw(reply, 1);
+    }
+    matches!(ipc_call_raw(input, request, 16, reply, 1), Ok(1))
+}
+
+fn require_window_overlay_capability() -> Result<(), MochiOsBackendError> {
+    if query_capability(WINDOW_OVERLAY_CAPABILITY) {
+        return Ok(());
+    }
+    Err(MochiOsBackendError::Syscall(mochi_user_syscall::EACCES))
+}
+
+fn query_capability(capability: &str) -> bool {
+    let bytes = capability.as_bytes();
+    matches!(
+        syscall::call2(
+            syscall::SyscallNumber::CapQuery,
+            bytes.as_ptr() as u64,
+            bytes.len() as u64,
+        ),
+        Ok(1)
+    )
+}
+
+fn display_surface_size() -> Option<crate::geometry::Size> {
+    let display = find_display_driver().ok()?;
+    let request = core::ptr::addr_of_mut!(DISPLAY_REQ).cast::<u8>();
+    let reply = core::ptr::addr_of_mut!(DISPLAY_REPLY).cast::<u8>();
+    unsafe {
+        zero_raw(request, 20);
+        zero_raw(reply, 32);
+        put_u32_raw(request, 0, DISPLAY_GET_INFO_OPCODE);
+    }
+    let len = ipc_call_raw(display, request, 20, reply, 32).ok()?;
+    if len < 20 {
+        return None;
+    }
+    let status = unsafe { read_u32_raw(reply.cast_const(), 0) };
+    if status != 0 {
+        return None;
+    }
+    let width = unsafe { read_u32_raw(reply.cast_const(), 4) };
+    let height = unsafe { read_u32_raw(reply.cast_const(), 8) };
+    match (width, height) {
+        (w, h) if w > 0 && h > 0 => Some(crate::geometry::Size::new(w as f32, h as f32)),
+        _ => None,
+    }
+}
+
+fn load_cursor_image() -> Option<ImageData> {
+    let svg = SvgData::from_path(CURSOR_SVG_PATH).ok()?;
+    ImageData::from_svg(&svg, CURSOR_WIDTH, CURSOR_HEIGHT).ok()
 }
 
 fn ipc_call_raw(
@@ -483,6 +1083,23 @@ fn send_pages(dest: u64, page_count: usize, local_base: u64) -> Result<(), Mochi
 struct SharedBuffer {
     virt: u64,
     byte_capacity: usize,
+    sent_pages: bool,
+    attached: bool,
+}
+
+#[derive(Clone, Copy)]
+struct PhysicalDirtyRect {
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
+}
+
+#[derive(Clone, Copy)]
+struct CursorBlit<'a> {
+    image: &'a ImageData,
+    x: f32,
+    y: f32,
 }
 
 impl SharedBuffer {
@@ -506,28 +1123,155 @@ impl SharedBuffer {
         Ok(Self {
             virt,
             byte_capacity,
+            sent_pages: false,
+            attached: false,
         })
     }
 
-    fn send_to(&mut self, compositor: u64, buffer: &[u32]) -> Result<(), MochiOsBackendError> {
-        let bytes_len = buffer
-            .len()
+    fn send_pixmap_to(
+        &mut self,
+        compositor: u64,
+        pixmap: &Pixmap,
+        background: Color,
+        dirty_rect: PhysicalDirtyRect,
+        cursor: Option<CursorBlit<'_>>,
+    ) -> Result<(), MochiOsBackendError> {
+        let pixel_count = (pixmap.width() as usize)
+            .checked_mul(pixmap.height() as usize)
+            .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
+        let bytes_len = pixel_count
             .checked_mul(4)
             .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
-        let src = unsafe { std::slice::from_raw_parts(buffer.as_ptr().cast::<u8>(), bytes_len) };
         if bytes_len > self.byte_capacity {
             return Err(MochiOsBackendError::InvalidWindowSize);
         }
         let dst =
             unsafe { std::slice::from_raw_parts_mut(self.virt as *mut u8, self.byte_capacity) };
-        dst[..bytes_len].copy_from_slice(src);
+
+        let pixmap_width = pixmap.width() as usize;
+        let pixmap_height = pixmap.height() as usize;
+        let copy_rect = if self.sent_pages {
+            dirty_rect
+        } else {
+            PhysicalDirtyRect {
+                x: 0,
+                y: 0,
+                width: pixmap_width,
+                height: pixmap_height,
+            }
+        };
+        let right = copy_rect
+            .x
+            .saturating_add(copy_rect.width)
+            .min(pixmap_width);
+        let bottom = copy_rect
+            .y
+            .saturating_add(copy_rect.height)
+            .min(pixmap_height);
+        let src = pixmap.data();
+        for y in copy_rect.y..bottom {
+            let Some(row_start) = y.checked_mul(pixmap_width) else {
+                return Err(MochiOsBackendError::ArithmeticOverflow);
+            };
+            for x in copy_rect.x..right {
+                let Some(pixel_index) = row_start.checked_add(x) else {
+                    return Err(MochiOsBackendError::ArithmeticOverflow);
+                };
+                let Some(byte_index) = pixel_index.checked_mul(4) else {
+                    return Err(MochiOsBackendError::ArithmeticOverflow);
+                };
+                let Some(pixel) = src.get(byte_index..byte_index + 4) else {
+                    return Err(MochiOsBackendError::InvalidWindowSize);
+                };
+                let Some(out) = dst.get_mut(byte_index..byte_index + 4) else {
+                    return Err(MochiOsBackendError::InvalidWindowSize);
+                };
+                let mut value = flatten_premultiplied_pixel(pixel, background);
+                if let Some(cursor) = cursor {
+                    value = blend_cursor_pixel(value, cursor, x, y);
+                }
+                out.copy_from_slice(&value.to_le_bytes());
+            }
+        }
         let page_count = bytes_len
             .checked_add(PAGE_SIZE - 1)
             .map(|len| len / PAGE_SIZE)
             .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
+        if self.sent_pages {
+            return Ok(());
+        }
         send_pages(compositor, page_count, self.virt)?;
+        self.sent_pages = true;
         Ok(())
     }
+
+    fn is_attached(&self) -> bool {
+        self.attached
+    }
+
+    fn mark_attached(&mut self) {
+        self.attached = true;
+    }
+}
+
+fn flatten_premultiplied_pixel(pixel: &[u8], background: Color) -> u32 {
+    let alpha = pixel[3] as u32;
+    let inv_alpha = 255_u32.saturating_sub(alpha);
+
+    // tiny-skia stores premultiplied RGBA. The compositor surface is XRGB,
+    // so each pixel is flattened into the configured clear color.
+    let red = pixel[0] as u32 + (background.red as u32 * inv_alpha + 127) / 255;
+    let green = pixel[1] as u32 + (background.green as u32 * inv_alpha + 127) / 255;
+    let blue = pixel[2] as u32 + (background.blue as u32 * inv_alpha + 127) / 255;
+
+    0xff00_0000 | (red.min(255) << 16) | (green.min(255) << 8) | blue.min(255)
+}
+
+fn blend_cursor_pixel(base: u32, cursor: CursorBlit<'_>, x: usize, y: usize) -> u32 {
+    let cursor_x = x as i32 - cursor.x.round() as i32;
+    let cursor_y = y as i32 - cursor.y.round() as i32;
+    if cursor_x < 0
+        || cursor_y < 0
+        || cursor_x >= cursor.image.width() as i32
+        || cursor_y >= cursor.image.height() as i32
+    {
+        return base;
+    }
+
+    let cursor_x = cursor_x as usize;
+    let cursor_y = cursor_y as usize;
+    let width = cursor.image.width() as usize;
+    let Some(pixel_index) = cursor_y
+        .checked_mul(width)
+        .and_then(|row| row.checked_add(cursor_x))
+    else {
+        return base;
+    };
+    let Some(byte_index) = pixel_index.checked_mul(4) else {
+        return base;
+    };
+    let Some(pixel) = cursor
+        .image
+        .premultiplied_rgba8()
+        .get(byte_index..byte_index + 4)
+    else {
+        return base;
+    };
+
+    let alpha = pixel[3] as u32;
+    if alpha == 0 {
+        return base;
+    }
+
+    let inv_alpha = 255_u32.saturating_sub(alpha);
+    let base_red = (base >> 16) & 0xff;
+    let base_green = (base >> 8) & 0xff;
+    let base_blue = base & 0xff;
+    let red = pixel[0] as u32 + (base_red * inv_alpha + 127) / 255;
+    let green = pixel[1] as u32 + (base_green * inv_alpha + 127) / 255;
+    let blue = pixel[2] as u32 + (base_blue * inv_alpha + 127) / 255;
+
+    0xff00_0000 | (red.min(255) << 16) | (green.min(255) << 8) | blue.min(255)
 }
 
 unsafe fn zero_raw(ptr: *mut u8, len: usize) {
@@ -584,7 +1328,7 @@ fn status_from_raw(ptr: *const u8, len: usize) -> Result<(), MochiOsBackendError
     }
 }
 
-fn try_recv_event() -> Result<Option<[u8; 32]>, MochiOsBackendError> {
+fn try_recv_event() -> Result<Option<(usize, [u8; 32])>, MochiOsBackendError> {
     let event = core::ptr::addr_of_mut!(EVENT_BUF).cast::<u8>();
     let len = match ipc_wait_raw(0, event, 32) {
         Ok(len) => len,
@@ -599,7 +1343,7 @@ fn try_recv_event() -> Result<Option<[u8; 32]>, MochiOsBackendError> {
     unsafe {
         core::ptr::copy_nonoverlapping(event, out.as_mut_ptr(), copy_len);
     }
-    Ok(Some(out))
+    Ok(Some((len, out)))
 }
 
 fn wait_for_event<A: PlatformApplication>(
@@ -607,8 +1351,9 @@ fn wait_for_event<A: PlatformApplication>(
     window: &MochiOsWindow,
     backend: &mut MochiOsBackend<A>,
 ) -> Result<(), MochiOsBackendError> {
-    if let Some(event) = read_event_blocking(endpoint)? {
-        backend.handle_compositor_event(event, window)?;
+    if let Some((len, event)) = read_event_blocking(endpoint)? {
+        backend.handle_or_queue_event_message(len, event, window)?;
+        backend.flush_pending_pointer_motion(window);
     }
     Ok(())
 }
@@ -619,8 +1364,9 @@ fn wait_until_deadline<A: PlatformApplication>(
     backend: &mut MochiOsBackend<A>,
 ) -> Result<bool, MochiOsBackendError> {
     loop {
-        if let Some(event) = try_recv_event()? {
-            backend.handle_compositor_event(event, window)?;
+        if let Some((len, event)) = try_recv_event()? {
+            backend.handle_or_queue_event_message(len, event, window)?;
+            backend.flush_pending_pointer_motion(window);
             return Ok(true);
         }
         if Instant::now() >= deadline {
@@ -630,9 +1376,13 @@ fn wait_until_deadline<A: PlatformApplication>(
     }
 }
 
-fn read_event_blocking(endpoint: u64) -> Result<Option<[u8; 32]>, MochiOsBackendError> {
+fn read_event_blocking(endpoint: u64) -> Result<Option<(usize, [u8; 32])>, MochiOsBackendError> {
     let event = core::ptr::addr_of_mut!(EVENT_BUF).cast::<u8>();
-    let len = ipc_wait_raw(endpoint, event, 32)?;
+    let len = match ipc_wait_raw(endpoint, event, 32) {
+        Ok(len) => len,
+        Err(MochiOsBackendError::Syscall(ERRNO_EAGAIN)) => return Ok(None),
+        Err(err) => return Err(err),
+    };
     if len < 16 {
         return Err(MochiOsBackendError::InvalidEvent);
     }
@@ -641,12 +1391,13 @@ fn read_event_blocking(endpoint: u64) -> Result<Option<[u8; 32]>, MochiOsBackend
     unsafe {
         core::ptr::copy_nonoverlapping(event, out.as_mut_ptr(), copy_len);
     }
-    Ok(Some(out))
+    Ok(Some((len, out)))
 }
 
 fn create_surface(
     compositor: u64,
     event_endpoint: u64,
+    role: u32,
     width: u32,
     height: u32,
 ) -> Result<u64, MochiOsBackendError> {
@@ -655,7 +1406,7 @@ fn create_surface(
     unsafe {
         zero_raw(request, 24);
         put_u32_raw(request, 0, OP_CREATE_SURFACE);
-        put_u32_raw(request, 4, ROLE_TOPLEVEL);
+        put_u32_raw(request, 4, role);
         put_u32_raw(request, 8, width);
         put_u32_raw(request, 12, height);
         put_u64_raw(request, 16, event_endpoint);
@@ -674,30 +1425,44 @@ fn attach_buffer(
     token: u64,
     width: usize,
     height: usize,
-    buffer: &[u32],
+    pixmap: &Pixmap,
+    background: Color,
     shared_buffer: &mut SharedBuffer,
+    viewport: Viewport,
+    dirty_bounds: Rect,
+    cursor: Option<CursorBlit<'_>>,
 ) -> Result<(), MochiOsBackendError> {
     let pixel_count = width
         .checked_mul(height)
         .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
-    if buffer.len() < pixel_count {
+    let pixmap_pixel_count = (pixmap.width() as usize)
+        .checked_mul(pixmap.height() as usize)
+        .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
+    if pixmap.width() as usize != width || pixmap.height() as usize != height {
         return Err(MochiOsBackendError::InvalidWindowSize);
     }
-    let request = core::ptr::addr_of_mut!(ATTACH_BUFFER_REQ).cast::<u8>();
-    let reply = core::ptr::addr_of_mut!(IPC_REPLY).cast::<u8>();
-    unsafe {
-        zero_raw(request, 28);
-        put_u32_raw(request, 0, OP_ATTACH_BUFFER);
-        put_u64_raw(request, 4, token);
-        put_u32_raw(request, 12, width as u32);
-        put_u32_raw(request, 16, height as u32);
-        put_u32_raw(request, 20, width as u32);
-        put_u32_raw(request, 24, PIXEL_FORMAT_XRGB8888);
-        zero_raw(reply, 16);
+    if pixmap_pixel_count < pixel_count {
+        return Err(MochiOsBackendError::InvalidWindowSize);
     }
-    let len = ipc_call_raw(compositor, request, 28, reply, 16)?;
-    status_from_raw(reply, len)?;
-    shared_buffer.send_to(compositor, &buffer[..pixel_count])
+    if !shared_buffer.is_attached() {
+        let request = core::ptr::addr_of_mut!(ATTACH_BUFFER_REQ).cast::<u8>();
+        let reply = core::ptr::addr_of_mut!(IPC_REPLY).cast::<u8>();
+        unsafe {
+            zero_raw(request, 28);
+            put_u32_raw(request, 0, OP_ATTACH_BUFFER);
+            put_u64_raw(request, 4, token);
+            put_u32_raw(request, 12, width as u32);
+            put_u32_raw(request, 16, height as u32);
+            put_u32_raw(request, 20, width as u32);
+            put_u32_raw(request, 24, PIXEL_FORMAT_XRGB8888);
+            zero_raw(reply, 16);
+        }
+        let len = ipc_call_raw(compositor, request, 28, reply, 16)?;
+        status_from_raw(reply, len)?;
+        shared_buffer.mark_attached();
+    }
+    let dirty_rect = physical_dirty_rect(viewport, dirty_bounds);
+    shared_buffer.send_pixmap_to(compositor, pixmap, background, dirty_rect, cursor)
 }
 
 fn simple_token_request(
@@ -717,36 +1482,94 @@ fn simple_token_request(
     status_from_raw(reply, len)
 }
 
+fn physical_dirty_rect(viewport: Viewport, dirty_bounds: Rect) -> PhysicalDirtyRect {
+    let viewport_bounds = viewport.logical_bounds();
+    let dirty = dirty_bounds
+        .intersection(viewport_bounds)
+        .unwrap_or(viewport_bounds);
+    let scale = valid_scale_factor(viewport.scale_factor);
+    let x = (dirty.origin.x * scale).floor().max(0.0);
+    let y = (dirty.origin.y * scale).floor().max(0.0);
+    let right = ((dirty.origin.x + dirty.size.width) * scale)
+        .ceil()
+        .min(viewport.physical_width as f32);
+    let bottom = ((dirty.origin.y + dirty.size.height) * scale)
+        .ceil()
+        .min(viewport.physical_height as f32);
+    let width = (right - x).max(1.0);
+    let height = (bottom - y).max(1.0);
+
+    PhysicalDirtyRect {
+        x: x as usize,
+        y: y as usize,
+        width: width as usize,
+        height: height as usize,
+    }
+}
+
+fn damage_token_request(
+    compositor: u64,
+    token: u64,
+    viewport: Viewport,
+    dirty_bounds: Rect,
+) -> Result<(), MochiOsBackendError> {
+    let dirty = physical_dirty_rect(viewport, dirty_bounds);
+
+    let request = core::ptr::addr_of_mut!(DAMAGE_REQ).cast::<u8>();
+    let reply = core::ptr::addr_of_mut!(IPC_REPLY).cast::<u8>();
+    unsafe {
+        zero_raw(request, 28);
+        put_u32_raw(request, 0, OP_DAMAGE);
+        put_u64_raw(request, 4, token);
+        put_u32_raw(request, 12, dirty.x as u32);
+        put_u32_raw(request, 16, dirty.y as u32);
+        put_u32_raw(request, 20, dirty.width as u32);
+        put_u32_raw(request, 24, dirty.height as u32);
+        zero_raw(reply, 16);
+    }
+    let len = ipc_call_raw(compositor, request, 28, reply, 16)?;
+    status_from_raw(reply, len)
+}
+
 fn render_display_list(
     viewport: Viewport,
+    dirty_bounds: Rect,
     display_list: &DisplayList,
     font_system: &mut FontSystem,
     swash_cache: &mut SwashCache,
     text_layout_cache: &mut HashMap<TextLayoutKey, Buffer>,
-) -> Result<Vec<u32>, MochiOsBackendError> {
+    pixmap: &mut Option<Pixmap>,
+) -> Result<Color, MochiOsBackendError> {
     let width = viewport.physical_width;
     let height = viewport.physical_height;
-    let mut pixmap = Pixmap::new(width, height).ok_or(MochiOsBackendError::InvalidWindowSize)?;
-    pixmap.fill(SkiaColor::from_rgba8(0, 0, 0, 0));
+    let pixmap = reusable_pixmap(pixmap, width, height)?;
     let mut clear_color = Color::BLACK;
 
     let scale = valid_scale_factor(viewport.scale_factor);
     let transform = Transform::from_scale(scale, scale);
     let bounds = viewport.logical_bounds();
-    let mut clip_stack = vec![create_clip_mask(bounds, None, width, height, transform)?];
+    let dirty_bounds = dirty_bounds.intersection(bounds).unwrap_or(bounds);
+    let mut clip_stack = vec![create_clip_mask(
+        dirty_bounds,
+        None,
+        width,
+        height,
+        transform,
+    )?];
 
     for command in display_list.commands() {
         match command {
             DrawCommand::Clear { color } => {
                 clear_color = *color;
-                pixmap.fill(SkiaColor::from_rgba8(
-                    color.red,
-                    color.green,
-                    color.blue,
-                    color.alpha,
-                ));
+                if let Some(rect) = to_skia_rect(dirty_bounds) {
+                    let paint = solid_paint(*color);
+                    pixmap.fill_rect(rect, &paint, transform, clip_stack.last());
+                }
             }
             DrawCommand::FillRect { rect, color } => {
+                if rect.intersection(dirty_bounds).is_none() {
+                    continue;
+                }
                 let Some(rect) = to_skia_rect(*rect) else {
                     continue;
                 };
@@ -758,6 +1581,9 @@ fn render_display_list(
                 radius,
                 color,
             } => {
+                if rect.intersection(dirty_bounds).is_none() {
+                    continue;
+                }
                 let Some(rect) = to_skia_rect(*rect) else {
                     continue;
                 };
@@ -772,6 +1598,9 @@ fn render_display_list(
                 );
             }
             DrawCommand::FillEllipse { rect, color } => {
+                if rect.intersection(dirty_bounds).is_none() {
+                    continue;
+                }
                 let Some(rect) = to_skia_rect(*rect) else {
                     continue;
                 };
@@ -791,6 +1620,13 @@ fn render_display_list(
                 width: stroke_width,
             } => {
                 if !stroke_width.is_finite() || *stroke_width <= 0.0 {
+                    continue;
+                }
+                if rect
+                    .expanded(*stroke_width * 0.5 + 1.0)
+                    .intersection(dirty_bounds)
+                    .is_none()
+                {
                     continue;
                 }
                 let Some(rect) = to_skia_rect(*rect) else {
@@ -813,6 +1649,13 @@ fn render_display_list(
                 if !stroke_width.is_finite() || *stroke_width <= 0.0 {
                     continue;
                 }
+                if rect
+                    .expanded(*stroke_width * 0.5 + 1.0)
+                    .intersection(dirty_bounds)
+                    .is_none()
+                {
+                    continue;
+                }
                 let Some(rect) = to_skia_rect(*rect) else {
                     continue;
                 };
@@ -830,6 +1673,13 @@ fn render_display_list(
                 width: stroke_width,
             } => {
                 if !stroke_width.is_finite() || *stroke_width <= 0.0 {
+                    continue;
+                }
+                if rect
+                    .expanded(*stroke_width * 0.5 + 1.0)
+                    .intersection(dirty_bounds)
+                    .is_none()
+                {
                     continue;
                 }
                 let Some(rect) = to_skia_rect(*rect) else {
@@ -864,11 +1714,11 @@ fn render_display_list(
                 }
             }
             DrawCommand::DrawText { command } => {
-                if command.bounds.intersection(bounds).is_none() {
+                if command.bounds.intersection(dirty_bounds).is_none() {
                     continue;
                 }
                 draw_text_command(
-                    &mut pixmap,
+                    &mut *pixmap,
                     font_system,
                     swash_cache,
                     text_layout_cache,
@@ -877,11 +1727,38 @@ fn render_display_list(
                     clip_stack.last(),
                 );
             }
-            DrawCommand::DrawImage { .. } | DrawCommand::DrawSvg { .. } => {}
+            DrawCommand::DrawSvg { command } => {
+                if command.bounds.intersection(dirty_bounds).is_none() {
+                    continue;
+                }
+                draw_svg_command(pixmap, command, scale, clip_stack.last())?;
+            }
+            DrawCommand::DrawImage { command } => {
+                if command.bounds.intersection(dirty_bounds).is_none() {
+                    continue;
+                }
+                draw_image_command(pixmap, command, scale, clip_stack.last())?;
+            }
         }
     }
 
-    Ok(pixmap_to_xrgb(&pixmap, clear_color))
+    Ok(clear_color)
+}
+
+fn reusable_pixmap(
+    pixmap: &mut Option<Pixmap>,
+    width: u32,
+    height: u32,
+) -> Result<&mut Pixmap, MochiOsBackendError> {
+    let needs_allocate = pixmap
+        .as_ref()
+        .is_none_or(|current| current.width() != width || current.height() != height);
+    if needs_allocate {
+        *pixmap = Some(Pixmap::new(width, height).ok_or(MochiOsBackendError::InvalidWindowSize)?);
+    }
+    pixmap
+        .as_mut()
+        .ok_or(MochiOsBackendError::InvalidWindowSize)
 }
 
 fn valid_scale_factor(scale_factor: f64) -> f32 {
@@ -890,6 +1767,187 @@ fn valid_scale_factor(scale_factor: f64) -> f32 {
     } else {
         1.0
     }
+}
+
+fn draw_image_command(
+    target: &mut Pixmap,
+    command: &ImageCommand,
+    display_scale: f32,
+    clip: Option<&Mask>,
+) -> Result<(), MochiOsBackendError> {
+    let bounds = command.bounds;
+    if !is_valid_image_bounds(bounds) {
+        return Ok(());
+    }
+
+    let image_width = command.image.width();
+    let image_height = command.image.height();
+    if image_width == 0 || image_height == 0 {
+        return Ok(());
+    }
+
+    let Some(source) = PixmapRef::from_bytes(
+        command.image.premultiplied_rgba8(),
+        image_width,
+        image_height,
+    ) else {
+        return Ok(());
+    };
+
+    let destination_width = bounds.size.width * display_scale;
+    let destination_height = bounds.size.height * display_scale;
+    let translate_x = bounds.origin.x * display_scale;
+    let translate_y = bounds.origin.y * display_scale;
+    if !destination_width.is_finite()
+        || !destination_height.is_finite()
+        || !translate_x.is_finite()
+        || !translate_y.is_finite()
+        || destination_width <= 0.0
+        || destination_height <= 0.0
+    {
+        return Ok(());
+    }
+
+    let scale_x = destination_width / image_width as f32;
+    let scale_y = destination_height / image_height as f32;
+    if !scale_x.is_finite() || !scale_y.is_finite() || scale_x <= 0.0 || scale_y <= 0.0 {
+        return Ok(());
+    }
+
+    let transform = Transform::from_row(scale_x, 0.0, 0.0, scale_y, translate_x, translate_y);
+    let paint = PixmapPaint {
+        opacity: sanitize_image_opacity(command.opacity),
+        quality: image_filter_quality(command.sampling),
+        ..PixmapPaint::default()
+    };
+    target.draw_pixmap(0, 0, source, &paint, transform, clip);
+    Ok(())
+}
+
+fn image_filter_quality(sampling: ImageSampling) -> FilterQuality {
+    match sampling {
+        ImageSampling::Nearest => FilterQuality::Nearest,
+        ImageSampling::Bilinear => FilterQuality::Bilinear,
+        ImageSampling::Bicubic => FilterQuality::Bicubic,
+    }
+}
+
+fn draw_svg_command(
+    target: &mut Pixmap,
+    command: &SvgCommand,
+    display_scale: f32,
+    clip: Option<&Mask>,
+) -> Result<(), MochiOsBackendError> {
+    let bounds = command.bounds;
+    if !is_valid_image_bounds(bounds) {
+        return Ok(());
+    }
+
+    let svg_width = command.svg.width();
+    let svg_height = command.svg.height();
+    if !svg_width.is_finite() || !svg_height.is_finite() || svg_width <= 0.0 || svg_height <= 0.0 {
+        return Ok(());
+    }
+
+    let destination_width = bounds.size.width * display_scale;
+    let destination_height = bounds.size.height * display_scale;
+    if !destination_width.is_finite()
+        || !destination_height.is_finite()
+        || destination_width <= 0.0
+        || destination_height <= 0.0
+    {
+        return Ok(());
+    }
+
+    let raster_width = destination_width.ceil() as u32;
+    let raster_height = destination_height.ceil() as u32;
+    if raster_width == 0 || raster_height == 0 {
+        return Ok(());
+    }
+
+    let mut raster =
+        Pixmap::new(raster_width, raster_height).ok_or(MochiOsBackendError::InvalidWindowSize)?;
+    let render_transform = Transform::from_scale(
+        raster_width as f32 / svg_width,
+        raster_height as f32 / svg_height,
+    );
+    resvg::render(command.svg.tree(), render_transform, &mut raster.as_mut());
+
+    if let Some(tint) = command.tint {
+        tint_svg_pixmap(&mut raster, tint);
+    }
+
+    let translate_x = bounds.origin.x * display_scale;
+    let translate_y = bounds.origin.y * display_scale;
+    if !translate_x.is_finite() || !translate_y.is_finite() {
+        return Ok(());
+    }
+
+    let paint = PixmapPaint {
+        opacity: sanitize_image_opacity(command.opacity),
+        quality: FilterQuality::Bicubic,
+        ..PixmapPaint::default()
+    };
+    target.draw_pixmap(
+        translate_x.round() as i32,
+        translate_y.round() as i32,
+        raster.as_ref(),
+        &paint,
+        Transform::identity(),
+        clip,
+    );
+
+    Ok(())
+}
+
+fn svg_supersample_scale(destination_width: f32, destination_height: f32) -> f32 {
+    if !destination_width.is_finite()
+        || !destination_height.is_finite()
+        || destination_width <= 0.0
+        || destination_height <= 0.0
+    {
+        return 1.0;
+    }
+
+    if destination_width.max(destination_height) <= SVG_SMALL_RENDER_LIMIT {
+        SVG_SMALL_RENDER_SUPERSAMPLE
+    } else {
+        1.0
+    }
+}
+
+fn is_valid_image_bounds(bounds: Rect) -> bool {
+    bounds.origin.x.is_finite()
+        && bounds.origin.y.is_finite()
+        && bounds.size.width.is_finite()
+        && bounds.size.height.is_finite()
+        && bounds.size.width > 0.0
+        && bounds.size.height > 0.0
+}
+
+fn sanitize_image_opacity(opacity: f32) -> f32 {
+    if opacity.is_finite() {
+        opacity.clamp(0.0, 1.0)
+    } else {
+        1.0
+    }
+}
+
+fn tint_svg_pixmap(pixmap: &mut Pixmap, tint: Color) {
+    for pixel in pixmap.data_mut().chunks_exact_mut(4) {
+        let alpha = multiply_channel(pixel[3], tint.alpha);
+
+        pixel[0] = multiply_channel(tint.red, alpha);
+        pixel[1] = multiply_channel(tint.green, alpha);
+        pixel[2] = multiply_channel(tint.blue, alpha);
+        pixel[3] = alpha;
+    }
+}
+
+fn multiply_channel(first: u8, second: u8) -> u8 {
+    let value = u16::from(first) * u16::from(second);
+
+    ((value + 127) / 255) as u8
 }
 
 fn draw_text_command(
@@ -1164,21 +2222,4 @@ fn solid_paint(color: Color) -> Paint<'static> {
     paint.set_color_rgba8(color.red, color.green, color.blue, color.alpha);
     paint.anti_alias = true;
     paint
-}
-
-fn pixmap_to_xrgb(pixmap: &Pixmap, background: Color) -> Vec<u32> {
-    let mut output = Vec::with_capacity(pixmap.width() as usize * pixmap.height() as usize);
-    for pixel in pixmap.data().chunks_exact(4) {
-        let alpha = pixel[3] as u32;
-        let inv_alpha = 255_u32.saturating_sub(alpha);
-
-        // tiny-skia stores premultiplied RGBA. The compositor surface is XRGB,
-        // so each pixel must be flattened explicitly instead of dropping alpha.
-        let red = pixel[0] as u32 + (background.red as u32 * inv_alpha + 127) / 255;
-        let green = pixel[1] as u32 + (background.green as u32 * inv_alpha + 127) / 255;
-        let blue = pixel[2] as u32 + (background.blue as u32 * inv_alpha + 127) / 255;
-
-        output.push(0xff00_0000 | (red.min(255) << 16) | (green.min(255) << 8) | blue.min(255));
-    }
-    output
 }

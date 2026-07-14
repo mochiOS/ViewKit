@@ -4,6 +4,8 @@ use std::fmt;
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::svg::SvgData;
+
 #[derive(Debug, thiserror::Error)]
 pub enum ImageError {
     #[error("画像サイズは0より大きくなければなりません: {width}x{height}")]
@@ -61,6 +63,57 @@ impl ImageData {
                 pixels: pixels.into_boxed_slice(),
             }),
         })
+    }
+
+    pub fn from_premultiplied_rgba8(
+        width: u32,
+        height: u32,
+        pixels: impl Into<Vec<u8>>,
+    ) -> Result<Self, ImageError> {
+        if width == 0 || height == 0 {
+            return Err(ImageError::InvalidDimensions { width, height });
+        }
+
+        let expected = expected_pixel_length(width, height)
+            .ok_or(ImageError::SizeOverflow { width, height })?;
+
+        let pixels = pixels.into();
+
+        if pixels.len() != expected {
+            return Err(ImageError::InvalidPixelLength {
+                expected,
+                actual: pixels.len(),
+            });
+        }
+
+        Ok(Self {
+            inner: Arc::new(ImageDataInner {
+                width,
+                height,
+                pixels: pixels.into_boxed_slice(),
+            }),
+        })
+    }
+
+    pub fn from_svg(svg: &SvgData, width: u32, height: u32) -> Result<Self, ImageError> {
+        if width == 0 || height == 0 {
+            return Err(ImageError::InvalidDimensions { width, height });
+        }
+        let svg_width = svg.width();
+        let svg_height = svg.height();
+        if !svg_width.is_finite()
+            || !svg_height.is_finite()
+            || svg_width <= 0.0
+            || svg_height <= 0.0
+        {
+            return Err(ImageError::InvalidDimensions { width, height });
+        }
+        let mut pixmap = tiny_skia::Pixmap::new(width, height)
+            .ok_or(ImageError::SizeOverflow { width, height })?;
+        let transform =
+            tiny_skia::Transform::from_scale(width as f32 / svg_width, height as f32 / svg_height);
+        resvg::render(svg.tree(), transform, &mut pixmap.as_mut());
+        Self::from_premultiplied_rgba8(width, height, pixmap.data().to_vec())
     }
 
     pub fn decode(bytes: &[u8]) -> Result<Self, ImageError> {

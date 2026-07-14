@@ -16,7 +16,7 @@ use crate::typography::{TextAlignment, TextMeasurer, Typography};
 use crate::view::{PaintContext, RedrawSchedule, View};
 use std::cell::RefCell;
 use std::collections::VecDeque;
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr;
 use std::rc::Rc;
 use std::slice;
@@ -1283,6 +1283,7 @@ pub extern "C" fn vk_runtime_run_window(
                     title,
                     size: Size::new(width, height),
                     resizable: resizable != 0,
+                    fullscreen: false,
                 },
             );
 

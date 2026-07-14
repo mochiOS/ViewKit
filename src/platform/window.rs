@@ -23,6 +23,7 @@ pub struct WindowConfig {
     pub title: String,
     pub size: Size,
     pub resizable: bool,
+    pub fullscreen: bool,
 }
 
 impl Default for WindowConfig {
@@ -31,6 +32,7 @@ impl Default for WindowConfig {
             title: String::from("ViewKit"),
             size: Size::new(800.0, 600.0),
             resizable: true,
+            fullscreen: false,
         }
     }
 }

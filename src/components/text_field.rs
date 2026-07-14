@@ -882,8 +882,10 @@ impl View for TextField {
         let caret_width = 2.0;
         let caret_half_width = caret_width / 2.0;
 
-        let caret_center_x = (text_bounds.origin.x + prefix_width - scroll_offset_x)
-            .clamp(text_bounds.origin.x, text_bounds.origin.x + viewport_width);
+        let caret_min_x = text_bounds.origin.x;
+        let caret_max_x = (text_bounds.origin.x + viewport_width).max(caret_min_x);
+        let caret_center_x =
+            (text_bounds.origin.x + prefix_width - scroll_offset_x).clamp(caret_min_x, caret_max_x);
 
         let caret_x = caret_center_x - caret_half_width;
 
