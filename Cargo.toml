@@ -47,7 +47,7 @@ mochi-user-syscall = "0.1.0"
 
 [lib]
 name = "viewkit"
-crate-type = ["cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [[example]]
 name = "button"
