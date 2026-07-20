@@ -1,4 +1,4 @@
-//! softbufferとtiny-skiaを使用したLinux向けソフトウェアレンダラー
+//! softbufferとtiny-skiaを使用したデスクトップ向けソフトウェアレンダラー
 
 use std::collections::HashMap;
 use std::num::NonZeroU32;

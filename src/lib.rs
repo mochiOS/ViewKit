@@ -4,7 +4,7 @@ pub mod components;
 pub mod draw_command;
 pub mod edge_insets;
 pub mod event;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub mod ffi;
 pub mod font;
 pub mod geometry;

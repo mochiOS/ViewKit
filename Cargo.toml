@@ -42,6 +42,17 @@ softbuffer = {
 
 thiserror = "2"
 
+[target.'cfg(target_os = "windows")'.dependencies]
+winit = {
+    version = "0.30.13",
+    default-features = false,
+    features = ["rwh_06"],
+}
+softbuffer = {
+    version = "0.4.8",
+    default-features = false,
+}
+
 [target.'cfg(target_os = "mochios")'.dependencies]
 mochi-user-syscall = "0.1.0"
 

@@ -1,7 +1,9 @@
 //! ViewKitで使用するフォントシステムを定義
 
 pub(crate) use crate::platform::{load_platform_fonts, DEFAULT_UI_FONT_FAMILY};
-use cosmic_text::{fontdb, FontSystem};
+#[cfg(target_os = "mochios")]
+use cosmic_text::fontdb;
+use cosmic_text::FontSystem;
 
 const DEFAULT_UI_FONT_BYTES: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/default_ui_font.ttf"));

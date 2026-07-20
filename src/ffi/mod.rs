@@ -8,7 +8,10 @@ use crate::draw_command::{DisplayList, DrawCommand, ImageSampling};
 use crate::event::{EventContext, EventDispatcher};
 use crate::geometry::{Rect, Size};
 use crate::layout::{LayoutLength, StackAlignment, StackDistribution, StackGap};
-use crate::platform::linux::LinuxBackend;
+#[cfg(target_os = "linux")]
+use crate::platform::linux::LinuxBackend as NativeBackend;
+#[cfg(target_os = "windows")]
+use crate::platform::windows::WindowsBackend as NativeBackend;
 use crate::platform::{PlatformApplication, PlatformEvent, PlatformWindow, WindowConfig};
 use crate::renderer::Viewport;
 use crate::theme::{Color, CornerRadius, Theme};
@@ -1273,11 +1276,11 @@ pub extern "C" fn vk_runtime_run_window(
             return Err(VkStatus::MissingRoot);
         }
 
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "windows"))]
         {
             let application = VkWindowApplication::new(runtime);
 
-            let backend = LinuxBackend::new(
+            let backend = NativeBackend::new(
                 application,
                 WindowConfig {
                     title,
@@ -1292,7 +1295,7 @@ pub extern "C" fn vk_runtime_run_window(
             Ok(())
         }
 
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", target_os = "windows")))]
         {
             let _ = title;
             let _ = width;

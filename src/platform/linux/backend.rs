@@ -1,12 +1,12 @@
-//! winitを使用したLinux/Waylandバックエンド
+//! winitを使用したLinux/Windows共通デスクトップバックエンド
 
 use super::super::{
     ButtonState, PlatformApplication, PlatformEvent, PlatformWindow, PointerButton, WindowConfig,
 };
 
+use super::SoftwareRenderer;
 use crate::draw_command::DisplayList;
 use crate::geometry::Size;
-use crate::platform::linux::SoftwareRenderer;
 use crate::renderer::{Renderer, Viewport};
 
 use softbuffer::Context;
@@ -21,7 +21,7 @@ use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, OwnedDisplayHandle};
 use winit::keyboard::{Key, NamedKey};
 use winit::window::CursorIcon as WinitCursorIcon;
-use winit::window::{Window, WindowId};
+use winit::window::{Fullscreen, Window, WindowId};
 
 const LINE_SCROLL_PIXELS: f32 = 40.0;
 
@@ -29,7 +29,7 @@ const BACK_MOUSE_BUTTON_ID: u16 = 4;
 const FORWARD_MOUSE_BUTTON_ID: u16 = 5;
 
 #[derive(Debug, thiserror::Error)]
-pub enum LinuxBackendError {
+pub enum DesktopBackendError {
     #[error("イベントループの作成または実行に失敗しました: {0}")]
     EventLoop(#[from] EventLoopError),
 
@@ -37,7 +37,7 @@ pub enum LinuxBackendError {
     Window(#[from] OsError),
 
     #[error("レンダラーの処理に失敗しました: {0}")]
-    Renderer(#[from] crate::platform::linux::SoftwareRendererError),
+    Renderer(#[from] super::SoftwareRendererError),
 
     #[error("softbufferの初期化に失敗しました: {0}")]
     SoftBuffer(#[from] softbuffer::SoftBufferError),
@@ -81,7 +81,7 @@ impl PlatformWindow for WinitWindow<'_> {
     }
 }
 
-pub struct LinuxBackend<A> {
+pub struct DesktopBackend<A> {
     application: A,
     config: WindowConfig,
 
@@ -92,11 +92,11 @@ pub struct LinuxBackend<A> {
     shift_pressed: bool,
     shortcut_pressed: bool,
 
-    runtime_error: Option<LinuxBackendError>,
+    runtime_error: Option<DesktopBackendError>,
     pending_pointer_move: Option<(f32, f32)>,
 }
 
-impl<A> LinuxBackend<A>
+impl<A> DesktopBackend<A>
 where
     A: PlatformApplication,
 {
@@ -117,7 +117,7 @@ where
         }
     }
 
-    pub fn run(mut self) -> Result<(), LinuxBackendError> {
+    pub fn run(mut self) -> Result<(), DesktopBackendError> {
         let event_loop = EventLoop::new()?;
 
         event_loop.set_control_flow(ControlFlow::Wait);
@@ -159,7 +159,7 @@ where
         };
 
         if let Err(error) = renderer.resize(viewport) {
-            self.runtime_error = Some(LinuxBackendError::Renderer(error));
+            self.runtime_error = Some(DesktopBackendError::Renderer(error));
 
             event_loop.exit();
 
@@ -187,7 +187,7 @@ where
         };
 
         if let Err(error) = renderer.render(&display_list, dirty_bounds) {
-            self.runtime_error = Some(LinuxBackendError::Renderer(error));
+            self.runtime_error = Some(DesktopBackendError::Renderer(error));
 
             event_loop.exit();
         }
@@ -202,7 +202,7 @@ where
     }
 }
 
-impl<A> ApplicationHandler for LinuxBackend<A>
+impl<A> ApplicationHandler for DesktopBackend<A>
 where
     A: PlatformApplication,
 {
@@ -217,13 +217,14 @@ where
                 self.config.size.width as f64,
                 self.config.size.height as f64,
             ))
-            .with_resizable(self.config.resizable);
+            .with_resizable(self.config.resizable)
+            .with_fullscreen(self.config.fullscreen.then(|| Fullscreen::Borderless(None)));
 
         let window = match event_loop.create_window(attributes) {
             Ok(window) => Rc::new(window),
 
             Err(error) => {
-                self.runtime_error = Some(LinuxBackendError::Window(error));
+                self.runtime_error = Some(DesktopBackendError::Window(error));
 
                 event_loop.exit();
 
@@ -243,7 +244,7 @@ where
             Ok(renderer) => renderer,
 
             Err(error) => {
-                self.runtime_error = Some(LinuxBackendError::Renderer(error));
+                self.runtime_error = Some(DesktopBackendError::Renderer(error));
 
                 event_loop.exit();
 
