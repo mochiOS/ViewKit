@@ -134,6 +134,25 @@ impl ImageData {
         Self::from_rgba8(width, height, image.into_raw())
     }
 
+    pub fn thumbnail_from_path(
+        path: impl AsRef<Path>,
+        max_width: u32,
+        max_height: u32,
+    ) -> Result<Self, ImageError> {
+        if max_width == 0 || max_height == 0 {
+            return Err(ImageError::InvalidDimensions {
+                width: max_width,
+                height: max_height,
+            });
+        }
+
+        let image = ::image::open(path)?;
+        let image = image.thumbnail(max_width, max_height).into_rgba8();
+        let width = image.width();
+        let height = image.height();
+        Self::from_rgba8(width, height, image.into_raw())
+    }
+
     pub fn width(&self) -> u32 {
         self.inner.width
     }

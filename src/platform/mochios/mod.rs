@@ -8,8 +8,8 @@ use cosmic_text::{
 };
 use mochi_user_syscall as syscall;
 use tiny_skia::{
-    Color as SkiaColor, FillRule, FilterQuality, Mask, Paint, Path, PathBuilder, Pixmap,
-    PixmapPaint, PixmapRef, Rect as SkiaRect, Stroke, Transform,
+    FillRule, FilterQuality, Mask, Paint, Path, PathBuilder, Pixmap, PixmapPaint,
+    Rect as SkiaRect, Stroke, Transform,
 };
 
 use crate::draw_command::{
@@ -68,8 +68,6 @@ const KEY_PAGE_DOWN: u16 = 87;
 const INPUT_FLAG_PRESS: u16 = 1 << 0;
 const INPUT_FLAG_RELEASE: u16 = 1 << 1;
 const TEXT_LAYOUT_CACHE_CAPACITY: usize = 1024;
-const SVG_SMALL_RENDER_LIMIT: f32 = 256.0;
-const SVG_SMALL_RENDER_SUPERSAMPLE: f32 = 2.0;
 const CURSOR_SVG_PATH: &str = "/system/icons/cursor.svg";
 const CURSOR_WIDTH: u32 = 12;
 const CURSOR_HEIGHT: u32 = 20;
@@ -169,6 +167,7 @@ where
     swash_cache: SwashCache,
     text_layout_cache: HashMap<TextLayoutKey, Buffer>,
     pixmap: Option<Pixmap>,
+    clip_masks: Vec<Mask>,
     direct_input: bool,
     pointer_x: f32,
     pointer_y: f32,
@@ -214,6 +213,7 @@ where
             swash_cache: SwashCache::new(),
             text_layout_cache: HashMap::new(),
             pixmap: None,
+            clip_masks: Vec::new(),
             direct_input: false,
             pointer_x: 0.0,
             pointer_y: 0.0,
@@ -307,6 +307,7 @@ where
                     &mut self.swash_cache,
                     &mut self.text_layout_cache,
                     &mut self.pixmap,
+                    &mut self.clip_masks,
                 )?;
                 let render_cycles = perf_counter_elapsed(render_start);
                 self.metrics.render_cycles =
@@ -667,8 +668,8 @@ where
                 CURSOR_WIDTH as f32,
                 CURSOR_HEIGHT as f32,
             )
-                .intersection(bounds)
-                .unwrap_or_else(|| Rect::new(self.pointer_x, self.pointer_y, 1.0, 1.0)),
+            .intersection(bounds)
+            .unwrap_or_else(|| Rect::new(self.pointer_x, self.pointer_y, 1.0, 1.0)),
         )
     }
 
@@ -1539,6 +1540,7 @@ fn render_display_list(
     swash_cache: &mut SwashCache,
     text_layout_cache: &mut HashMap<TextLayoutKey, Buffer>,
     pixmap: &mut Option<Pixmap>,
+    clip_masks: &mut Vec<Mask>,
 ) -> Result<Color, MochiOsBackendError> {
     let width = viewport.physical_width;
     let height = viewport.physical_height;
@@ -1549,13 +1551,8 @@ fn render_display_list(
     let transform = Transform::from_scale(scale, scale);
     let bounds = viewport.logical_bounds();
     let dirty_bounds = dirty_bounds.intersection(bounds).unwrap_or(bounds);
-    let mut clip_stack = vec![create_clip_mask(
-        dirty_bounds,
-        None,
-        width,
-        height,
-        transform,
-    )?];
+    configure_clip_mask(clip_masks, 0, dirty_bounds, None, width, height, transform)?;
+    let mut clip_depth = 0usize;
 
     for command in display_list.commands() {
         match command {
@@ -1563,7 +1560,7 @@ fn render_display_list(
                 clear_color = *color;
                 if let Some(rect) = to_skia_rect(dirty_bounds) {
                     let paint = solid_paint(*color);
-                    pixmap.fill_rect(rect, &paint, transform, clip_stack.last());
+                    pixmap.fill_rect(rect, &paint, transform, clip_masks.get(clip_depth));
                 }
             }
             DrawCommand::FillRect { rect, color } => {
@@ -1574,7 +1571,7 @@ fn render_display_list(
                     continue;
                 };
                 let paint = solid_paint(*color);
-                pixmap.fill_rect(rect, &paint, transform, clip_stack.last());
+                pixmap.fill_rect(rect, &paint, transform, clip_masks.get(clip_depth));
             }
             DrawCommand::FillRoundedRect {
                 rect,
@@ -1594,7 +1591,7 @@ fn render_display_list(
                     &paint,
                     FillRule::Winding,
                     transform,
-                    clip_stack.last(),
+                    clip_masks.get(clip_depth),
                 );
             }
             DrawCommand::FillEllipse { rect, color } => {
@@ -1611,7 +1608,7 @@ fn render_display_list(
                     &paint,
                     FillRule::Winding,
                     transform,
-                    clip_stack.last(),
+                    clip_masks.get(clip_depth),
                 );
             }
             DrawCommand::StrokeRect {
@@ -1638,7 +1635,13 @@ fn render_display_list(
                     width: *stroke_width,
                     ..Stroke::default()
                 };
-                pixmap.stroke_path(&path, &paint, &stroke, transform, clip_stack.last());
+                pixmap.stroke_path(
+                    &path,
+                    &paint,
+                    &stroke,
+                    transform,
+                    clip_masks.get(clip_depth),
+                );
             }
             DrawCommand::StrokeRoundedRect {
                 rect,
@@ -1665,7 +1668,13 @@ fn render_display_list(
                     width: *stroke_width,
                     ..Stroke::default()
                 };
-                pixmap.stroke_path(&path, &paint, &stroke, transform, clip_stack.last());
+                pixmap.stroke_path(
+                    &path,
+                    &paint,
+                    &stroke,
+                    transform,
+                    clip_masks.get(clip_depth),
+                );
             }
             DrawCommand::StrokeEllipse {
                 rect,
@@ -1691,26 +1700,44 @@ fn render_display_list(
                     width: *stroke_width,
                     ..Stroke::default()
                 };
-                pixmap.stroke_path(&path, &paint, &stroke, transform, clip_stack.last());
+                pixmap.stroke_path(
+                    &path,
+                    &paint,
+                    &stroke,
+                    transform,
+                    clip_masks.get(clip_depth),
+                );
             }
             DrawCommand::PushClip { rect } => {
-                let mask = create_clip_mask(*rect, clip_stack.last(), width, height, transform)?;
-                clip_stack.push(mask);
-            }
-            DrawCommand::PushRoundedClip { rect, radius } => {
-                let mask = create_rounded_clip_mask(
+                let next_depth = clip_depth.saturating_add(1);
+                configure_clip_mask(
+                    clip_masks,
+                    next_depth,
                     *rect,
-                    *radius,
-                    clip_stack.last(),
+                    Some(clip_depth),
                     width,
                     height,
                     transform,
                 )?;
-                clip_stack.push(mask);
+                clip_depth = next_depth;
+            }
+            DrawCommand::PushRoundedClip { rect, radius } => {
+                let next_depth = clip_depth.saturating_add(1);
+                configure_rounded_clip_mask(
+                    clip_masks,
+                    next_depth,
+                    *rect,
+                    *radius,
+                    Some(clip_depth),
+                    width,
+                    height,
+                    transform,
+                )?;
+                clip_depth = next_depth;
             }
             DrawCommand::PopClip => {
-                if clip_stack.len() > 1 {
-                    clip_stack.pop();
+                if clip_depth > 0 {
+                    clip_depth -= 1;
                 }
             }
             DrawCommand::DrawText { command } => {
@@ -1724,20 +1751,20 @@ fn render_display_list(
                     text_layout_cache,
                     command,
                     scale,
-                    clip_stack.last(),
+                    clip_masks.get(clip_depth),
                 );
             }
             DrawCommand::DrawSvg { command } => {
                 if command.bounds.intersection(dirty_bounds).is_none() {
                     continue;
                 }
-                draw_svg_command(pixmap, command, scale, clip_stack.last())?;
+                draw_svg_command(pixmap, command, scale, clip_masks.get(clip_depth))?;
             }
             DrawCommand::DrawImage { command } => {
                 if command.bounds.intersection(dirty_bounds).is_none() {
                     continue;
                 }
-                draw_image_command(pixmap, command, scale, clip_stack.last())?;
+                draw_image_command(pixmap, command, scale, clip_masks.get(clip_depth))?;
             }
         }
     }
@@ -1786,14 +1813,6 @@ fn draw_image_command(
         return Ok(());
     }
 
-    let Some(source) = PixmapRef::from_bytes(
-        command.image.premultiplied_rgba8(),
-        image_width,
-        image_height,
-    ) else {
-        return Ok(());
-    };
-
     let destination_width = bounds.size.width * display_scale;
     let destination_height = bounds.size.height * display_scale;
     let translate_x = bounds.origin.x * display_scale;
@@ -1808,28 +1827,152 @@ fn draw_image_command(
         return Ok(());
     }
 
-    let scale_x = destination_width / image_width as f32;
-    let scale_y = destination_height / image_height as f32;
-    if !scale_x.is_finite() || !scale_y.is_finite() || scale_x <= 0.0 || scale_y <= 0.0 {
-        return Ok(());
-    }
-
-    let transform = Transform::from_row(scale_x, 0.0, 0.0, scale_y, translate_x, translate_y);
-    let paint = PixmapPaint {
-        opacity: sanitize_image_opacity(command.opacity),
-        quality: image_filter_quality(command.sampling),
-        ..PixmapPaint::default()
-    };
-    target.draw_pixmap(0, 0, source, &paint, transform, clip);
+    blit_image(
+        target,
+        command.image.premultiplied_rgba8(),
+        image_width as usize,
+        image_height as usize,
+        translate_x,
+        translate_y,
+        destination_width,
+        destination_height,
+        sanitize_image_opacity(command.opacity),
+        command.sampling,
+        clip,
+    );
     Ok(())
 }
 
-fn image_filter_quality(sampling: ImageSampling) -> FilterQuality {
-    match sampling {
-        ImageSampling::Nearest => FilterQuality::Nearest,
-        ImageSampling::Bilinear => FilterQuality::Bilinear,
-        ImageSampling::Bicubic => FilterQuality::Bicubic,
+#[allow(clippy::too_many_arguments)]
+fn blit_image(
+    target: &mut Pixmap,
+    source: &[u8],
+    source_width: usize,
+    source_height: usize,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    opacity: f32,
+    sampling: ImageSampling,
+    clip: Option<&Mask>,
+) {
+    let target_width = target.width() as usize;
+    let target_height = target.height() as usize;
+    let left = x.floor().max(0.0) as usize;
+    let top = y.floor().max(0.0) as usize;
+    let right = (x + width).ceil().max(0.0).min(target_width as f32) as usize;
+    let bottom = (y + height)
+        .ceil()
+        .max(0.0)
+        .min(target_height as f32) as usize;
+    if left >= right || top >= bottom {
+        return;
     }
+
+    let opacity = (opacity * 255.0).round().clamp(0.0, 255.0) as u32;
+    let clip_data = clip.map(Mask::data);
+    let target_data = target.data_mut();
+    for target_y in top..bottom {
+        let source_y = ((target_y as f32 + 0.5 - y) * source_height as f32 / height - 0.5)
+            .clamp(0.0, source_height.saturating_sub(1) as f32);
+        for target_x in left..right {
+            let source_x = ((target_x as f32 + 0.5 - x) * source_width as f32 / width - 0.5)
+                .clamp(0.0, source_width.saturating_sub(1) as f32);
+            let pixel = match sampling {
+                ImageSampling::Nearest => sample_nearest(
+                    source,
+                    source_width,
+                    source_height,
+                    source_x,
+                    source_y,
+                ),
+                ImageSampling::Bilinear | ImageSampling::Bicubic => sample_bilinear(
+                    source,
+                    source_width,
+                    source_height,
+                    source_x,
+                    source_y,
+                ),
+            };
+            let target_index = (target_y * target_width + target_x) * 4;
+            let mask = clip_data
+                .and_then(|data| data.get(target_y * target_width + target_x))
+                .copied()
+                .unwrap_or(255) as u32;
+            let factor = (opacity * mask + 127) / 255;
+            blend_premultiplied(&mut target_data[target_index..target_index + 4], pixel, factor);
+        }
+    }
+}
+
+fn sample_nearest(
+    source: &[u8],
+    width: usize,
+    height: usize,
+    x: f32,
+    y: f32,
+) -> [u8; 4] {
+    let x = (x.round() as usize).min(width.saturating_sub(1));
+    let y = (y.round() as usize).min(height.saturating_sub(1));
+    source_pixel(source, width, x, y)
+}
+
+fn sample_bilinear(
+    source: &[u8],
+    width: usize,
+    height: usize,
+    x: f32,
+    y: f32,
+) -> [u8; 4] {
+    let x0 = (x.floor() as usize).min(width.saturating_sub(1));
+    let y0 = (y.floor() as usize).min(height.saturating_sub(1));
+    let x1 = x0.saturating_add(1).min(width.saturating_sub(1));
+    let y1 = y0.saturating_add(1).min(height.saturating_sub(1));
+    let fx = x - x0 as f32;
+    let fy = y - y0 as f32;
+    let pixels = [
+        source_pixel(source, width, x0, y0),
+        source_pixel(source, width, x1, y0),
+        source_pixel(source, width, x0, y1),
+        source_pixel(source, width, x1, y1),
+    ];
+    let weights = [
+        (1.0 - fx) * (1.0 - fy),
+        fx * (1.0 - fy),
+        (1.0 - fx) * fy,
+        fx * fy,
+    ];
+    let mut output = [0u8; 4];
+    for channel in 0..4 {
+        output[channel] = pixels
+            .iter()
+            .zip(weights)
+            .map(|(pixel, weight)| pixel[channel] as f32 * weight)
+            .sum::<f32>()
+            .round()
+            .clamp(0.0, 255.0) as u8;
+    }
+    output
+}
+
+fn source_pixel(source: &[u8], width: usize, x: usize, y: usize) -> [u8; 4] {
+    let index = (y * width + x) * 4;
+    source
+        .get(index..index + 4)
+        .and_then(|pixel| pixel.try_into().ok())
+        .unwrap_or([0; 4])
+}
+
+fn blend_premultiplied(target: &mut [u8], source: [u8; 4], factor: u32) {
+    let source_alpha = (source[3] as u32 * factor + 127) / 255;
+    let inverse_alpha = 255 - source_alpha;
+    for channel in 0..3 {
+        let source_channel = (source[channel] as u32 * factor + 127) / 255;
+        target[channel] = (source_channel + (target[channel] as u32 * inverse_alpha + 127) / 255)
+            .min(255) as u8;
+    }
+    target[3] = (source_alpha + (target[3] as u32 * inverse_alpha + 127) / 255).min(255) as u8;
 }
 
 fn draw_svg_command(
@@ -1898,22 +2041,6 @@ fn draw_svg_command(
     );
 
     Ok(())
-}
-
-fn svg_supersample_scale(destination_width: f32, destination_height: f32) -> f32 {
-    if !destination_width.is_finite()
-        || !destination_height.is_finite()
-        || destination_width <= 0.0
-        || destination_height <= 0.0
-    {
-        return 1.0;
-    }
-
-    if destination_width.max(destination_height) <= SVG_SMALL_RENDER_LIMIT {
-        SVG_SMALL_RENDER_SUPERSAMPLE
-    } else {
-        1.0
-    }
 }
 
 fn is_valid_image_bounds(bounds: Rect) -> bool {
@@ -2166,45 +2293,64 @@ fn ellipse_path(rect: SkiaRect) -> Path {
         .unwrap_or_else(|| PathBuilder::from_rect(rect))
 }
 
-fn create_clip_mask(
+fn configure_clip_mask(
+    masks: &mut Vec<Mask>,
+    index: usize,
     rect: Rect,
-    previous: Option<&Mask>,
+    previous: Option<usize>,
     width: u32,
     height: u32,
     transform: Transform,
-) -> Result<Mask, MochiOsBackendError> {
+) -> Result<(), MochiOsBackendError> {
     let path = to_skia_rect(rect).map(PathBuilder::from_rect);
-    create_path_clip_mask(path, previous, width, height, transform)
+    configure_path_clip_mask(masks, index, path, previous, width, height, transform)
 }
 
-fn create_rounded_clip_mask(
+fn configure_rounded_clip_mask(
+    masks: &mut Vec<Mask>,
+    index: usize,
     rect: Rect,
     radius: f32,
-    previous: Option<&Mask>,
+    previous: Option<usize>,
     width: u32,
     height: u32,
     transform: Transform,
-) -> Result<Mask, MochiOsBackendError> {
+) -> Result<(), MochiOsBackendError> {
     let path = to_skia_rect(rect).map(|rect| rounded_rect_path(rect, radius));
-    create_path_clip_mask(path, previous, width, height, transform)
+    configure_path_clip_mask(masks, index, path, previous, width, height, transform)
 }
 
-fn create_path_clip_mask(
+fn configure_path_clip_mask(
+    masks: &mut Vec<Mask>,
+    index: usize,
     path: Option<Path>,
-    previous: Option<&Mask>,
+    previous: Option<usize>,
     width: u32,
     height: u32,
     transform: Transform,
-) -> Result<Mask, MochiOsBackendError> {
+) -> Result<(), MochiOsBackendError> {
+    while masks.len() <= index {
+        masks.push(Mask::new(width, height).ok_or(MochiOsBackendError::InvalidWindowSize)?);
+    }
+    if masks[index].width() != width || masks[index].height() != height {
+        masks[index] = Mask::new(width, height).ok_or(MochiOsBackendError::InvalidWindowSize)?;
+    }
+
     let has_previous = previous.is_some();
-    let mut mask = match previous {
-        Some(previous) => previous.clone(),
-        None => Mask::new(width, height).ok_or(MochiOsBackendError::InvalidWindowSize)?,
-    };
+    if let Some(previous) = previous {
+        if previous >= index {
+            return Err(MochiOsBackendError::InvalidWindowSize);
+        }
+        let (before, current) = masks.split_at_mut(index);
+        current[0]
+            .data_mut()
+            .copy_from_slice(before[previous].data());
+    }
+    let mask = &mut masks[index];
 
     let Some(path) = path else {
         mask.clear();
-        return Ok(mask);
+        return Ok(());
     };
 
     if has_previous {
@@ -2214,7 +2360,7 @@ fn create_path_clip_mask(
         mask.fill_path(&path, FillRule::Winding, true, transform);
     }
 
-    Ok(mask)
+    Ok(())
 }
 
 fn solid_paint(color: Color) -> Paint<'static> {
