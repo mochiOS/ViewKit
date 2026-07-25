@@ -16,7 +16,7 @@ use crate::draw_command::{
     DisplayList, DrawCommand, ImageCommand, ImageSampling, SvgCommand, TextCommand,
 };
 use crate::font::create_font_system;
-use crate::geometry::Rect;
+use crate::geometry::{Rect, Size};
 use crate::image::ImageData;
 use crate::platform::{
     ButtonState, CursorIcon, PlatformApplication, PlatformEvent, PlatformWindow, PointerButton,
@@ -1772,6 +1772,41 @@ fn render_display_list(
     Ok(clear_color)
 }
 
+pub fn render_offscreen_xrgb(
+    display_list: &DisplayList,
+    width: u32,
+    height: u32,
+) -> Result<Vec<u32>, MochiOsBackendError> {
+    let viewport = Viewport::new(
+        Size::new(width as f32, height as f32),
+        width,
+        height,
+        1.0,
+    );
+    let mut font_system = create_font_system();
+    let mut swash_cache = SwashCache::new();
+    let mut text_layout_cache = HashMap::new();
+    let mut pixmap = None;
+    let mut clip_masks = Vec::new();
+    let bounds = viewport.logical_bounds();
+    let background = render_display_list(
+        viewport,
+        bounds,
+        display_list,
+        &mut font_system,
+        &mut swash_cache,
+        &mut text_layout_cache,
+        &mut pixmap,
+        &mut clip_masks,
+    )?;
+    let pixmap = pixmap.ok_or(MochiOsBackendError::InvalidWindowSize)?;
+    Ok(pixmap
+        .data()
+        .chunks_exact(4)
+        .map(|pixel| flatten_premultiplied_pixel(pixel, background))
+        .collect())
+}
+
 fn reusable_pixmap(
     pixmap: &mut Option<Pixmap>,
     width: u32,
@@ -2164,35 +2199,74 @@ fn draw_text_command(
             |x, y, color| {
                 let draw_x = physical_glyph.x + x;
                 let draw_y = physical_glyph.y + y;
-                let Some(pixel_rect) = SkiaRect::from_xywh(draw_x as f32, draw_y as f32, 1.0, 1.0)
-                else {
-                    return;
-                };
-                let Some(rect) = intersect_rect(pixel_rect, text_clip) else {
-                    return;
-                };
-                let (red, green, blue, alpha) = color.as_rgba_tuple();
-                if alpha == 0 {
-                    return;
-                }
-                let mut paint = Paint::default();
-                paint.set_color_rgba8(red, green, blue, alpha);
-                paint.anti_alias = false;
-                pixmap.fill_rect(rect, &paint, Transform::identity(), clip);
+                blend_text_pixel(pixmap, clip, text_clip, draw_x, draw_y, color);
             },
         );
     }
 }
 
-fn intersect_rect(first: SkiaRect, second: SkiaRect) -> Option<SkiaRect> {
-    let left = first.left().max(second.left());
-    let top = first.top().max(second.top());
-    let right = first.right().min(second.right());
-    let bottom = first.bottom().min(second.bottom());
-    if right <= left || bottom <= top {
-        return None;
+fn blend_text_pixel(
+    pixmap: &mut Pixmap,
+    clip: Option<&Mask>,
+    text_clip: SkiaRect,
+    x: i32,
+    y: i32,
+    color: CosmicColor,
+) {
+    let Ok(x) = usize::try_from(x) else {
+        return;
+    };
+    let Ok(y) = usize::try_from(y) else {
+        return;
+    };
+    let width = pixmap.width() as usize;
+    let height = pixmap.height() as usize;
+    if x >= width || y >= height {
+        return;
     }
-    SkiaRect::from_xywh(left, top, right - left, bottom - top)
+
+    let pixel_left = x as f32;
+    let pixel_top = y as f32;
+    let overlap_width =
+        (pixel_left + 1.0).min(text_clip.right()) - pixel_left.max(text_clip.left());
+    let overlap_height = (pixel_top + 1.0).min(text_clip.bottom()) - pixel_top.max(text_clip.top());
+    if overlap_width <= 0.0 || overlap_height <= 0.0 {
+        return;
+    }
+
+    let Some(pixel_index) = y.checked_mul(width).and_then(|index| index.checked_add(x)) else {
+        return;
+    };
+    let clip_alpha = clip
+        .and_then(|mask| mask.data().get(pixel_index))
+        .copied()
+        .unwrap_or(255);
+    let coverage = (overlap_width * overlap_height).clamp(0.0, 1.0);
+    let factor = (f32::from(clip_alpha) * coverage).round() as u32;
+    if factor == 0 {
+        return;
+    }
+
+    let (red, green, blue, alpha) = color.as_rgba_tuple();
+    if alpha == 0 {
+        return;
+    }
+    let source = [
+        multiply_channel(red, alpha),
+        multiply_channel(green, alpha),
+        multiply_channel(blue, alpha),
+        alpha,
+    ];
+    let Some((byte_index, byte_end)) = pixel_index
+        .checked_mul(4)
+        .and_then(|index| index.checked_add(4).map(|end| (index, end)))
+    else {
+        return;
+    };
+    let Some(pixel) = pixmap.data_mut().get_mut(byte_index..byte_end) else {
+        return;
+    };
+    blend_premultiplied(pixel, source, factor);
 }
 
 fn to_skia_rect(rect: Rect) -> Option<SkiaRect> {
