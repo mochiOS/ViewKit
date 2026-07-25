@@ -16,7 +16,7 @@ use crate::typography::{TextAlignment, TextMeasurer, Typography};
 use crate::view::{PaintContext, RedrawSchedule, View};
 use std::cell::RefCell;
 use std::collections::VecDeque;
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
 use std::rc::Rc;
 use std::slice;

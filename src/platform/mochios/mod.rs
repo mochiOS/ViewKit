@@ -8,7 +8,7 @@ use cosmic_text::{
 };
 use mochi_user_syscall as syscall;
 use tiny_skia::{
-    FillRule, FilterQuality, Mask, Paint, Path, PathBuilder, Pixmap, PixmapPaint,
+    BlendMode, FillRule, FilterQuality, Mask, Paint, Path, PathBuilder, Pixmap, PixmapPaint,
     Rect as SkiaRect, Stroke, Transform,
 };
 
@@ -35,9 +35,13 @@ const OP_CREATE_SURFACE: u32 = 1;
 const OP_ATTACH_BUFFER: u32 = 2;
 const OP_DAMAGE: u32 = 3;
 const OP_COMMIT: u32 = 4;
+const OP_SET_CURSOR_POSITION: u32 = 7;
+const OP_SET_CURSOR_IMAGE: u32 = 8;
 const ROLE_TOPLEVEL: u32 = 1;
 const ROLE_BACKGROUND: u32 = 3;
+const ROLE_PANEL: u32 = 4;
 const PIXEL_FORMAT_XRGB8888: u32 = 1;
+const PIXEL_FORMAT_ARGB8888_PREMULTIPLIED: u32 = 2;
 const PAGE_SIZE: usize = 4096;
 const MAX_SURFACE_EXTENT: u32 = 16_384;
 const ERRNO_EAGAIN: u64 = 11;
@@ -49,6 +53,7 @@ const EVENT_KEY: u32 = 6;
 const EVENT_FOCUS_GAINED: u32 = 8;
 const EVENT_FOCUS_LOST: u32 = 9;
 const EVENT_FRAME_DONE: u32 = 10;
+const EVENT_CONFIGURE: u32 = 11;
 const INPUT_SUBSCRIBE_OPCODE: u32 = 0x5355_4253;
 const INPUT_EVENT_SIZE: usize = 32;
 const INPUT_EVENT_KIND_POINTER_MOVE: u16 = 2;
@@ -129,7 +134,8 @@ static mut ATTACH_BUFFER_REQ: [u8; 28] = [0; 28];
 static mut TOKEN_REQ: [u8; 12] = [0; 12];
 static mut DAMAGE_REQ: [u8; 28] = [0; 28];
 static mut IPC_REPLY: [u8; 16] = [0; 16];
-static mut EVENT_BUF: [u8; 32] = [0; 32];
+const EVENT_BUFFER_SIZE: usize = 128;
+static mut EVENT_BUF: [u8; EVENT_BUFFER_SIZE] = [0; EVENT_BUFFER_SIZE];
 static mut DISPLAY_REQ: [u8; 20] = [0; 20];
 static mut DISPLAY_REPLY: [u8; 32] = [0; 32];
 static mut INPUT_SUBSCRIBE_REQ: [u8; 16] = [0; 16];
@@ -175,12 +181,14 @@ where
     cursor_dirty: Option<Rect>,
     clear_color: Color,
     pending_pointer_motion: PendingPointerMotion,
+    pending_resize: Option<(u32, u32)>,
     metrics: BackendMetrics,
 }
 
 #[derive(Default)]
 struct PendingPointerMotion {
     absolute: Option<(f32, f32)>,
+    compositor_position: Option<(f32, f32)>,
     relative_dx: f32,
     relative_dy: f32,
     pending: bool,
@@ -221,6 +229,7 @@ where
             cursor_dirty: None,
             clear_color: Color::BLACK,
             pending_pointer_motion: PendingPointerMotion::default(),
+            pending_resize: None,
             metrics: BackendMetrics::default(),
         }
     }
@@ -245,17 +254,26 @@ where
         let viewport = Viewport::new(logical_size, size.0, size.1, 1.0);
         let window = MochiOsWindow::new(viewport);
         let role = if self.config.fullscreen {
-            ROLE_BACKGROUND
+            ROLE_PANEL
         } else {
             ROLE_TOPLEVEL
+        };
+        let pixel_format = if self.config.fullscreen {
+            PIXEL_FORMAT_ARGB8888_PREMULTIPLIED
+        } else {
+            PIXEL_FORMAT_XRGB8888
         };
         let token = create_surface(compositor, event_endpoint, role, size.0, size.1)?;
         let mut shared_buffer = SharedBuffer::new(size.0 as usize, size.1 as usize)?;
         self.pointer_x = (viewport.logical_size.width / 2.0).max(0.0);
         self.pointer_y = (viewport.logical_size.height / 2.0).max(0.0);
-        self.direct_input = self.config.fullscreen && subscribe_input_events(event_endpoint);
-        if self.direct_input {
-            self.cursor_image = load_cursor_image();
+        self.direct_input = false;
+        if self.config.fullscreen {
+            let cursor_image = load_cursor_image();
+            if let Some(image) = cursor_image.as_ref() {
+                set_cursor_image(compositor, image)?;
+            }
+            self.cursor_image = cursor_image;
         }
         self.log_backend_started(size);
 
@@ -269,6 +287,18 @@ where
 
             while let Some((len, event)) = try_recv_event()? {
                 self.handle_or_queue_event_message(len, event, &window)?;
+                handled_work = true;
+            }
+            if let Some((width, height)) = self.pending_resize.take() {
+                let viewport =
+                    Viewport::new(Size::new(width as f32, height as f32), width, height, 1.0);
+                window.set_viewport(viewport);
+                shared_buffer = SharedBuffer::new(width as usize, height as usize)?;
+                self.pixmap = None;
+                self.clip_masks.clear();
+                self.app
+                    .handle_event(PlatformEvent::Resized { viewport }, &window);
+                window.request_redraw();
                 handled_work = true;
             }
             if self.flush_pending_pointer_motion(&window) {
@@ -308,6 +338,7 @@ where
                     &mut self.text_layout_cache,
                     &mut self.pixmap,
                     &mut self.clip_masks,
+                    self.config.fullscreen,
                 )?;
                 let render_cycles = perf_counter_elapsed(render_start);
                 self.metrics.render_cycles =
@@ -328,7 +359,7 @@ where
                     &mut shared_buffer,
                     window.viewport(),
                     dirty_bounds,
-                    self.cursor_blit(),
+                    pixel_format,
                 )?;
                 let attach_cycles = perf_counter_elapsed(attach_start);
                 self.metrics.attach_cycles =
@@ -353,30 +384,11 @@ where
                 self.report_metrics_if_due();
                 handled_work = true;
             } else if let Some(dirty_bounds) = self.cursor_dirty.take() {
-                if let (Some(pixmap), Some(_cursor)) =
-                    (self.pixmap.as_ref(), self.cursor_image.as_ref())
-                {
+                if self.cursor_image.is_some() {
                     let frame_start = perf_counter();
                     let frame_tick_start = perf_tick();
-                    let attach_start = perf_counter();
-                    attach_buffer(
-                        compositor,
-                        token,
-                        window.width() as usize,
-                        window.height() as usize,
-                        pixmap,
-                        self.clear_color,
-                        &mut shared_buffer,
-                        window.viewport(),
-                        dirty_bounds,
-                        self.cursor_blit(),
-                    )?;
-                    let attach_cycles = perf_counter_elapsed(attach_start);
-                    self.metrics.attach_cycles =
-                        self.metrics.attach_cycles.saturating_add(attach_cycles);
                     let commit_start = perf_counter();
-                    damage_token_request(compositor, token, window.viewport(), dirty_bounds)?;
-                    simple_token_request(compositor, OP_COMMIT, token)?;
+                    set_cursor_position(compositor, self.pointer_x, self.pointer_y, true)?;
                     let commit_cycles = perf_counter_elapsed(commit_start);
                     self.metrics.commit_cycles =
                         self.metrics.commit_cycles.saturating_add(commit_cycles);
@@ -387,7 +399,7 @@ where
                         perf_tick_elapsed(frame_tick_start),
                         0,
                         0,
-                        attach_cycles,
+                        0,
                         commit_cycles,
                         dirty_bounds,
                     );
@@ -424,10 +436,24 @@ where
     fn handle_or_queue_event_message(
         &mut self,
         len: usize,
-        event: [u8; 32],
+        event: [u8; EVENT_BUFFER_SIZE],
         window: &MochiOsWindow,
     ) -> Result<(), MochiOsBackendError> {
-        if self.direct_input && len == INPUT_EVENT_SIZE && self.queue_pointer_motion(event) {
+        let message_len = len.min(event.len());
+        if self.app.handle_platform_message(&event[..message_len]) {
+            window.request_redraw();
+            return Ok(());
+        }
+
+        let mut core_event = [0u8; 32];
+        core_event.copy_from_slice(&event[..32]);
+        if len >= 12 && self.queue_compositor_pointer_motion(core_event) {
+            self.metrics.input_events = self.metrics.input_events.saturating_add(1);
+            self.metrics.coalesced_pointer_events =
+                self.metrics.coalesced_pointer_events.saturating_add(1);
+            return Ok(());
+        }
+        if self.direct_input && len == INPUT_EVENT_SIZE && self.queue_pointer_motion(core_event) {
             self.metrics.input_events = self.metrics.input_events.saturating_add(1);
             self.metrics.coalesced_pointer_events =
                 self.metrics.coalesced_pointer_events.saturating_add(1);
@@ -436,7 +462,7 @@ where
 
         self.flush_pending_pointer_motion(window);
         self.metrics.input_events = self.metrics.input_events.saturating_add(1);
-        self.handle_event_message(len, event, window)
+        self.handle_event_message(len, core_event, window)
     }
 
     fn queue_pointer_motion(&mut self, event: [u8; 32]) -> bool {
@@ -465,14 +491,30 @@ where
         }
     }
 
+    fn queue_compositor_pointer_motion(&mut self, event: [u8; 32]) -> bool {
+        if u32::from_le_bytes([event[0], event[1], event[2], event[3]]) != EVENT_POINTER_MOTION {
+            return false;
+        }
+        let x = i32::from_le_bytes([event[4], event[5], event[6], event[7]]) as f32;
+        let y = i32::from_le_bytes([event[8], event[9], event[10], event[11]]) as f32;
+        self.pending_pointer_motion.absolute = None;
+        self.pending_pointer_motion.compositor_position = Some((x, y));
+        self.pending_pointer_motion.relative_dx = 0.0;
+        self.pending_pointer_motion.relative_dy = 0.0;
+        self.pending_pointer_motion.pending = true;
+        true
+    }
+
     fn flush_pending_pointer_motion(&mut self, window: &MochiOsWindow) -> bool {
         if !self.pending_pointer_motion.pending {
             return false;
         }
 
-        let previous = self.current_cursor_rect(window.viewport());
         let bounds = window.viewport().logical_bounds();
-        if let Some((raw_x, raw_y)) = self.pending_pointer_motion.absolute.take() {
+        if let Some((x, y)) = self.pending_pointer_motion.compositor_position.take() {
+            self.pointer_x = x;
+            self.pointer_y = y;
+        } else if let Some((raw_x, raw_y)) = self.pending_pointer_motion.absolute.take() {
             self.pointer_x = bounds.origin.x + (raw_x / 32_767.0) * bounds.size.width;
             self.pointer_y = bounds.origin.y + (raw_y / 32_767.0) * bounds.size.height;
         }
@@ -494,7 +536,6 @@ where
             },
             window,
         );
-        self.mark_cursor_dirty(window.viewport(), previous);
         true
     }
 
@@ -683,14 +724,6 @@ where
         self.cursor_dirty = Some(self.cursor_dirty.map_or(dirty, |old| old.union(dirty)));
     }
 
-    fn cursor_blit(&self) -> Option<CursorBlit<'_>> {
-        Some(CursorBlit {
-            image: self.cursor_image.as_ref()?,
-            x: self.pointer_x - CURSOR_HOTSPOT_X,
-            y: self.pointer_y - CURSOR_HOTSPOT_Y,
-        })
-    }
-
     fn handle_compositor_event(
         &mut self,
         event: [u8; 32],
@@ -757,6 +790,13 @@ where
                 self.app.handle_event(PlatformEvent::Focused(false), window);
             }
             EVENT_FRAME_DONE => {}
+            EVENT_CONFIGURE => {
+                let width = u32::try_from(a).map_err(|_| MochiOsBackendError::InvalidWindowSize)?;
+                let height =
+                    u32::try_from(b).map_err(|_| MochiOsBackendError::InvalidWindowSize)?;
+                checked_surface_size(Size::new(width as f32, height as f32))?;
+                self.pending_resize = Some((width, height));
+            }
             _ => {}
         }
 
@@ -809,28 +849,32 @@ where
 }
 
 struct MochiOsWindow {
-    viewport: Viewport,
+    viewport: Cell<Viewport>,
     redraw_requested: Cell<bool>,
 }
 
 impl MochiOsWindow {
     fn new(viewport: Viewport) -> Self {
         Self {
-            viewport,
+            viewport: Cell::new(viewport),
             redraw_requested: Cell::new(false),
         }
     }
 
     const fn width(&self) -> u32 {
-        self.viewport.physical_width
+        self.viewport.get().physical_width
     }
 
     const fn height(&self) -> u32 {
-        self.viewport.physical_height
+        self.viewport.get().physical_height
     }
 
     fn take_redraw_requested(&self) -> bool {
         self.redraw_requested.replace(false)
+    }
+
+    fn set_viewport(&self, viewport: Viewport) {
+        self.viewport.set(viewport);
     }
 }
 
@@ -844,7 +888,7 @@ impl PlatformWindow for MochiOsWindow {
     }
 
     fn viewport(&self) -> Viewport {
-        self.viewport
+        self.viewport.get()
     }
 
     fn set_cursor(&self, cursor: CursorIcon) {
@@ -1096,13 +1140,6 @@ struct PhysicalDirtyRect {
     height: usize,
 }
 
-#[derive(Clone, Copy)]
-struct CursorBlit<'a> {
-    image: &'a ImageData,
-    x: f32,
-    y: f32,
-}
-
 impl SharedBuffer {
     fn new(width: usize, height: usize) -> Result<Self, MochiOsBackendError> {
         let pixel_count = width
@@ -1135,7 +1172,7 @@ impl SharedBuffer {
         pixmap: &Pixmap,
         background: Color,
         dirty_rect: PhysicalDirtyRect,
-        cursor: Option<CursorBlit<'_>>,
+        format: u32,
     ) -> Result<(), MochiOsBackendError> {
         let pixel_count = (pixmap.width() as usize)
             .checked_mul(pixmap.height() as usize)
@@ -1187,10 +1224,11 @@ impl SharedBuffer {
                 let Some(out) = dst.get_mut(byte_index..byte_index + 4) else {
                     return Err(MochiOsBackendError::InvalidWindowSize);
                 };
-                let mut value = flatten_premultiplied_pixel(pixel, background);
-                if let Some(cursor) = cursor {
-                    value = blend_cursor_pixel(value, cursor, x, y);
-                }
+                let value = if format == PIXEL_FORMAT_ARGB8888_PREMULTIPLIED {
+                    premultiplied_pixel(pixel)
+                } else {
+                    flatten_premultiplied_pixel(pixel, background)
+                };
                 out.copy_from_slice(&value.to_le_bytes());
             }
         }
@@ -1228,51 +1266,11 @@ fn flatten_premultiplied_pixel(pixel: &[u8], background: Color) -> u32 {
     0xff00_0000 | (red.min(255) << 16) | (green.min(255) << 8) | blue.min(255)
 }
 
-fn blend_cursor_pixel(base: u32, cursor: CursorBlit<'_>, x: usize, y: usize) -> u32 {
-    let cursor_x = x as i32 - cursor.x.round() as i32;
-    let cursor_y = y as i32 - cursor.y.round() as i32;
-    if cursor_x < 0
-        || cursor_y < 0
-        || cursor_x >= cursor.image.width() as i32
-        || cursor_y >= cursor.image.height() as i32
-    {
-        return base;
-    }
-
-    let cursor_x = cursor_x as usize;
-    let cursor_y = cursor_y as usize;
-    let width = cursor.image.width() as usize;
-    let Some(pixel_index) = cursor_y
-        .checked_mul(width)
-        .and_then(|row| row.checked_add(cursor_x))
-    else {
-        return base;
-    };
-    let Some(byte_index) = pixel_index.checked_mul(4) else {
-        return base;
-    };
-    let Some(pixel) = cursor
-        .image
-        .premultiplied_rgba8()
-        .get(byte_index..byte_index + 4)
-    else {
-        return base;
-    };
-
-    let alpha = pixel[3] as u32;
-    if alpha == 0 {
-        return base;
-    }
-
-    let inv_alpha = 255_u32.saturating_sub(alpha);
-    let base_red = (base >> 16) & 0xff;
-    let base_green = (base >> 8) & 0xff;
-    let base_blue = base & 0xff;
-    let red = pixel[0] as u32 + (base_red * inv_alpha + 127) / 255;
-    let green = pixel[1] as u32 + (base_green * inv_alpha + 127) / 255;
-    let blue = pixel[2] as u32 + (base_blue * inv_alpha + 127) / 255;
-
-    0xff00_0000 | (red.min(255) << 16) | (green.min(255) << 8) | blue.min(255)
+fn premultiplied_pixel(pixel: &[u8]) -> u32 {
+    (u32::from(pixel[3]) << 24)
+        | (u32::from(pixel[0]) << 16)
+        | (u32::from(pixel[1]) << 8)
+        | u32::from(pixel[2])
 }
 
 unsafe fn zero_raw(ptr: *mut u8, len: usize) {
@@ -1329,9 +1327,9 @@ fn status_from_raw(ptr: *const u8, len: usize) -> Result<(), MochiOsBackendError
     }
 }
 
-fn try_recv_event() -> Result<Option<(usize, [u8; 32])>, MochiOsBackendError> {
+fn try_recv_event() -> Result<Option<(usize, [u8; EVENT_BUFFER_SIZE])>, MochiOsBackendError> {
     let event = core::ptr::addr_of_mut!(EVENT_BUF).cast::<u8>();
-    let len = match ipc_wait_raw(0, event, 32) {
+    let len = match ipc_wait_raw(0, event, EVENT_BUFFER_SIZE) {
         Ok(len) => len,
         Err(MochiOsBackendError::Syscall(ERRNO_EAGAIN)) => return Ok(None),
         Err(err) => return Err(err),
@@ -1339,7 +1337,7 @@ fn try_recv_event() -> Result<Option<(usize, [u8; 32])>, MochiOsBackendError> {
     if len < 16 {
         return Err(MochiOsBackendError::InvalidEvent);
     }
-    let mut out = [0u8; 32];
+    let mut out = [0u8; EVENT_BUFFER_SIZE];
     let copy_len = len.min(out.len());
     unsafe {
         core::ptr::copy_nonoverlapping(event, out.as_mut_ptr(), copy_len);
@@ -1377,9 +1375,11 @@ fn wait_until_deadline<A: PlatformApplication>(
     }
 }
 
-fn read_event_blocking(endpoint: u64) -> Result<Option<(usize, [u8; 32])>, MochiOsBackendError> {
+fn read_event_blocking(
+    endpoint: u64,
+) -> Result<Option<(usize, [u8; EVENT_BUFFER_SIZE])>, MochiOsBackendError> {
     let event = core::ptr::addr_of_mut!(EVENT_BUF).cast::<u8>();
-    let len = match ipc_wait_raw(endpoint, event, 32) {
+    let len = match ipc_wait_raw(endpoint, event, EVENT_BUFFER_SIZE) {
         Ok(len) => len,
         Err(MochiOsBackendError::Syscall(ERRNO_EAGAIN)) => return Ok(None),
         Err(err) => return Err(err),
@@ -1387,7 +1387,7 @@ fn read_event_blocking(endpoint: u64) -> Result<Option<(usize, [u8; 32])>, Mochi
     if len < 16 {
         return Err(MochiOsBackendError::InvalidEvent);
     }
-    let mut out = [0u8; 32];
+    let mut out = [0u8; EVENT_BUFFER_SIZE];
     let copy_len = len.min(out.len());
     unsafe {
         core::ptr::copy_nonoverlapping(event, out.as_mut_ptr(), copy_len);
@@ -1431,7 +1431,7 @@ fn attach_buffer(
     shared_buffer: &mut SharedBuffer,
     viewport: Viewport,
     dirty_bounds: Rect,
-    cursor: Option<CursorBlit<'_>>,
+    format: u32,
 ) -> Result<(), MochiOsBackendError> {
     let pixel_count = width
         .checked_mul(height)
@@ -1455,7 +1455,7 @@ fn attach_buffer(
             put_u32_raw(request, 12, width as u32);
             put_u32_raw(request, 16, height as u32);
             put_u32_raw(request, 20, width as u32);
-            put_u32_raw(request, 24, PIXEL_FORMAT_XRGB8888);
+            put_u32_raw(request, 24, format);
             zero_raw(reply, 16);
         }
         let len = ipc_call_raw(compositor, request, 28, reply, 16)?;
@@ -1463,7 +1463,7 @@ fn attach_buffer(
         shared_buffer.mark_attached();
     }
     let dirty_rect = physical_dirty_rect(viewport, dirty_bounds);
-    shared_buffer.send_pixmap_to(compositor, pixmap, background, dirty_rect, cursor)
+    shared_buffer.send_pixmap_to(compositor, pixmap, background, dirty_rect, format)
 }
 
 fn simple_token_request(
@@ -1481,6 +1481,67 @@ fn simple_token_request(
     }
     let len = ipc_call_raw(compositor, request, 12, reply, 16)?;
     status_from_raw(reply, len)
+}
+
+fn set_cursor_position(
+    compositor: u64,
+    x: f32,
+    y: f32,
+    visible: bool,
+) -> Result<(), MochiOsBackendError> {
+    let mut request = [0u8; 16];
+    request[0..4].copy_from_slice(&OP_SET_CURSOR_POSITION.to_le_bytes());
+    request[4..8].copy_from_slice(&(x.round() as i32).to_le_bytes());
+    request[8..12].copy_from_slice(&(y.round() as i32).to_le_bytes());
+    request[12..16].copy_from_slice(&u32::from(visible).to_le_bytes());
+    let mut reply = [0u8; 16];
+    let len = ipc_call_raw(
+        compositor,
+        request.as_ptr(),
+        request.len(),
+        reply.as_mut_ptr(),
+        reply.len(),
+    )?;
+    if len < 4 {
+        return Err(MochiOsBackendError::InvalidReply);
+    }
+    let status = u32::from_le_bytes([reply[0], reply[1], reply[2], reply[3]]);
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(MochiOsBackendError::Syscall(u64::from(status)))
+    }
+}
+
+fn set_cursor_image(compositor: u64, image: &ImageData) -> Result<(), MochiOsBackendError> {
+    let pixels = image.premultiplied_rgba8();
+    let mut request = Vec::new();
+    request
+        .try_reserve_exact(20usize.saturating_add(pixels.len()))
+        .map_err(|_| MochiOsBackendError::ArithmeticOverflow)?;
+    request.extend_from_slice(&OP_SET_CURSOR_IMAGE.to_le_bytes());
+    request.extend_from_slice(&image.width().to_le_bytes());
+    request.extend_from_slice(&image.height().to_le_bytes());
+    request.extend_from_slice(&(CURSOR_HOTSPOT_X.round() as i32).to_le_bytes());
+    request.extend_from_slice(&(CURSOR_HOTSPOT_Y.round() as i32).to_le_bytes());
+    request.extend_from_slice(pixels);
+    let mut reply = [0u8; 16];
+    let len = ipc_call_raw(
+        compositor,
+        request.as_ptr(),
+        request.len(),
+        reply.as_mut_ptr(),
+        reply.len(),
+    )?;
+    if len < 4 {
+        return Err(MochiOsBackendError::InvalidReply);
+    }
+    let status = u32::from_le_bytes([reply[0], reply[1], reply[2], reply[3]]);
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(MochiOsBackendError::Syscall(u64::from(status)))
+    }
 }
 
 fn physical_dirty_rect(viewport: Viewport, dirty_bounds: Rect) -> PhysicalDirtyRect {
@@ -1541,6 +1602,7 @@ fn render_display_list(
     text_layout_cache: &mut HashMap<TextLayoutKey, Buffer>,
     pixmap: &mut Option<Pixmap>,
     clip_masks: &mut Vec<Mask>,
+    transparent_clear: bool,
 ) -> Result<Color, MochiOsBackendError> {
     let width = viewport.physical_width;
     let height = viewport.physical_height;
@@ -1557,9 +1619,17 @@ fn render_display_list(
     for command in display_list.commands() {
         match command {
             DrawCommand::Clear { color } => {
-                clear_color = *color;
+                let color = if transparent_clear {
+                    Color::TRANSPARENT
+                } else {
+                    *color
+                };
+                clear_color = color;
                 if let Some(rect) = to_skia_rect(dirty_bounds) {
-                    let paint = solid_paint(*color);
+                    let mut paint = solid_paint(color);
+                    if transparent_clear {
+                        paint.blend_mode = BlendMode::Source;
+                    }
                     pixmap.fill_rect(rect, &paint, transform, clip_masks.get(clip_depth));
                 }
             }
@@ -1777,12 +1847,7 @@ pub fn render_offscreen_xrgb(
     width: u32,
     height: u32,
 ) -> Result<Vec<u32>, MochiOsBackendError> {
-    let viewport = Viewport::new(
-        Size::new(width as f32, height as f32),
-        width,
-        height,
-        1.0,
-    );
+    let viewport = Viewport::new(Size::new(width as f32, height as f32), width, height, 1.0);
     let mut font_system = create_font_system();
     let mut swash_cache = SwashCache::new();
     let mut text_layout_cache = HashMap::new();
@@ -1798,6 +1863,7 @@ pub fn render_offscreen_xrgb(
         &mut text_layout_cache,
         &mut pixmap,
         &mut clip_masks,
+        false,
     )?;
     let pixmap = pixmap.ok_or(MochiOsBackendError::InvalidWindowSize)?;
     Ok(pixmap
@@ -1897,10 +1963,7 @@ fn blit_image(
     let left = x.floor().max(0.0) as usize;
     let top = y.floor().max(0.0) as usize;
     let right = (x + width).ceil().max(0.0).min(target_width as f32) as usize;
-    let bottom = (y + height)
-        .ceil()
-        .max(0.0)
-        .min(target_height as f32) as usize;
+    let bottom = (y + height).ceil().max(0.0).min(target_height as f32) as usize;
     if left >= right || top >= bottom {
         return;
     }
@@ -1915,20 +1978,12 @@ fn blit_image(
             let source_x = ((target_x as f32 + 0.5 - x) * source_width as f32 / width - 0.5)
                 .clamp(0.0, source_width.saturating_sub(1) as f32);
             let pixel = match sampling {
-                ImageSampling::Nearest => sample_nearest(
-                    source,
-                    source_width,
-                    source_height,
-                    source_x,
-                    source_y,
-                ),
-                ImageSampling::Bilinear | ImageSampling::Bicubic => sample_bilinear(
-                    source,
-                    source_width,
-                    source_height,
-                    source_x,
-                    source_y,
-                ),
+                ImageSampling::Nearest => {
+                    sample_nearest(source, source_width, source_height, source_x, source_y)
+                }
+                ImageSampling::Bilinear | ImageSampling::Bicubic => {
+                    sample_bilinear(source, source_width, source_height, source_x, source_y)
+                }
             };
             let target_index = (target_y * target_width + target_x) * 4;
             let mask = clip_data
@@ -1936,30 +1991,22 @@ fn blit_image(
                 .copied()
                 .unwrap_or(255) as u32;
             let factor = (opacity * mask + 127) / 255;
-            blend_premultiplied(&mut target_data[target_index..target_index + 4], pixel, factor);
+            blend_premultiplied(
+                &mut target_data[target_index..target_index + 4],
+                pixel,
+                factor,
+            );
         }
     }
 }
 
-fn sample_nearest(
-    source: &[u8],
-    width: usize,
-    height: usize,
-    x: f32,
-    y: f32,
-) -> [u8; 4] {
+fn sample_nearest(source: &[u8], width: usize, height: usize, x: f32, y: f32) -> [u8; 4] {
     let x = (x.round() as usize).min(width.saturating_sub(1));
     let y = (y.round() as usize).min(height.saturating_sub(1));
     source_pixel(source, width, x, y)
 }
 
-fn sample_bilinear(
-    source: &[u8],
-    width: usize,
-    height: usize,
-    x: f32,
-    y: f32,
-) -> [u8; 4] {
+fn sample_bilinear(source: &[u8], width: usize, height: usize, x: f32, y: f32) -> [u8; 4] {
     let x0 = (x.floor() as usize).min(width.saturating_sub(1));
     let y0 = (y.floor() as usize).min(height.saturating_sub(1));
     let x1 = x0.saturating_add(1).min(width.saturating_sub(1));
@@ -2004,8 +2051,8 @@ fn blend_premultiplied(target: &mut [u8], source: [u8; 4], factor: u32) {
     let inverse_alpha = 255 - source_alpha;
     for channel in 0..3 {
         let source_channel = (source[channel] as u32 * factor + 127) / 255;
-        target[channel] = (source_channel + (target[channel] as u32 * inverse_alpha + 127) / 255)
-            .min(255) as u8;
+        target[channel] =
+            (source_channel + (target[channel] as u32 * inverse_alpha + 127) / 255).min(255) as u8;
     }
     target[3] = (source_alpha + (target[3] as u32 * inverse_alpha + 127) / 255).min(255) as u8;
 }

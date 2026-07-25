@@ -1,7 +1,7 @@
 //! ViewKitで使用するフォントシステムを定義
 
-pub(crate) use crate::platform::{load_platform_fonts, DEFAULT_UI_FONT_FAMILY};
-use cosmic_text::{fontdb, FontSystem};
+pub(crate) use crate::platform::{DEFAULT_UI_FONT_FAMILY, load_platform_fonts};
+use cosmic_text::{FontSystem, fontdb};
 
 const DEFAULT_UI_FONT_BYTES: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/default_ui_font.ttf"));

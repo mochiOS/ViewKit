@@ -52,6 +52,10 @@ pub trait PlatformWindow {
 pub trait PlatformApplication {
     fn handle_event(&mut self, event: PlatformEvent, window: &dyn PlatformWindow);
 
+    fn handle_platform_message(&mut self, _message: &[u8]) -> bool {
+        false
+    }
+
     fn draw(&mut self, viewport: Viewport, display_list: &mut DisplayList) -> Rect {
         let _ = display_list;
 

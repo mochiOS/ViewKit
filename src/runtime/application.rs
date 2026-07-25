@@ -78,6 +78,10 @@ impl<A> PlatformApplication for ApplicationRuntime<A>
 where
     A: App,
 {
+    fn handle_platform_message(&mut self, message: &[u8]) -> bool {
+        self.app.handle_platform_message(message)
+    }
+
     fn handle_event(&mut self, event: PlatformEvent, window: &dyn PlatformWindow) {
         match &event {
             PlatformEvent::Resumed { viewport }

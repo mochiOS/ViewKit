@@ -237,4 +237,9 @@ pub trait App: Sized + 'static {
 
     /// 現在のアプリケーション状態からルートViewを構築します。
     fn body(&self, context: &ViewContext) -> Self::Body;
+
+    /// Platform固有の補助messageを処理します。
+    fn handle_platform_message(&mut self, _message: &[u8]) -> bool {
+        false
+    }
 }
