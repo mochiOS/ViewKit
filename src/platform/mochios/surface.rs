@@ -5,7 +5,35 @@ use super::connection::{
 };
 use super::present::physical_dirty_rect;
 
-pub(super) fn create_surface(
+pub(super) struct CompositorSurface {
+    compositor: u64,
+    token: u64,
+}
+
+impl CompositorSurface {
+    pub(super) fn create(
+        compositor: u64,
+        event_endpoint: u64,
+        role: u32,
+        width: u32,
+        height: u32,
+    ) -> Result<Self, MochiOsBackendError> {
+        let token = create_surface(compositor, event_endpoint, role, width, height)?;
+        Ok(Self { compositor, token })
+    }
+
+    pub(super) const fn token(&self) -> u64 {
+        self.token
+    }
+}
+
+impl Drop for CompositorSurface {
+    fn drop(&mut self) {
+        let _ = simple_token_request(self.compositor, OP_DESTROY_SURFACE, self.token);
+    }
+}
+
+fn create_surface(
     compositor: u64,
     event_endpoint: u64,
     role: u32,

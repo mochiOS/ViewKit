@@ -39,7 +39,7 @@ use present::damage_token_request;
 pub use renderer::render_offscreen_xrgb;
 use renderer::{TextLayoutKey, render_display_list};
 use surface::{
-    attach_buffer, create_surface, set_cursor_image, set_cursor_position, simple_token_request,
+    CompositorSurface, attach_buffer, set_cursor_image, set_cursor_position, simple_token_request,
 };
 use window::{MochiOsWindow, checked_surface_size};
 
@@ -52,6 +52,7 @@ const OP_CREATE_SURFACE: u32 = 1;
 const OP_ATTACH_BUFFER: u32 = 2;
 const OP_DAMAGE: u32 = 3;
 const OP_COMMIT: u32 = 4;
+const OP_DESTROY_SURFACE: u32 = 6;
 const OP_SET_CURSOR_POSITION: u32 = 7;
 const OP_SET_CURSOR_IMAGE: u32 = 8;
 const ROLE_TOPLEVEL: u32 = 1;
@@ -234,7 +235,8 @@ where
         } else {
             PIXEL_FORMAT_XRGB8888
         };
-        let token = create_surface(compositor, event_endpoint, role, size.0, size.1)?;
+        let surface = CompositorSurface::create(compositor, event_endpoint, role, size.0, size.1)?;
+        let token = surface.token();
         let mut shared_buffer = SharedBuffer::new(size.0 as usize, size.1 as usize)?;
         self.pointer_x = (viewport.logical_size.width / 2.0).max(0.0);
         self.pointer_y = (viewport.logical_size.height / 2.0).max(0.0);
