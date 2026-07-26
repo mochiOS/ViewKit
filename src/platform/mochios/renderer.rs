@@ -69,9 +69,57 @@ pub(super) fn render_display_list(
     let dirty_bounds = dirty_bounds.intersection(bounds).unwrap_or(bounds);
     configure_clip_mask(clip_masks, 0, dirty_bounds, None, width, height, transform)?;
     let mut clip_depth = 0usize;
+    let mut clip_enabled = vec![true];
 
     for command in display_list.commands() {
         match command {
+            DrawCommand::PushClip { rect } => {
+                let next_depth = clip_depth.saturating_add(1);
+                let enabled = clip_enabled[clip_depth] && rect.intersection(dirty_bounds).is_some();
+                if clip_enabled.len() <= next_depth {
+                    clip_enabled.resize(next_depth + 1, false);
+                }
+                clip_enabled[next_depth] = enabled;
+                if enabled {
+                    configure_clip_mask(
+                        clip_masks,
+                        next_depth,
+                        *rect,
+                        Some(clip_depth),
+                        width,
+                        height,
+                        transform,
+                    )?;
+                }
+                clip_depth = next_depth;
+            }
+            DrawCommand::PushRoundedClip { rect, radius } => {
+                let next_depth = clip_depth.saturating_add(1);
+                let enabled = clip_enabled[clip_depth] && rect.intersection(dirty_bounds).is_some();
+                if clip_enabled.len() <= next_depth {
+                    clip_enabled.resize(next_depth + 1, false);
+                }
+                clip_enabled[next_depth] = enabled;
+                if enabled {
+                    configure_rounded_clip_mask(
+                        clip_masks,
+                        next_depth,
+                        *rect,
+                        *radius,
+                        Some(clip_depth),
+                        width,
+                        height,
+                        transform,
+                    )?;
+                }
+                clip_depth = next_depth;
+            }
+            DrawCommand::PopClip => {
+                if clip_depth > 0 {
+                    clip_depth -= 1;
+                }
+            }
+            _ if !clip_enabled[clip_depth] => continue,
             DrawCommand::Clear { color } => {
                 let color = if transparent_clear {
                     Color::TRANSPARENT
@@ -231,38 +279,6 @@ pub(super) fn render_display_list(
                     transform,
                     clip_masks.get(clip_depth),
                 );
-            }
-            DrawCommand::PushClip { rect } => {
-                let next_depth = clip_depth.saturating_add(1);
-                configure_clip_mask(
-                    clip_masks,
-                    next_depth,
-                    *rect,
-                    Some(clip_depth),
-                    width,
-                    height,
-                    transform,
-                )?;
-                clip_depth = next_depth;
-            }
-            DrawCommand::PushRoundedClip { rect, radius } => {
-                let next_depth = clip_depth.saturating_add(1);
-                configure_rounded_clip_mask(
-                    clip_masks,
-                    next_depth,
-                    *rect,
-                    *radius,
-                    Some(clip_depth),
-                    width,
-                    height,
-                    transform,
-                )?;
-                clip_depth = next_depth;
-            }
-            DrawCommand::PopClip => {
-                if clip_depth > 0 {
-                    clip_depth -= 1;
-                }
             }
             DrawCommand::DrawText { command } => {
                 if command.bounds.intersection(dirty_bounds).is_none() {
