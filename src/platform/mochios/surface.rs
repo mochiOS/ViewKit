@@ -104,6 +104,53 @@ pub(super) fn attach_buffer(
     shared_buffer.send_pixmap_to(compositor, pixmap, background, dirty_rect, format)
 }
 
+pub(super) fn attach_gpu_scene(
+    compositor: u64,
+    token: u64,
+    width: usize,
+    height: usize,
+    scene: &[u8],
+    shared_buffer: &mut SharedBuffer,
+) -> Result<(), MochiOsBackendError> {
+    if !shared_buffer.is_attached() {
+        let request = core::ptr::addr_of_mut!(ATTACH_BUFFER_REQ).cast::<u8>();
+        let reply = core::ptr::addr_of_mut!(IPC_REPLY).cast::<u8>();
+        unsafe {
+            zero_raw(request, 28);
+            put_u32_raw(request, 0, OP_ATTACH_BUFFER);
+            put_u64_raw(request, 4, token);
+            put_u32_raw(request, 12, width as u32);
+            put_u32_raw(request, 16, height as u32);
+            put_u32_raw(request, 20, width as u32);
+            put_u32_raw(request, 24, PIXEL_FORMAT_GPU_SCENE);
+            zero_raw(reply, 16);
+        }
+        let len = ipc_call_raw(compositor, request, 28, reply, 16)?;
+        status_from_raw(reply, len)?;
+        shared_buffer.mark_attached();
+    }
+    shared_buffer.send_scene_to(compositor, scene)
+}
+
+pub(super) fn renderer_caps(compositor: u64) -> u32 {
+    let mut request = [0u8; 4];
+    request.copy_from_slice(&OP_GET_RENDERER_CAPS.to_le_bytes());
+    let mut reply = [0u8; 16];
+    let Ok(length) = ipc_call_raw(
+        compositor,
+        request.as_ptr(),
+        request.len(),
+        reply.as_mut_ptr(),
+        reply.len(),
+    ) else {
+        return 0;
+    };
+    if length < 8 || u32::from_le_bytes([reply[0], reply[1], reply[2], reply[3]]) != 0 {
+        return 0;
+    }
+    u32::from_le_bytes([reply[4], reply[5], reply[6], reply[7]])
+}
+
 pub(super) fn simple_token_request(
     compositor: u64,
     opcode: u32,

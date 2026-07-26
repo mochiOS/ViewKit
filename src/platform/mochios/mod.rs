@@ -28,6 +28,7 @@ use crate::theme::Color;
 
 mod buffer;
 mod connection;
+mod gpu_renderer;
 mod present;
 mod renderer;
 mod surface;
@@ -35,11 +36,13 @@ mod window;
 
 use buffer::{PhysicalDirtyRect, SharedBuffer};
 use connection::*;
+use gpu_renderer::GpuSceneRenderer;
 use present::damage_token_request;
 pub use renderer::render_offscreen_xrgb;
 use renderer::{TextLayoutKey, render_display_list};
 use surface::{
-    CompositorSurface, attach_buffer, set_cursor_image, set_cursor_position, simple_token_request,
+    CompositorSurface, attach_buffer, attach_gpu_scene, renderer_caps, set_cursor_image,
+    set_cursor_position, simple_token_request,
 };
 use window::{MochiOsWindow, checked_surface_size};
 
@@ -55,11 +58,14 @@ const OP_COMMIT: u32 = 4;
 const OP_DESTROY_SURFACE: u32 = 6;
 const OP_SET_CURSOR_POSITION: u32 = 7;
 const OP_SET_CURSOR_IMAGE: u32 = 8;
+const OP_GET_RENDERER_CAPS: u32 = 9;
 const ROLE_TOPLEVEL: u32 = 1;
 const ROLE_BACKGROUND: u32 = 3;
 const ROLE_PANEL: u32 = 4;
 const PIXEL_FORMAT_XRGB8888: u32 = 1;
 const PIXEL_FORMAT_ARGB8888_PREMULTIPLIED: u32 = 2;
+const PIXEL_FORMAT_GPU_SCENE: u32 = 3;
+const RENDERER_CAP_GPU_SCENE: u32 = 1;
 const PAGE_SIZE: usize = 4096;
 const MAX_SURFACE_EXTENT: u32 = 16_384;
 const ERRNO_EAGAIN: u64 = 11;
@@ -146,6 +152,8 @@ where
     text_layout_cache: HashMap<TextLayoutKey, Buffer>,
     pixmap: Option<Pixmap>,
     clip_masks: Vec<Mask>,
+    gpu_renderer: GpuSceneRenderer,
+    gpu_scene: Vec<u8>,
     direct_input: bool,
     pointer_x: f32,
     pointer_y: f32,
@@ -194,6 +202,8 @@ where
             text_layout_cache: HashMap::new(),
             pixmap: None,
             clip_masks: Vec::new(),
+            gpu_renderer: GpuSceneRenderer::new(),
+            gpu_scene: Vec::new(),
             direct_input: false,
             pointer_x: 0.0,
             pointer_y: 0.0,
@@ -238,6 +248,8 @@ where
         let surface = CompositorSurface::create(compositor, event_endpoint, role, size.0, size.1)?;
         let token = surface.token();
         let mut shared_buffer = SharedBuffer::new(size.0 as usize, size.1 as usize)?;
+        let mut gpu_enabled =
+            self.config.fullscreen && renderer_caps(compositor) & RENDERER_CAP_GPU_SCENE != 0;
         self.pointer_x = (viewport.logical_size.width / 2.0).max(0.0);
         self.pointer_y = (viewport.logical_size.height / 2.0).max(0.0);
         self.direct_input = false;
@@ -300,40 +312,79 @@ where
                 }
                 self.cursor_dirty = None;
                 let render_start = perf_counter();
-                let clear_color = render_display_list(
-                    window.viewport(),
-                    dirty_bounds,
-                    &display_list,
-                    self.font_system
-                        .as_mut()
-                        .ok_or(MochiOsBackendError::InvalidWindowSize)?,
-                    &mut self.swash_cache,
-                    &mut self.text_layout_cache,
-                    &mut self.pixmap,
-                    &mut self.clip_masks,
-                    self.config.fullscreen,
-                )?;
+                let mut gpu_scene = None;
+                if gpu_enabled {
+                    match self.gpu_renderer.render(
+                        window.viewport(),
+                        dirty_bounds,
+                        &display_list,
+                        self.font_system
+                            .as_mut()
+                            .ok_or(MochiOsBackendError::InvalidWindowSize)?,
+                        &mut self.swash_cache,
+                        &mut self.text_layout_cache,
+                        self.config.fullscreen,
+                        &mut self.gpu_scene,
+                    ) {
+                        Ok(()) => gpu_scene = Some(self.gpu_scene.as_slice()),
+                        Err(_) => {
+                            gpu_enabled = false;
+                            shared_buffer = SharedBuffer::new(
+                                window.width() as usize,
+                                window.height() as usize,
+                            )?;
+                        }
+                    }
+                }
+                let clear_color = if gpu_scene.is_some() {
+                    Color::TRANSPARENT
+                } else {
+                    render_display_list(
+                        window.viewport(),
+                        dirty_bounds,
+                        &display_list,
+                        self.font_system
+                            .as_mut()
+                            .ok_or(MochiOsBackendError::InvalidWindowSize)?,
+                        &mut self.swash_cache,
+                        &mut self.text_layout_cache,
+                        &mut self.pixmap,
+                        &mut self.clip_masks,
+                        self.config.fullscreen,
+                    )?
+                };
                 let render_cycles = perf_counter_elapsed(render_start);
                 self.metrics.render_cycles =
                     self.metrics.render_cycles.saturating_add(render_cycles);
                 self.clear_color = clear_color;
-                let pixmap = self
-                    .pixmap
-                    .as_ref()
-                    .ok_or(MochiOsBackendError::InvalidWindowSize)?;
                 let attach_start = perf_counter();
-                attach_buffer(
-                    compositor,
-                    token,
-                    window.width() as usize,
-                    window.height() as usize,
-                    pixmap,
-                    clear_color,
-                    &mut shared_buffer,
-                    window.viewport(),
-                    dirty_bounds,
-                    pixel_format,
-                )?;
+                if let Some(scene) = gpu_scene.as_deref() {
+                    attach_gpu_scene(
+                        compositor,
+                        token,
+                        window.width() as usize,
+                        window.height() as usize,
+                        scene,
+                        &mut shared_buffer,
+                    )?;
+                } else {
+                    let pixmap = self
+                        .pixmap
+                        .as_ref()
+                        .ok_or(MochiOsBackendError::InvalidWindowSize)?;
+                    attach_buffer(
+                        compositor,
+                        token,
+                        window.width() as usize,
+                        window.height() as usize,
+                        pixmap,
+                        clear_color,
+                        &mut shared_buffer,
+                        window.viewport(),
+                        dirty_bounds,
+                        pixel_format,
+                    )?;
+                }
                 let attach_cycles = perf_counter_elapsed(attach_start);
                 self.metrics.attach_cycles =
                     self.metrics.attach_cycles.saturating_add(attach_cycles);

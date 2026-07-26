@@ -15,7 +15,7 @@ pub(super) struct TextLayoutKey {
 }
 
 impl TextLayoutKey {
-    fn new(command: &TextCommand, scale: f32) -> Self {
+    pub(super) fn new(command: &TextCommand, scale: f32) -> Self {
         Self {
             text: command.text.clone(),
             font_family: command.font_family.clone(),

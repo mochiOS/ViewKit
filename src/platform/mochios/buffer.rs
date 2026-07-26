@@ -121,6 +121,25 @@ impl SharedBuffer {
         Ok(())
     }
 
+    pub(super) fn send_scene_to(
+        &mut self,
+        compositor: u64,
+        scene: &[u8],
+    ) -> Result<(), MochiOsBackendError> {
+        if scene.len() > self.byte_capacity {
+            return Err(MochiOsBackendError::InvalidWindowSize);
+        }
+        let destination =
+            unsafe { std::slice::from_raw_parts_mut(self.virt as *mut u8, self.byte_capacity) };
+        destination[..scene.len()].copy_from_slice(scene);
+        if !self.sent_pages {
+            let page_count = self.byte_capacity / PAGE_SIZE;
+            send_pages(compositor, page_count, self.virt)?;
+            self.sent_pages = true;
+        }
+        Ok(())
+    }
+
     pub(super) fn is_attached(&self) -> bool {
         self.attached
     }
