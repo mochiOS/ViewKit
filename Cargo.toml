@@ -43,8 +43,8 @@ softbuffer = {
 thiserror = "2"
 
 [target.'cfg(target_os = "mochios")'.dependencies]
-mochi-user-syscall = "0.1.0"
-mochios-viewkit-gpu-protocol = { path = "../../user/crates/viewkit-gpu-protocol" }
+mochi-user-syscall = { git = "https://github.com/mochiOS/syscalls", package = "mochi-user-syscall" }
+mochios-viewkit-gpu-protocol = { git = "https://github.com/mochiOS/syscalls", package = "mochios-viewkit-gpu-protocol" }
 
 [lib]
 name = "viewkit"
