@@ -1,7 +1,8 @@
 //! winitを使用したLinux/Waylandバックエンド
 
 use super::super::{
-    ButtonState, PlatformApplication, PlatformEvent, PlatformWindow, PointerButton, WindowConfig,
+    ButtonState, Key, KeyModifiers, PlatformApplication, PlatformEvent, PlatformWindow,
+    PointerButton, WindowConfig,
 };
 
 use crate::draw_command::DisplayList;
@@ -19,7 +20,7 @@ use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::error::{EventLoopError, OsError};
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, OwnedDisplayHandle};
-use winit::keyboard::{Key, NamedKey};
+use winit::keyboard::{Key as WinitKey, NamedKey};
 use winit::window::CursorIcon as WinitCursorIcon;
 use winit::window::{Window, WindowId};
 
@@ -89,8 +90,7 @@ pub struct LinuxBackend<A> {
     window: Option<Rc<Window>>,
     renderer: Option<SoftwareRenderer>,
 
-    shift_pressed: bool,
-    shortcut_pressed: bool,
+    modifiers: KeyModifiers,
 
     runtime_error: Option<LinuxBackendError>,
     pending_pointer_move: Option<(f32, f32)>,
@@ -109,8 +109,7 @@ where
             window: None,
             renderer: None,
 
-            shift_pressed: false,
-            shortcut_pressed: false,
+            modifiers: KeyModifiers::default(),
 
             runtime_error: None,
             pending_pointer_move: None,
@@ -317,8 +316,7 @@ where
 
             WindowEvent::Focused(focused) => {
                 if !focused {
-                    self.shift_pressed = false;
-                    self.shortcut_pressed = false;
+                    self.modifiers = KeyModifiers::default();
                 }
 
                 self.emit(PlatformEvent::Focused(focused));
@@ -343,9 +341,20 @@ where
             WindowEvent::ModifiersChanged(modifiers) => {
                 let state = modifiers.state();
 
-                self.shift_pressed = state.shift_key();
-
-                self.shortcut_pressed = state.control_key() || state.super_key();
+                let mut bits = 0;
+                if state.shift_key() {
+                    bits |= KeyModifiers::SHIFT;
+                }
+                if state.control_key() {
+                    bits |= KeyModifiers::CONTROL;
+                }
+                if state.alt_key() {
+                    bits |= KeyModifiers::ALT;
+                }
+                if state.super_key() {
+                    bits |= KeyModifiers::SUPER;
+                }
+                self.modifiers = KeyModifiers::from_bits(bits);
             }
 
             WindowEvent::MouseInput { state, button, .. } => {
@@ -380,31 +389,38 @@ where
                     return;
                 }
 
+                if let Some(key) = convert_key(&event.logical_key) {
+                    self.emit(PlatformEvent::KeyPressed {
+                        key,
+                        modifiers: self.modifiers,
+                    });
+                }
+
                 let platform_event = match &event.logical_key {
-                    Key::Character(character)
-                        if self.shortcut_pressed
+                    WinitKey::Character(character)
+                        if self.modifiers.shortcut()
                             && character.as_str().eq_ignore_ascii_case("a") =>
                     {
                         Some(PlatformEvent::SelectAll)
                     }
-                    Key::Named(NamedKey::Backspace) => Some(PlatformEvent::Backspace),
-                    Key::Named(NamedKey::Delete) => Some(PlatformEvent::Delete),
-                    Key::Named(NamedKey::ArrowLeft) => Some(if self.shift_pressed {
+                    WinitKey::Named(NamedKey::Backspace) => Some(PlatformEvent::Backspace),
+                    WinitKey::Named(NamedKey::Delete) => Some(PlatformEvent::Delete),
+                    WinitKey::Named(NamedKey::ArrowLeft) => Some(if self.modifiers.shift() {
                         PlatformEvent::SelectLeft
                     } else {
                         PlatformEvent::ArrowLeft
                     }),
-                    Key::Named(NamedKey::ArrowRight) => Some(if self.shift_pressed {
+                    WinitKey::Named(NamedKey::ArrowRight) => Some(if self.modifiers.shift() {
                         PlatformEvent::SelectRight
                     } else {
                         PlatformEvent::ArrowRight
                     }),
-                    Key::Named(NamedKey::Home) => Some(if self.shift_pressed {
+                    WinitKey::Named(NamedKey::Home) => Some(if self.modifiers.shift() {
                         PlatformEvent::SelectHome
                     } else {
                         PlatformEvent::Home
                     }),
-                    Key::Named(NamedKey::End) => Some(if self.shift_pressed {
+                    WinitKey::Named(NamedKey::End) => Some(if self.modifiers.shift() {
                         PlatformEvent::SelectEnd
                     } else {
                         PlatformEvent::End
@@ -415,6 +431,10 @@ where
 
                 if let Some(platform_event) = platform_event {
                     self.emit(platform_event);
+                    return;
+                }
+
+                if self.modifiers.shortcut() || self.modifiers.alt() {
                     return;
                 }
 
@@ -456,6 +476,37 @@ where
 
 fn viewport_from_window(window: &Window) -> Viewport {
     viewport_from_physical(window.inner_size(), window.scale_factor())
+}
+
+fn convert_key(key: &WinitKey) -> Option<Key> {
+    match key {
+        WinitKey::Named(named) => Some(match named {
+            NamedKey::Escape => Key::Escape,
+            NamedKey::Tab => Key::Tab,
+            NamedKey::Enter => Key::Enter,
+            NamedKey::Space => Key::Space,
+            NamedKey::Backspace => Key::Backspace,
+            NamedKey::Delete => Key::Delete,
+            NamedKey::ArrowLeft => Key::ArrowLeft,
+            NamedKey::ArrowRight => Key::ArrowRight,
+            NamedKey::ArrowUp => Key::ArrowUp,
+            NamedKey::ArrowDown => Key::ArrowDown,
+            NamedKey::Home => Key::Home,
+            NamedKey::End => Key::End,
+            NamedKey::PageUp => Key::PageUp,
+            NamedKey::PageDown => Key::PageDown,
+            _ => return None,
+        }),
+        WinitKey::Character(text) => {
+            let mut characters = text.chars();
+            let character = characters.next()?;
+            characters
+                .next()
+                .is_none()
+                .then_some(Key::Character(character))
+        }
+        _ => None,
+    }
 }
 
 fn viewport_from_physical(physical_size: PhysicalSize<u32>, scale_factor: f64) -> Viewport {

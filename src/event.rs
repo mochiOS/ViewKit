@@ -1,7 +1,7 @@
 //! Viewツリー内部で使用するイベント配送API
 
 use crate::geometry::{Point, Rect};
-use crate::platform::{ButtonState, CursorIcon, PlatformEvent, PointerButton};
+use crate::platform::{ButtonState, CursorIcon, Key, KeyModifiers, PlatformEvent, PointerButton};
 use crate::theme::Theme;
 use crate::typography::{TextMeasurer, Typography};
 use crate::view::View;
@@ -23,6 +23,11 @@ pub enum ViewEvent {
     },
 
     PointerLeft,
+
+    KeyPressed {
+        key: Key,
+        modifiers: KeyModifiers,
+    },
 
     Scroll {
         position: Point,
@@ -66,6 +71,7 @@ impl ViewEvent {
             | Self::PointerFocusRequested { position } => Some(*position),
 
             Self::PointerLeft
+            | Self::KeyPressed { .. }
             | Self::TextInput { .. }
             | Self::FocusChanged { .. }
             | Self::Backspace
@@ -96,6 +102,7 @@ impl ViewEvent {
                 | Self::PointerReleased { .. }
                 | Self::PointerFocusRequested { .. }
                 | Self::PointerLeft
+                | Self::KeyPressed { .. }
                 | Self::TextInput { .. }
                 | Self::Backspace
                 | Self::Delete
@@ -297,6 +304,11 @@ impl EventDispatcher {
 
                 Some(ViewEvent::PointerLeft)
             }
+
+            PlatformEvent::KeyPressed { key, modifiers } => Some(ViewEvent::KeyPressed {
+                key: *key,
+                modifiers: *modifiers,
+            }),
 
             PlatformEvent::Scroll { delta_x, delta_y } => {
                 let position = self.pointer_position?;

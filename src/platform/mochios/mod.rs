@@ -19,8 +19,8 @@ use crate::font::create_font_system;
 use crate::geometry::{Rect, Size};
 use crate::image::ImageData;
 use crate::platform::{
-    ButtonState, CursorIcon, PlatformApplication, PlatformEvent, PlatformWindow, PointerButton,
-    WindowConfig,
+    ButtonState, CursorIcon, Key, KeyModifiers, PlatformApplication, PlatformEvent, PlatformWindow,
+    PointerButton, WindowConfig,
 };
 use crate::renderer::Viewport;
 use crate::svg::SvgData;
@@ -85,19 +85,26 @@ const INPUT_EVENT_KIND_POINTER_MOVE: u16 = 2;
 const INPUT_EVENT_KIND_POINTER_BUTTON: u16 = 3;
 const INPUT_EVENT_KIND_POINTER_WHEEL: u16 = 4;
 const INPUT_EVENT_KIND_POINTER_ABSOLUTE: u16 = 5;
+const KEY_ESCAPE: u16 = 1;
 const KEY_BACKSPACE: u16 = 2;
 const KEY_TAB: u16 = 3;
 const KEY_ENTER: u16 = 4;
 const KEY_SPACE: u16 = 5;
+const KEY_A: u16 = 32;
 const KEY_DELETE: u16 = 79;
 const KEY_HOME: u16 = 80;
 const KEY_END: u16 = 81;
 const KEY_LEFT: u16 = 82;
 const KEY_RIGHT: u16 = 83;
+const KEY_UP: u16 = 84;
+const KEY_DOWN: u16 = 85;
 const KEY_PAGE_UP: u16 = 86;
 const KEY_PAGE_DOWN: u16 = 87;
 const INPUT_FLAG_PRESS: u16 = 1 << 0;
 const INPUT_FLAG_RELEASE: u16 = 1 << 1;
+const INPUT_MOD_SHIFT: u32 = 1 << 0;
+const INPUT_MOD_CONTROL: u32 = 1 << 1;
+const INPUT_MOD_ALT: u32 = 1 << 2;
 const TEXT_LAYOUT_CACHE_CAPACITY: usize = 1024;
 const CURSOR_SVG_PATH: &str = "/system/icons/cursor.svg";
 const CURSOR_WIDTH: u32 = 12;
@@ -829,8 +836,14 @@ where
                 );
             }
             EVENT_KEY => {
-                if c & 1 != 0 {
-                    if let Some(event) = self.key_event(a as u16, b as u32) {
+                let flags = (c & 0xffff) as u16;
+                if flags & INPUT_FLAG_PRESS != 0 {
+                    let modifiers = key_modifiers_from_wire(c >> 16);
+                    if let Some(key) = key_from_wire(a as u16, b as u32) {
+                        self.app
+                            .handle_event(PlatformEvent::KeyPressed { key, modifiers }, window);
+                    }
+                    if let Some(event) = self.key_event(a as u16, b as u32, modifiers) {
                         self.app.handle_event(event, window);
                     }
                 }
@@ -855,7 +868,15 @@ where
         Ok(())
     }
 
-    fn key_event(&self, keycode: u16, codepoint: u32) -> Option<PlatformEvent> {
+    fn key_event(
+        &self,
+        keycode: u16,
+        codepoint: u32,
+        modifiers: KeyModifiers,
+    ) -> Option<PlatformEvent> {
+        if modifiers.shortcut() {
+            return (keycode == KEY_A).then_some(PlatformEvent::SelectAll);
+        }
         if let Some(text) = char::from_u32(codepoint)
             && !text.is_control()
         {
@@ -875,10 +896,34 @@ where
                 text: String::from(" "),
             },
             KEY_DELETE => PlatformEvent::Delete,
-            KEY_HOME => PlatformEvent::Home,
-            KEY_END => PlatformEvent::End,
-            KEY_LEFT => PlatformEvent::ArrowLeft,
-            KEY_RIGHT => PlatformEvent::ArrowRight,
+            KEY_LEFT => {
+                if modifiers.shift() {
+                    PlatformEvent::SelectLeft
+                } else {
+                    PlatformEvent::ArrowLeft
+                }
+            }
+            KEY_RIGHT => {
+                if modifiers.shift() {
+                    PlatformEvent::SelectRight
+                } else {
+                    PlatformEvent::ArrowRight
+                }
+            }
+            KEY_HOME => {
+                if modifiers.shift() {
+                    PlatformEvent::SelectHome
+                } else {
+                    PlatformEvent::Home
+                }
+            }
+            KEY_END => {
+                if modifiers.shift() {
+                    PlatformEvent::SelectEnd
+                } else {
+                    PlatformEvent::End
+                }
+            }
             KEY_PAGE_UP => PlatformEvent::SelectHome,
             KEY_PAGE_DOWN => PlatformEvent::SelectEnd,
             _ => return None,
@@ -898,4 +943,44 @@ where
             ButtonState::Pressed
         }
     }
+}
+
+fn key_modifiers_from_wire(modifiers: u32) -> KeyModifiers {
+    let mut bits = 0;
+    if modifiers & INPUT_MOD_SHIFT != 0 {
+        bits |= KeyModifiers::SHIFT;
+    }
+    if modifiers & INPUT_MOD_CONTROL != 0 {
+        bits |= KeyModifiers::CONTROL;
+    }
+    if modifiers & INPUT_MOD_ALT != 0 {
+        bits |= KeyModifiers::ALT;
+    }
+    KeyModifiers::from_bits(bits)
+}
+
+fn key_from_wire(keycode: u16, codepoint: u32) -> Option<Key> {
+    if let Some(character) = char::from_u32(codepoint)
+        && !character.is_control()
+    {
+        return Some(Key::Character(character));
+    }
+
+    Some(match keycode {
+        KEY_ESCAPE => Key::Escape,
+        KEY_BACKSPACE => Key::Backspace,
+        KEY_TAB => Key::Tab,
+        KEY_ENTER => Key::Enter,
+        KEY_SPACE => Key::Space,
+        KEY_DELETE => Key::Delete,
+        KEY_HOME => Key::Home,
+        KEY_END => Key::End,
+        KEY_LEFT => Key::ArrowLeft,
+        KEY_RIGHT => Key::ArrowRight,
+        KEY_UP => Key::ArrowUp,
+        KEY_DOWN => Key::ArrowDown,
+        KEY_PAGE_UP => Key::PageUp,
+        KEY_PAGE_DOWN => Key::PageDown,
+        _ => return None,
+    })
 }
