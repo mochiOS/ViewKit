@@ -484,39 +484,58 @@ impl GpuSceneRenderer {
         if !width.is_finite() || width <= 0.0 {
             return;
         }
-        let outer = rounded_points(rect.expanded(width * 0.5), radius + width * 0.5);
-        let inner_rect = Rect::new(
-            rect.origin.x + width * 0.5,
-            rect.origin.y + width * 0.5,
-            (rect.size.width - width).max(0.0),
-            (rect.size.height - width).max(0.0),
+        let half = width * 0.5;
+        let opaque_inset = half.min(0.5);
+        let outer_transparent = rounded_points_at_offset(rect, radius, half + 0.5);
+        let outer_opaque = rounded_points_at_offset(rect, radius, half - opaque_inset);
+        let inner_opaque = rounded_points_at_offset(rect, radius, -half + opaque_inset);
+        let inner_transparent = rounded_points_at_offset(rect, radius, -half - 0.5);
+        self.anti_aliased_ring(
+            &outer_transparent,
+            &outer_opaque,
+            &inner_opaque,
+            &inner_transparent,
+            color,
+            viewport,
         );
-        let inner = rounded_points(inner_rect, (radius - width * 0.5).max(0.0));
-        self.ring(&outer, &inner, color, viewport);
     }
 
     fn stroke_ellipse(&mut self, rect: Rect, width: f32, color: Color, viewport: Viewport) {
         if !width.is_finite() || width <= 0.0 {
             return;
         }
-        let outer = ellipse_points(rect.expanded(width * 0.5));
-        let inner = ellipse_points(Rect::new(
-            rect.origin.x + width * 0.5,
-            rect.origin.y + width * 0.5,
-            (rect.size.width - width).max(0.0),
-            (rect.size.height - width).max(0.0),
-        ));
-        self.ring(&outer, &inner, color, viewport);
+        let half = width * 0.5;
+        let opaque_inset = half.min(0.5);
+        let outer_transparent = ellipse_points(offset_rect(rect, half + 0.5));
+        let outer_opaque = ellipse_points(offset_rect(rect, half - opaque_inset));
+        let inner_opaque = ellipse_points(offset_rect(rect, -half + opaque_inset));
+        let inner_transparent = ellipse_points(offset_rect(rect, -half - 0.5));
+        self.anti_aliased_ring(
+            &outer_transparent,
+            &outer_opaque,
+            &inner_opaque,
+            &inner_transparent,
+            color,
+            viewport,
+        );
     }
 
-    fn ring(
+    #[allow(clippy::too_many_arguments)]
+    fn anti_aliased_ring(
         &mut self,
-        outer: &[(f32, f32)],
-        inner: &[(f32, f32)],
+        outer_transparent: &[(f32, f32)],
+        outer_opaque: &[(f32, f32)],
+        inner_opaque: &[(f32, f32)],
+        inner_transparent: &[(f32, f32)],
         color: Color,
         viewport: Viewport,
     ) {
-        if outer.len() != inner.len() || outer.len() < 3 {
+        let point_count = outer_transparent.len();
+        if point_count < 3
+            || outer_opaque.len() != point_count
+            || inner_opaque.len() != point_count
+            || inner_transparent.len() != point_count
+        {
             return;
         }
         let uv = self.uv_center(AtlasRect {
@@ -525,10 +544,47 @@ impl GpuSceneRenderer {
             width: 1,
             height: 1,
         });
-        for i in 0..outer.len() {
-            let n = (i + 1) % outer.len();
-            self.push_triangle([outer[i], outer[n], inner[n]], [uv; 3], color, viewport);
-            self.push_triangle([outer[i], inner[n], inner[i]], [uv; 3], color, viewport);
+        let clear = transparent(color);
+        for i in 0..point_count {
+            let n = (i + 1) % point_count;
+            self.push_triangle_colors(
+                [outer_transparent[i], outer_opaque[i], outer_opaque[n]],
+                [uv; 3],
+                [clear, color, color],
+                viewport,
+            );
+            self.push_triangle_colors(
+                [outer_transparent[i], outer_opaque[n], outer_transparent[n]],
+                [uv; 3],
+                [clear, color, clear],
+                viewport,
+            );
+            if outer_opaque != inner_opaque {
+                self.push_triangle(
+                    [outer_opaque[i], outer_opaque[n], inner_opaque[n]],
+                    [uv; 3],
+                    color,
+                    viewport,
+                );
+                self.push_triangle(
+                    [outer_opaque[i], inner_opaque[n], inner_opaque[i]],
+                    [uv; 3],
+                    color,
+                    viewport,
+                );
+            }
+            self.push_triangle_colors(
+                [inner_opaque[i], inner_opaque[n], inner_transparent[n]],
+                [uv; 3],
+                [color, color, clear],
+                viewport,
+            );
+            self.push_triangle_colors(
+                [inner_opaque[i], inner_transparent[n], inner_transparent[i]],
+                [uv; 3],
+                [color, clear, clear],
+                viewport,
+            );
         }
     }
 
@@ -1031,6 +1087,18 @@ fn inset_rect(rect: Rect, inset: f32) -> Rect {
         (rect.size.width - inset * 2.0).max(0.0),
         (rect.size.height - inset * 2.0).max(0.0),
     )
+}
+
+fn offset_rect(rect: Rect, offset: f32) -> Rect {
+    if offset >= 0.0 {
+        rect.expanded(offset)
+    } else {
+        inset_rect(rect, -offset)
+    }
+}
+
+fn rounded_points_at_offset(rect: Rect, radius: f32, offset: f32) -> Vec<(f32, f32)> {
+    rounded_points(offset_rect(rect, offset), (radius + offset).max(0.0))
 }
 
 fn transparent(color: Color) -> Color {
