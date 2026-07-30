@@ -198,7 +198,7 @@ impl View for SegmentedControl {
         let (animated_index, next_redraw) = self.animated_index(now, motion);
 
         if let Some(next_redraw) = next_redraw {
-            context.request_redraw_at(next_redraw);
+            context.request_redraw_in_at(bounds.expanded(16.0), next_redraw);
         }
 
         if let Some(animated_index) = animated_index {

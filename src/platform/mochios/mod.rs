@@ -249,9 +249,13 @@ where
         };
         let surface = CompositorSurface::create(compositor, event_endpoint, role, size.0, size.1)?;
         let token = surface.token();
-        let mut shared_buffer = SharedBuffer::new(size.0 as usize, size.1 as usize)?;
         let mut gpu_enabled =
             self.config.fullscreen && renderer_caps(compositor) & RENDERER_CAP_GPU_SCENE != 0;
+        let mut shared_buffer = if gpu_enabled {
+            SharedBuffer::new_gpu_scene(size.0 as usize, size.1 as usize)?
+        } else {
+            SharedBuffer::new(size.0 as usize, size.1 as usize)?
+        };
         self.pointer_x = (viewport.logical_size.width / 2.0).max(0.0);
         self.pointer_y = (viewport.logical_size.height / 2.0).max(0.0);
         self.direct_input = false;
@@ -280,7 +284,11 @@ where
                 let viewport =
                     Viewport::new(Size::new(width as f32, height as f32), width, height, 1.0);
                 window.set_viewport(viewport);
-                shared_buffer = SharedBuffer::new(width as usize, height as usize)?;
+                shared_buffer = if gpu_enabled {
+                    SharedBuffer::new_gpu_scene(width as usize, height as usize)?
+                } else {
+                    SharedBuffer::new(width as usize, height as usize)?
+                };
                 self.pixmap = None;
                 self.clip_masks.clear();
                 self.app

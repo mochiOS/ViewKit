@@ -1,5 +1,5 @@
 use crate::draw_command::DisplayList;
-use crate::event::{EventContext, EventResult, ViewEvent};
+use crate::event::{EventContext, EventResult, RedrawRequest, ViewEvent};
 use crate::geometry::{Rect, Size};
 use crate::theme::Theme;
 use crate::typography::{TextMeasurer, Typography};
@@ -90,6 +90,18 @@ impl<'a> PaintContext<'a> {
         schedule.request_at(deadline);
     }
 
+    pub fn request_redraw_in_at(&mut self, bounds: Rect, deadline: Instant) {
+        if bounds.is_empty() {
+            return;
+        }
+
+        let Some(schedule) = self.redraw_schedule.as_deref_mut() else {
+            return;
+        };
+
+        schedule.request_in_at(bounds, deadline);
+    }
+
     pub(crate) fn inherited_corner_radius(&self) -> Option<f32> {
         self.inherited_corner_radii.last().copied()
     }
@@ -103,14 +115,18 @@ impl<'a> PaintContext<'a> {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct RedrawSchedule {
     deadline: Option<Instant>,
+    request: RedrawRequest,
 }
 
 impl RedrawSchedule {
     pub const fn new() -> Self {
-        Self { deadline: None }
+        Self {
+            deadline: None,
+            request: RedrawRequest::None,
+        }
     }
 
     pub const fn deadline(&self) -> Option<Instant> {
@@ -118,6 +134,18 @@ impl RedrawSchedule {
     }
 
     pub fn request_at(&mut self, deadline: Instant) {
+        self.request(deadline, RedrawRequest::Full);
+    }
+
+    pub fn request_in_at(&mut self, bounds: Rect, deadline: Instant) {
+        if bounds.is_empty() {
+            return;
+        }
+
+        self.request(deadline, RedrawRequest::Region(bounds));
+    }
+
+    fn request(&mut self, deadline: Instant, request: RedrawRequest) {
         match self.deadline {
             Some(current) if current <= deadline => {}
 
@@ -125,14 +153,22 @@ impl RedrawSchedule {
                 self.deadline = Some(deadline);
             }
         }
+
+        self.request = self.request.merge(request);
     }
 
-    pub fn take(&mut self) -> Option<Instant> {
-        self.deadline.take()
+    pub(crate) fn take_due(&mut self, now: Instant) -> RedrawRequest {
+        if self.deadline.is_none_or(|deadline| deadline > now) {
+            return RedrawRequest::None;
+        }
+
+        self.deadline = None;
+        std::mem::take(&mut self.request)
     }
 
     pub fn clear(&mut self) {
         self.deadline = None;
+        self.request = RedrawRequest::None;
     }
 }
 
@@ -150,5 +186,42 @@ pub trait View {
         _context: &mut EventContext<'_>,
     ) -> EventResult {
         EventResult::Ignored
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn scheduled_regions_merge_and_remain_pending_until_due() {
+        let now = Instant::now();
+        let deadline = now + Duration::from_millis(20);
+        let first = Rect::new(10.0, 20.0, 30.0, 40.0);
+        let second = Rect::new(35.0, 50.0, 20.0, 30.0);
+        let mut schedule = RedrawSchedule::new();
+
+        schedule.request_in_at(first, deadline);
+        schedule.request_in_at(second, deadline + Duration::from_millis(10));
+
+        assert_eq!(schedule.deadline(), Some(deadline));
+        assert_eq!(schedule.take_due(now), RedrawRequest::None);
+        assert_eq!(
+            schedule.take_due(deadline),
+            RedrawRequest::Region(first.union(second))
+        );
+        assert_eq!(schedule.deadline(), None);
+    }
+
+    #[test]
+    fn scheduled_full_redraw_overrides_regions() {
+        let deadline = Instant::now();
+        let mut schedule = RedrawSchedule::new();
+
+        schedule.request_in_at(Rect::new(1.0, 2.0, 3.0, 4.0), deadline);
+        schedule.request_at(deadline);
+
+        assert_eq!(schedule.take_due(deadline), RedrawRequest::Full);
     }
 }

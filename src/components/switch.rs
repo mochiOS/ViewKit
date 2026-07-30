@@ -414,7 +414,7 @@ impl View for SwitchMark {
         let (knob_width, width_redraw) = self.animated_knob_width(now, motion, pressed);
 
         if let Some(next_redraw) = position_redraw.into_iter().chain(width_redraw).min() {
-            context.request_redraw_at(next_redraw);
+            context.request_redraw_in_at(bounds.expanded(16.0), next_redraw);
         }
 
         let track_color = self.track_color(context.theme, hovered, pressed, position);

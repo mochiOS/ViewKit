@@ -873,7 +873,7 @@ impl View for TextField {
 
         let (caret_visible, next_redraw) = self.interaction.caret_blink_state(now);
 
-        context.request_redraw_at(next_redraw);
+        context.request_redraw_in_at(bounds.expanded(16.0), next_redraw);
 
         if !caret_visible {
             return;
@@ -911,7 +911,7 @@ impl View for TextField {
         let enabled_changed = self.interaction.set_enabled(self.enabled);
 
         if enabled_changed {
-            context.request_redraw();
+            context.request_redraw_in(bounds.expanded(16.0));
         }
 
         if !self.enabled {
@@ -927,7 +927,7 @@ impl View for TextField {
                     inner.hovered = hovered;
 
                     if hover_changed {
-                        context.request_redraw();
+                        context.request_redraw_in(bounds.expanded(16.0));
                     }
 
                     inner.selecting && inner.focused
@@ -940,7 +940,7 @@ impl View for TextField {
                         inner.cursor = cursor;
                         inner.caret_blink_origin = Some(Instant::now());
 
-                        context.request_redraw();
+                        context.request_redraw_in(bounds.expanded(16.0));
                     }
                 }
 
@@ -964,7 +964,7 @@ impl View for TextField {
                 }
 
                 drop(inner);
-                context.request_redraw();
+                context.request_redraw_in(bounds.expanded(16.0));
 
                 EventResult::Consumed
             }
@@ -986,7 +986,7 @@ impl View for TextField {
                 drop(inner);
 
                 if changed {
-                    context.request_redraw();
+                    context.request_redraw_in(bounds.expanded(16.0));
                 }
 
                 EventResult::Ignored
@@ -1012,7 +1012,7 @@ impl View for TextField {
 
                 drop(inner);
 
-                context.request_redraw();
+                context.request_redraw_in(bounds.expanded(16.0));
 
                 EventResult::Consumed
             }
@@ -1027,7 +1027,7 @@ impl View for TextField {
                 drop(inner);
 
                 if changed {
-                    context.request_redraw();
+                    context.request_redraw_in(bounds.expanded(16.0));
                 }
 
                 EventResult::Ignored
@@ -1044,7 +1044,7 @@ impl View for TextField {
                 drop(inner);
 
                 if changed {
-                    context.request_redraw();
+                    context.request_redraw_in(bounds.expanded(16.0));
                 }
 
                 EventResult::Ignored
@@ -1058,7 +1058,7 @@ impl View for TextField {
                 if self.interaction.insert_text(text) {
                     self.synchronize_binding();
                     self.interaction.reset_caret_blink();
-                    context.request_redraw();
+                    context.request_redraw_in(bounds.expanded(16.0));
                 }
 
                 EventResult::Consumed
@@ -1072,7 +1072,7 @@ impl View for TextField {
                 if self.interaction.delete_backward() {
                     self.synchronize_binding();
                     self.interaction.reset_caret_blink();
-                    context.request_redraw();
+                    context.request_redraw_in(bounds.expanded(16.0));
                 }
 
                 EventResult::Consumed
@@ -1086,7 +1086,7 @@ impl View for TextField {
                 if self.interaction.delete_forward() {
                     self.synchronize_binding();
                     self.interaction.reset_caret_blink();
-                    context.request_redraw();
+                    context.request_redraw_in(bounds.expanded(16.0));
                 }
 
                 EventResult::Consumed
@@ -1099,7 +1099,7 @@ impl View for TextField {
 
                 self.interaction.move_cursor_left();
                 self.interaction.reset_caret_blink();
-                context.request_redraw();
+                context.request_redraw_in(bounds.expanded(16.0));
 
                 EventResult::Consumed
             }
@@ -1111,7 +1111,7 @@ impl View for TextField {
 
                 self.interaction.move_cursor_right();
                 self.interaction.reset_caret_blink();
-                context.request_redraw();
+                context.request_redraw_in(bounds.expanded(16.0));
 
                 EventResult::Consumed
             }
@@ -1123,7 +1123,7 @@ impl View for TextField {
 
                 self.interaction.move_cursor_home();
                 self.interaction.reset_caret_blink();
-                context.request_redraw();
+                context.request_redraw_in(bounds.expanded(16.0));
 
                 EventResult::Consumed
             }
@@ -1135,7 +1135,7 @@ impl View for TextField {
 
                 self.interaction.move_cursor_end();
                 self.interaction.reset_caret_blink();
-                context.request_redraw();
+                context.request_redraw_in(bounds.expanded(16.0));
 
                 EventResult::Consumed
             }
@@ -1149,7 +1149,7 @@ impl View for TextField {
 
                 self.interaction.reset_caret_blink();
 
-                context.request_redraw();
+                context.request_redraw_in(bounds.expanded(16.0));
 
                 EventResult::Consumed
             }
@@ -1163,7 +1163,7 @@ impl View for TextField {
 
                 self.interaction.reset_caret_blink();
 
-                context.request_redraw();
+                context.request_redraw_in(bounds.expanded(16.0));
 
                 EventResult::Consumed
             }
@@ -1177,7 +1177,7 @@ impl View for TextField {
 
                 self.interaction.reset_caret_blink();
 
-                context.request_redraw();
+                context.request_redraw_in(bounds.expanded(16.0));
 
                 EventResult::Consumed
             }
@@ -1191,7 +1191,7 @@ impl View for TextField {
 
                 self.interaction.reset_caret_blink();
 
-                context.request_redraw();
+                context.request_redraw_in(bounds.expanded(16.0));
 
                 EventResult::Consumed
             }
@@ -1205,7 +1205,7 @@ impl View for TextField {
 
                 self.interaction.reset_caret_blink();
 
-                context.request_redraw();
+                context.request_redraw_in(bounds.expanded(16.0));
 
                 EventResult::Consumed
             }

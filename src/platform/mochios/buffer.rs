@@ -19,12 +19,41 @@ pub(super) struct PhysicalDirtyRect {
 
 impl SharedBuffer {
     pub(super) fn new(width: usize, height: usize) -> Result<Self, MochiOsBackendError> {
+        Self::new_with_minimum_capacity(width, height, 0)
+    }
+
+    pub(super) fn new_gpu_scene(width: usize, height: usize) -> Result<Self, MochiOsBackendError> {
+        use mochios_viewkit_gpu_protocol::{
+            ATLAS_HEIGHT, ATLAS_WIDTH, HEADER_LEN, MAX_VERTICES, VERTEX_STRIDE,
+        };
+
+        let vertex_bytes = (MAX_VERTICES as usize)
+            .checked_mul(VERTEX_STRIDE)
+            .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
+        let atlas_bytes = (ATLAS_WIDTH as usize)
+            .checked_mul(ATLAS_HEIGHT as usize)
+            .and_then(|pixels| pixels.checked_mul(4))
+            .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
+        let scene_capacity = HEADER_LEN
+            .checked_add(vertex_bytes)
+            .and_then(|bytes| bytes.checked_add(atlas_bytes))
+            .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
+
+        Self::new_with_minimum_capacity(width, height, scene_capacity)
+    }
+
+    fn new_with_minimum_capacity(
+        width: usize,
+        height: usize,
+        minimum_capacity: usize,
+    ) -> Result<Self, MochiOsBackendError> {
         let pixel_count = width
             .checked_mul(height)
             .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
-        let byte_len = pixel_count
+        let pixel_bytes = pixel_count
             .checked_mul(4)
             .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
+        let byte_len = pixel_bytes.max(minimum_capacity);
         let page_count = byte_len
             .checked_add(PAGE_SIZE - 1)
             .map(|len| len / PAGE_SIZE)

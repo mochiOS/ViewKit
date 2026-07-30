@@ -143,6 +143,8 @@ where
         self.ensure_root(viewport);
 
         let viewport_bounds = viewport.logical_bounds();
+        let scheduled_redraw = self.redraw_schedule.take_due(Instant::now());
+        self.pending_redraw = self.pending_redraw.merge(scheduled_redraw);
 
         let dirty_bounds = match std::mem::take(&mut self.pending_redraw) {
             RedrawRequest::Region(bounds) => bounds
