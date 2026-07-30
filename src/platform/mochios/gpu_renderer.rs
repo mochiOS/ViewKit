@@ -1,7 +1,7 @@
 use super::renderer::valid_scale_factor;
 use super::*;
-use cosmic_text::{SwashContent, SwashImage};
-use std::sync::Arc;
+use crate::gpu_clip::{ClipRegion, ClipShape, ClipVertex, clip_polygon, premultiplied_color};
+use cosmic_text::{CacheKey, SwashContent, SwashImage};
 
 use mochios_viewkit_gpu_protocol::{
     ATLAS_HEIGHT, ATLAS_WIDTH, HEADER_LEN, VERTEX_STRIDE, encode_header,
@@ -30,28 +30,42 @@ struct SvgRasterCacheEntry {
     width: u32,
     height: u32,
     tint: Option<Color>,
-    pixels: Arc<[u8]>,
+    atlas: AtlasRect,
 }
 
 struct ImageRasterCacheEntry {
     image: ImageData,
-    pixels: Arc<[u8]>,
+    atlas: AtlasRect,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct GlyphAtlasKey {
+    cache_key: CacheKey,
+    color: u32,
+}
+
+#[derive(Clone, Copy)]
+struct GlyphAtlasEntry {
+    atlas: AtlasRect,
+    left: i32,
+    top: i32,
 }
 
 pub(super) struct GpuSceneRenderer {
     vertices: Vec<Vertex>,
     atlas: Vec<u8>,
-    previous_atlas: Vec<u8>,
-    previous_atlas_valid: bool,
     atlas_x: u32,
     atlas_y: u32,
     atlas_row_height: u32,
-    clips: Vec<Rect>,
+    atlas_dirty_rows: Option<(u32, u32)>,
+    clips: Vec<ClipRegion>,
+    glyph_atlas_cache: HashMap<GlyphAtlasKey, GlyphAtlasEntry>,
     image_raster_cache: Vec<ImageRasterCacheEntry>,
     svg_raster_cache: Vec<SvgRasterCacheEntry>,
     frame_width: u32,
     frame_height: u32,
     frame_valid: bool,
+    atlas_full: bool,
 }
 
 impl GpuSceneRenderer {
@@ -59,21 +73,60 @@ impl GpuSceneRenderer {
         Self {
             vertices: Vec::new(),
             atlas: Vec::new(),
-            previous_atlas: Vec::new(),
-            previous_atlas_valid: false,
             atlas_x: 1,
             atlas_y: 0,
             atlas_row_height: 1,
+            atlas_dirty_rows: None,
             clips: Vec::new(),
+            glyph_atlas_cache: HashMap::new(),
             image_raster_cache: Vec::new(),
             svg_raster_cache: Vec::new(),
             frame_width: 0,
             frame_height: 0,
             frame_valid: false,
+            atlas_full: false,
         }
     }
 
     pub(super) fn render(
+        &mut self,
+        viewport: Viewport,
+        dirty_bounds: Rect,
+        display_list: &DisplayList,
+        font_system: &mut FontSystem,
+        swash_cache: &mut SwashCache,
+        text_layout_cache: &mut HashMap<TextLayoutKey, Buffer>,
+        transparent_clear: bool,
+        output: &mut Vec<u8>,
+    ) -> Result<(), MochiOsBackendError> {
+        let result = self.render_once(
+            viewport,
+            dirty_bounds,
+            display_list,
+            font_system,
+            swash_cache,
+            text_layout_cache,
+            transparent_clear,
+            output,
+        );
+        if result.is_err() && self.atlas_full {
+            self.clear_atlas_cache();
+            return self.render_once(
+                viewport,
+                dirty_bounds,
+                display_list,
+                font_system,
+                swash_cache,
+                text_layout_cache,
+                transparent_clear,
+                output,
+            );
+        }
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_once(
         &mut self,
         viewport: Viewport,
         dirty_bounds: Rect,
@@ -97,7 +150,10 @@ impl GpuSceneRenderer {
         } else {
             viewport_bounds
         };
-        self.clips.push(damage);
+        self.clips.push(ClipRegion {
+            bounds: damage,
+            shapes: vec![ClipShape::Rect(damage)],
+        });
         for command in display_list.commands() {
             match command {
                 DrawCommand::Clear { color } => {
@@ -146,12 +202,11 @@ impl GpuSceneRenderer {
                 )?,
                 DrawCommand::DrawImage { command } => self.image(command, scale, viewport)?,
                 DrawCommand::DrawSvg { command } => self.svg(command, scale, viewport)?,
-                DrawCommand::PushClip { rect } | DrawCommand::PushRoundedClip { rect, .. } => {
-                    let current = self.current_clip();
-                    self.clips.push(
-                        rect.intersection(current)
-                            .unwrap_or(Rect::new(0.0, 0.0, 0.0, 0.0)),
-                    );
+                DrawCommand::PushClip { rect } => {
+                    self.push_clip(*rect, None);
+                }
+                DrawCommand::PushRoundedClip { rect, radius } => {
+                    self.push_clip(*rect, Some(*radius));
                 }
                 DrawCommand::PopClip => {
                     if self.clips.len() > 1 {
@@ -170,17 +225,36 @@ impl GpuSceneRenderer {
     fn reset(&mut self) -> Result<(), MochiOsBackendError> {
         self.vertices.clear();
         self.clips.clear();
+        self.atlas_dirty_rows = None;
+        self.atlas_full = false;
+        if self.atlas.is_empty() {
+            let atlas_len = (ATLAS_WIDTH as usize)
+                .checked_mul(ATLAS_HEIGHT as usize)
+                .and_then(|pixels| pixels.checked_mul(4))
+                .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
+            self.atlas.resize(atlas_len, 0);
+            self.atlas[..4].copy_from_slice(&[255, 255, 255, 255]);
+            self.atlas_dirty_rows = Some((0, 1));
+        }
+        Ok(())
+    }
+
+    fn clear_atlas_cache(&mut self) {
+        self.atlas.clear();
         self.atlas_x = 1;
         self.atlas_y = 0;
         self.atlas_row_height = 1;
-        core::mem::swap(&mut self.atlas, &mut self.previous_atlas);
-        let atlas_len = (ATLAS_WIDTH as usize)
-            .checked_mul(ATLAS_HEIGHT as usize)
-            .and_then(|pixels| pixels.checked_mul(4))
-            .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
-        self.atlas.resize(atlas_len, 0);
-        self.atlas[..4].copy_from_slice(&[255, 255, 255, 255]);
-        Ok(())
+        self.atlas_dirty_rows = None;
+        self.glyph_atlas_cache.clear();
+        self.image_raster_cache.clear();
+        self.svg_raster_cache.clear();
+        self.frame_valid = false;
+        self.atlas_full = false;
+    }
+
+    fn atlas_capacity_error(&mut self) -> MochiOsBackendError {
+        self.atlas_full = true;
+        MochiOsBackendError::InvalidWindowSize
     }
 
     fn encode(
@@ -195,26 +269,11 @@ impl GpuSceneRenderer {
             .len()
             .checked_mul(VERTEX_STRIDE)
             .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
-        let atlas_used_height = self
-            .atlas_y
-            .saturating_add(self.atlas_row_height)
-            .clamp(1, ATLAS_HEIGHT);
         let row_bytes = ATLAS_WIDTH as usize * 4;
-        let (atlas_data_y, atlas_data_height) = if self.previous_atlas_valid {
-            let changed = (0..atlas_used_height as usize).filter(|row| {
-                let start = row * row_bytes;
-                let end = start + row_bytes;
-                self.atlas[start..end] != self.previous_atlas[start..end]
-            });
-            let first = changed.clone().next();
-            let last = changed.last();
-            match (first, last) {
-                (Some(first), Some(last)) => (first as u32, (last - first + 1) as u32),
-                _ => (0, 0),
-            }
-        } else {
-            (0, atlas_used_height)
-        };
+        let (atlas_data_y, atlas_data_height) = self
+            .atlas_dirty_rows
+            .map(|(start, end)| (start, end.saturating_sub(start)))
+            .unwrap_or((0, 0));
         let atlas_bytes = (ATLAS_WIDTH as usize)
             .checked_mul(atlas_data_height as usize)
             .and_then(|pixels| pixels.checked_mul(4))
@@ -250,15 +309,37 @@ impl GpuSceneRenderer {
         }
         let atlas_start = atlas_data_y as usize * row_bytes;
         output[offset..].copy_from_slice(&self.atlas[atlas_start..atlas_start + atlas_bytes]);
-        self.previous_atlas_valid = true;
         Ok(())
     }
 
     fn current_clip(&self) -> Rect {
         self.clips
             .last()
-            .copied()
+            .map(|clip| clip.bounds)
             .unwrap_or(Rect::new(0.0, 0.0, 0.0, 0.0))
+    }
+
+    fn push_clip(&mut self, rect: Rect, radius: Option<f32>) {
+        let Some(current) = self.clips.last() else {
+            return;
+        };
+        let bounds = rect
+            .intersection(current.bounds)
+            .unwrap_or(Rect::new(0.0, 0.0, 0.0, 0.0));
+        let mut shapes = current.shapes.clone();
+        if let Some(radius) = radius {
+            let radius = radius
+                .max(0.0)
+                .min(rect.size.width.min(rect.size.height) * 0.5);
+            shapes.push(ClipShape::Rounded {
+                rect,
+                radius,
+                polygon: rounded_points(rect, radius),
+            });
+        } else {
+            shapes.push(ClipShape::Rect(rect));
+        }
+        self.clips.push(ClipRegion { bounds, shapes });
     }
 
     fn solid_rect(&mut self, rect: Rect, color: Color, viewport: Viewport) {
@@ -293,11 +374,7 @@ impl GpuSceneRenderer {
     }
 
     fn fan(&mut self, rect: Rect, radius: f32, color: Color, viewport: Viewport, ellipse: bool) {
-        let Some(clipped) = rect.intersection(self.current_clip()) else {
-            return;
-        };
-        if clipped != rect {
-            self.solid_rect(clipped, color, viewport);
+        if rect.intersection(self.current_clip()).is_none() {
             return;
         }
         let inner_rect = inset_rect(rect, 0.5);
@@ -464,25 +541,24 @@ impl GpuSceneRenderer {
         if command.bounds.intersection(self.current_clip()).is_none() {
             return Ok(());
         }
-        let pixels = if let Some(entry) = self
+        let atlas = if let Some(entry) = self
             .image_raster_cache
             .iter()
             .find(|entry| entry.image == command.image)
         {
-            Arc::clone(&entry.pixels)
+            entry.atlas
         } else {
-            let pixels: Arc<[u8]> =
-                Arc::from(rgba_to_bgra(command.image.premultiplied_rgba8()).into_boxed_slice());
             if self.image_raster_cache.len() >= IMAGE_RASTER_CACHE_CAPACITY {
-                self.image_raster_cache.clear();
+                return Err(self.atlas_capacity_error());
             }
+            let pixels = rgba_to_bgra(command.image.premultiplied_rgba8());
+            let atlas = self.pack_bgra(command.image.width(), command.image.height(), &pixels)?;
             self.image_raster_cache.push(ImageRasterCacheEntry {
                 image: command.image.clone(),
-                pixels: Arc::clone(&pixels),
+                atlas,
             });
-            pixels
+            atlas
         };
-        let atlas = self.pack_bgra(command.image.width(), command.image.height(), &pixels)?;
         let rect = scale_rect(command.bounds, scale);
         self.textured_quad(rect, atlas, command.opacity, viewport);
         Ok(())
@@ -499,14 +575,17 @@ impl GpuSceneRenderer {
         }
         let width = (command.bounds.size.width * scale).ceil().max(1.0) as u32;
         let height = (command.bounds.size.height * scale).ceil().max(1.0) as u32;
-        let pixels = if let Some(entry) = self.svg_raster_cache.iter().find(|entry| {
+        let atlas = if let Some(entry) = self.svg_raster_cache.iter().find(|entry| {
             entry.svg == command.svg
                 && entry.width == width
                 && entry.height == height
                 && entry.tint == command.tint
         }) {
-            Arc::clone(&entry.pixels)
+            entry.atlas
         } else {
+            if self.svg_raster_cache.len() >= SVG_RASTER_CACHE_CAPACITY {
+                return Err(self.atlas_capacity_error());
+            }
             let mut pixmap =
                 Pixmap::new(width, height).ok_or(MochiOsBackendError::InvalidWindowSize)?;
             let transform = Transform::from_scale(
@@ -523,20 +602,17 @@ impl GpuSceneRenderer {
                     pixel[3] = alpha;
                 }
             }
-            let pixels: Arc<[u8]> = Arc::from(rgba_to_bgra(pixmap.data()).into_boxed_slice());
-            if self.svg_raster_cache.len() >= SVG_RASTER_CACHE_CAPACITY {
-                self.svg_raster_cache.clear();
-            }
+            let pixels = rgba_to_bgra(pixmap.data());
+            let atlas = self.pack_bgra(width, height, &pixels)?;
             self.svg_raster_cache.push(SvgRasterCacheEntry {
                 svg: command.svg.clone(),
                 width,
                 height,
                 tint: command.tint,
-                pixels: Arc::clone(&pixels),
+                atlas,
             });
-            pixels
+            atlas
         };
-        let atlas = self.pack_bgra(width, height, &pixels)?;
         self.textured_quad(
             scale_rect(command.bounds, scale),
             atlas,
@@ -608,24 +684,40 @@ impl GpuSceneRenderer {
             command.color.alpha,
         );
         let text_clip = scale_rect(command.bounds, scale);
-        let current_clip = self.current_clip();
-        self.clips.push(
-            text_clip
-                .intersection(current_clip)
-                .unwrap_or(Rect::new(0.0, 0.0, 0.0, 0.0)),
-        );
+        self.push_clip(text_clip, None);
         for glyph in glyphs {
-            let Some(image) = swash_cache.get_image(font_system, glyph.cache_key).as_ref() else {
-                continue;
+            let atlas_key = GlyphAtlasKey {
+                cache_key: glyph.cache_key,
+                color: u32::from_be_bytes([
+                    command.color.red,
+                    command.color.green,
+                    command.color.blue,
+                    command.color.alpha,
+                ]),
             };
-            let atlas = self.pack_glyph(image, text_color)?;
+            let entry = if let Some(entry) = self.glyph_atlas_cache.get(&atlas_key) {
+                *entry
+            } else {
+                let Some(image) = swash_cache.get_image(font_system, glyph.cache_key).as_ref()
+                else {
+                    continue;
+                };
+                let atlas = self.pack_glyph(image, text_color)?;
+                let entry = GlyphAtlasEntry {
+                    atlas,
+                    left: image.placement.left,
+                    top: image.placement.top,
+                };
+                self.glyph_atlas_cache.insert(atlas_key, entry);
+                entry
+            };
             let rect = Rect::new(
-                (glyph.x + image.placement.left) as f32,
-                (glyph.y - image.placement.top) as f32,
-                image.placement.width as f32,
-                image.placement.height as f32,
+                (glyph.x + entry.left) as f32,
+                (glyph.y - entry.top) as f32,
+                entry.atlas.width as f32,
+                entry.atlas.height as f32,
             );
-            self.textured_quad(rect, atlas, 1.0, viewport);
+            self.textured_quad(rect, entry.atlas, 1.0, viewport);
         }
         self.clips.pop();
         Ok(())
@@ -711,23 +803,46 @@ impl GpuSceneRenderer {
         colors: [Color; 3],
         viewport: Viewport,
     ) {
-        for index in 0..3 {
-            let color = colors[index];
-            let alpha = f32::from(color.alpha) / 255.0;
-            let rgba = [
-                f32::from(color.red) / 255.0 * alpha,
-                f32::from(color.green) / 255.0 * alpha,
-                f32::from(color.blue) / 255.0 * alpha,
-                alpha,
-            ];
-            let x = positions[index].0 / viewport.physical_width as f32 * 2.0 - 1.0;
-            let y = positions[index].1 / viewport.physical_height as f32 * 2.0 - 1.0;
-            self.vertices.push(Vertex {
-                position: [x, y, 0.0],
-                uv: uv[index],
-                color: rgba,
-            });
+        let mut polygon = positions
+            .into_iter()
+            .zip(uv)
+            .zip(colors)
+            .map(|((position, uv), color)| ClipVertex {
+                position,
+                uv,
+                color: premultiplied_color(color),
+            })
+            .collect::<Vec<_>>();
+        let Some(clip) = self.clips.last() else {
+            return;
+        };
+        if !clip
+            .shapes
+            .iter()
+            .all(|shape| polygon.iter().all(|vertex| shape.contains(vertex.position)))
+        {
+            for shape in &clip.shapes {
+                polygon = clip_polygon(polygon, shape.polygon());
+                if polygon.len() < 3 {
+                    return;
+                }
+            }
         }
+        for index in 1..polygon.len() - 1 {
+            self.push_clipped_vertex(polygon[0], viewport);
+            self.push_clipped_vertex(polygon[index], viewport);
+            self.push_clipped_vertex(polygon[index + 1], viewport);
+        }
+    }
+
+    fn push_clipped_vertex(&mut self, vertex: ClipVertex, viewport: Viewport) {
+        let x = vertex.position.0 / viewport.physical_width as f32 * 2.0 - 1.0;
+        let y = vertex.position.1 / viewport.physical_height as f32 * 2.0 - 1.0;
+        self.vertices.push(Vertex {
+            position: [x, y, 0.0],
+            uv: vertex.uv,
+            color: vertex.color,
+        });
     }
 
     fn pack_bgra(
@@ -751,7 +866,7 @@ impl GpuSceneRenderer {
             self.atlas_row_height = 0;
         }
         if self.atlas_y + height > ATLAS_HEIGHT {
-            return Err(MochiOsBackendError::InvalidWindowSize);
+            return Err(self.atlas_capacity_error());
         }
         let rect = AtlasRect {
             x: self.atlas_x,
@@ -768,6 +883,7 @@ impl GpuSceneRenderer {
         }
         self.atlas_x = self.atlas_x.saturating_add(width + 1);
         self.atlas_row_height = self.atlas_row_height.max(height + 1);
+        self.mark_atlas_dirty(rect.y, rect.height);
         Ok(rect)
     }
 
@@ -787,7 +903,7 @@ impl GpuSceneRenderer {
             self.atlas_row_height = 0;
         }
         if self.atlas_y + height > ATLAS_HEIGHT {
-            return Err(MochiOsBackendError::InvalidWindowSize);
+            return Err(self.atlas_capacity_error());
         }
         let rect = AtlasRect {
             x: self.atlas_x,
@@ -841,12 +957,45 @@ impl GpuSceneRenderer {
                 }
             }
             SwashContent::SubpixelMask => {
-                return Err(MochiOsBackendError::InvalidWindowSize);
+                if image.data.len() < pixel_count.saturating_mul(4) {
+                    return Err(MochiOsBackendError::InvalidWindowSize);
+                }
+                for index in 0..pixel_count {
+                    let source = index * 4;
+                    let red_alpha = combine_alpha(image.data[source], base_alpha);
+                    let green_alpha = combine_alpha(image.data[source + 1], base_alpha);
+                    let blue_alpha = combine_alpha(image.data[source + 2], base_alpha);
+                    let alpha = red_alpha.max(green_alpha).max(blue_alpha);
+                    let target_x = index % width as usize;
+                    let target_y = index / width as usize;
+                    let target = ((rect.y as usize + target_y) * ATLAS_WIDTH as usize
+                        + rect.x as usize
+                        + target_x)
+                        * 4;
+                    self.atlas[target..target + 4].copy_from_slice(&[
+                        premultiply(blue, blue_alpha),
+                        premultiply(green, green_alpha),
+                        premultiply(red, red_alpha),
+                        alpha,
+                    ]);
+                }
             }
         }
         self.atlas_x = self.atlas_x.saturating_add(width + 1);
         self.atlas_row_height = self.atlas_row_height.max(height + 1);
+        self.mark_atlas_dirty(rect.y, rect.height);
         Ok(rect)
+    }
+
+    fn mark_atlas_dirty(&mut self, y: u32, height: u32) {
+        let end = y.saturating_add(height).min(ATLAS_HEIGHT);
+        if y >= end {
+            return;
+        }
+        self.atlas_dirty_rows = Some(match self.atlas_dirty_rows {
+            Some((start, previous_end)) => (start.min(y), previous_end.max(end)),
+            None => (y, end),
+        });
     }
 
     fn uv_center(&self, rect: AtlasRect) -> [f32; 2] {
@@ -898,6 +1047,10 @@ fn rgba_to_bgra(rgba: &[u8]) -> Vec<u8> {
 
 fn premultiply(channel: u8, alpha: u8) -> u8 {
     ((u16::from(channel) * u16::from(alpha) + 127) / 255) as u8
+}
+
+fn combine_alpha(mask: u8, alpha: u8) -> u8 {
+    ((u16::from(mask) * u16::from(alpha) + 127) / 255) as u8
 }
 
 fn ellipse_points(rect: Rect) -> Vec<(f32, f32)> {

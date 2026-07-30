@@ -8,6 +8,8 @@ pub mod event;
 pub mod ffi;
 pub mod font;
 pub mod geometry;
+#[cfg(any(target_os = "mochios", test))]
+mod gpu_clip;
 pub mod image;
 pub mod layout;
 pub mod platform;

@@ -78,10 +78,12 @@ const EVENT_FOCUS_GAINED: u32 = 8;
 const EVENT_FOCUS_LOST: u32 = 9;
 const EVENT_FRAME_DONE: u32 = 10;
 const EVENT_CONFIGURE: u32 = 11;
+const EVENT_POINTER_SCROLL: u32 = 12;
 const INPUT_SUBSCRIBE_OPCODE: u32 = 0x5355_4253;
 const INPUT_EVENT_SIZE: usize = 32;
 const INPUT_EVENT_KIND_POINTER_MOVE: u16 = 2;
 const INPUT_EVENT_KIND_POINTER_BUTTON: u16 = 3;
+const INPUT_EVENT_KIND_POINTER_WHEEL: u16 = 4;
 const INPUT_EVENT_KIND_POINTER_ABSOLUTE: u16 = 5;
 const KEY_BACKSPACE: u16 = 2;
 const KEY_TAB: u16 = 3;
@@ -624,6 +626,15 @@ where
                     .handle_event(PlatformEvent::PointerButton { button, state }, window);
                 true
             }
+            INPUT_EVENT_KIND_POINTER_WHEEL => {
+                let delta_x =
+                    i32::from_le_bytes([event[12], event[13], event[14], event[15]]) as f32;
+                let delta_y =
+                    i32::from_le_bytes([event[16], event[17], event[18], event[19]]) as f32;
+                self.app
+                    .handle_event(PlatformEvent::Scroll { delta_x, delta_y }, window);
+                true
+            }
             _ => false,
         }
     }
@@ -799,6 +810,15 @@ where
                 };
                 self.app
                     .handle_event(PlatformEvent::PointerButton { button, state }, window);
+            }
+            EVENT_POINTER_SCROLL => {
+                self.app.handle_event(
+                    PlatformEvent::Scroll {
+                        delta_x: a as f32,
+                        delta_y: b as f32,
+                    },
+                    window,
+                );
             }
             EVENT_KEY => {
                 if c & 1 != 0 {
