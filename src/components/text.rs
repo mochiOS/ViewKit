@@ -3,7 +3,7 @@
 use cosmic_text::{Attrs, Buffer, Family, Metrics, Shaping, Weight};
 
 use crate::draw_command::{DrawCommand, TextCommand};
-use crate::font::DEFAULT_UI_FONT_FAMILY;
+use crate::font::{DEFAULT_MONOSPACE_FONT_FAMILY, DEFAULT_UI_FONT_FAMILY};
 use crate::geometry::{Rect, Size};
 use crate::runtime::{IntoViewNode, TextNode, ViewNode, ViewNodeContext, ViewNodeKind};
 use crate::theme::Color;
@@ -47,6 +47,11 @@ impl Text {
     pub fn font_family(mut self, font_family: impl Into<String>) -> Self {
         self.font_family = font_family.into();
 
+        self
+    }
+
+    pub fn monospaced(mut self) -> Self {
+        self.font_family = DEFAULT_MONOSPACE_FONT_FAMILY.to_owned();
         self
     }
 
@@ -252,5 +257,18 @@ fn finite_positive_or(value: f32, fallback: f32) -> f32 {
         value
     } else {
         fallback
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Text;
+    use crate::font::DEFAULT_MONOSPACE_FONT_FAMILY;
+
+    #[test]
+    fn monospaced_uses_the_embedded_monospace_family() {
+        let text = Text::new("terminal").monospaced();
+
+        assert_eq!(text.font_family, DEFAULT_MONOSPACE_FONT_FAMILY);
     }
 }

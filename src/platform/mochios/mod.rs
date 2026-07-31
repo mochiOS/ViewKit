@@ -74,6 +74,7 @@ const EVENT_POINTER_LEAVE: u32 = 3;
 const EVENT_POINTER_MOTION: u32 = 4;
 const EVENT_POINTER_BUTTON: u32 = 5;
 const EVENT_KEY: u32 = 6;
+const EVENT_CLOSE_REQUESTED: u32 = 7;
 const EVENT_FOCUS_GAINED: u32 = 8;
 const EVENT_FOCUS_LOST: u32 = 9;
 const EVENT_FRAME_DONE: u32 = 10;
@@ -171,6 +172,7 @@ where
     clear_color: Color,
     pending_pointer_motion: PendingPointerMotion,
     pending_resize: Option<(u32, u32)>,
+    close_requested: bool,
     metrics: BackendMetrics,
 }
 
@@ -221,6 +223,7 @@ where
             clear_color: Color::BLACK,
             pending_pointer_motion: PendingPointerMotion::default(),
             pending_resize: None,
+            close_requested: false,
             metrics: BackendMetrics::default(),
         }
     }
@@ -280,12 +283,15 @@ where
         window.request_redraw();
 
         let mut display_list = DisplayList::new();
-        loop {
+        'event_loop: loop {
             let mut handled_work = false;
 
             while let Some((len, event)) = try_recv_event()? {
                 self.handle_or_queue_event_message(len, event, &window)?;
                 handled_work = true;
+            }
+            if self.close_requested {
+                break 'event_loop Ok(());
             }
             if let Some((width, height)) = self.pending_resize.take() {
                 let viewport =
@@ -847,6 +853,10 @@ where
                         self.app.handle_event(event, window);
                     }
                 }
+            }
+            EVENT_CLOSE_REQUESTED => {
+                self.app.handle_event(PlatformEvent::CloseRequested, window);
+                self.close_requested = true;
             }
             EVENT_FOCUS_GAINED => {
                 self.app.handle_event(PlatformEvent::Focused(true), window);
