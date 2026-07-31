@@ -17,7 +17,11 @@ pub(super) struct TextLayoutKey {
 impl TextLayoutKey {
     pub(super) fn new(command: &TextCommand, scale: f32) -> Self {
         Self {
-            text: command.text.clone(),
+            text: if command.cache_layout {
+                command.text.clone()
+            } else {
+                String::new()
+            },
             font_family: command.font_family.clone(),
             font_size_bits: canonical_f32_bits(command.font_size),
             line_height_bits: canonical_f32_bits(command.line_height),
@@ -657,13 +661,7 @@ fn draw_text_command(
     let height = (command.bounds.size.height * scale).max(0.0);
     let origin_x = (command.bounds.origin.x * scale).round();
     let origin_y = command.bounds.origin.y * scale;
-    let key = TextLayoutKey::new(command, scale);
-
-    if !layout_cache.contains_key(&key) {
-        if layout_cache.len() >= TEXT_LAYOUT_CACHE_CAPACITY {
-            layout_cache.clear();
-        }
-
+    let create_buffer = |font_system: &mut FontSystem| {
         let metrics = Metrics::new(font_size, line_height);
         let mut buffer = Buffer::new(font_system, metrics);
         {
@@ -681,13 +679,31 @@ fn draw_text_command(
                 command.alignment.to_cosmic(),
             );
         }
-
-        layout_cache.insert(key.clone(), buffer);
+        buffer
+    };
+    let key = TextLayoutKey::new(command, scale);
+    if !layout_cache.contains_key(&key) {
+        if layout_cache.len() >= TEXT_LAYOUT_CACHE_CAPACITY {
+            layout_cache.clear();
+        }
+        layout_cache.insert(key.clone(), create_buffer(font_system));
     }
-
     let Some(buffer) = layout_cache.get_mut(&key) else {
         return;
     };
+    if !command.cache_layout {
+        let mut buffer = buffer.borrow_with(font_system);
+        buffer.set_size(Some(width), Some(height));
+        let attrs = Attrs::new()
+            .family(Family::Name(command.font_family.as_str()))
+            .weight(Weight(command.weight.clamp(1, 1000)));
+        buffer.set_text(
+            command.text.as_str(),
+            &attrs,
+            Shaping::Advanced,
+            command.alignment.to_cosmic(),
+        );
+    }
     let mut buffer = buffer.borrow_with(font_system);
     let text_color = CosmicColor::rgba(
         command.color.red,

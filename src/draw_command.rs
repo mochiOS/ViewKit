@@ -80,6 +80,7 @@ pub struct DisplayList {
 pub struct TextCommand {
     pub text: String,
     pub bounds: Rect,
+    pub cache_layout: bool,
 
     pub font_family: String,
     pub font_size: f32,

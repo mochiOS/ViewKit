@@ -112,7 +112,7 @@ const CURSOR_WIDTH: u32 = 12;
 const CURSOR_HEIGHT: u32 = 20;
 const CURSOR_HOTSPOT_X: f32 = 1.0;
 const CURSOR_HOTSPOT_Y: f32 = 1.0;
-const PERF_LOG_ENABLED: bool = false;
+const PERF_LOG_ENABLED: bool = true;
 const METRICS_INTERVAL_TICKS: u64 = 500;
 const SLOW_FRAME_THRESHOLD_TICKS: u64 = 16;
 const INITIAL_FRAME_LOGS: u64 = 8;
@@ -259,8 +259,7 @@ where
         };
         let surface = CompositorSurface::create(compositor, event_endpoint, role, size.0, size.1)?;
         let token = surface.token();
-        let mut gpu_enabled =
-            self.config.fullscreen && renderer_caps(compositor) & RENDERER_CAP_GPU_SCENE != 0;
+        let mut gpu_enabled = renderer_caps(compositor) & RENDERER_CAP_GPU_SCENE != 0;
         let mut shared_buffer = if gpu_enabled {
             SharedBuffer::new_gpu_scene(size.0 as usize, size.1 as usize)?
         } else {

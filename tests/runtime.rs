@@ -63,6 +63,7 @@ fn build_counter_tree(counter: i64) -> ViewNode {
 
             color: Color::BLACK,
             font_family: "Noto Sans JP".to_string(),
+            cache_layout: true,
         }),
     ));
 

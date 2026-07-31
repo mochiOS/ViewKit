@@ -105,6 +105,7 @@ pub struct TextNode {
     pub weight: u16,
     pub alignment: TextAlignment,
     pub color: Color,
+    pub cache_layout: bool,
 }
 
 #[derive(Clone, Debug)]

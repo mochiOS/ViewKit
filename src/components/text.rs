@@ -21,6 +21,7 @@ pub struct Text {
     alignment: TextAlignment,
 
     color: Color,
+    cache_layout: bool,
 }
 
 impl Text {
@@ -37,6 +38,7 @@ impl Text {
             alignment: TextAlignment::Start,
 
             color: Color::BLACK,
+            cache_layout: true,
         }
     }
 
@@ -81,6 +83,11 @@ impl Text {
 
     pub fn color(mut self, color: Color) -> Self {
         self.color = color;
+        self
+    }
+
+    pub fn cache_layout(mut self, cache_layout: bool) -> Self {
+        self.cache_layout = cache_layout;
         self
     }
 
@@ -185,6 +192,7 @@ impl IntoViewNode for Text {
                 weight: self.weight,
                 alignment: self.alignment,
                 color: self.color,
+                cache_layout: self.cache_layout,
             }),
         )
     }
@@ -217,6 +225,7 @@ impl View for Text {
                 text: self.value.clone(),
 
                 bounds,
+                cache_layout: self.cache_layout,
 
                 font_family: self.font_family.clone(),
 
@@ -270,5 +279,12 @@ mod tests {
         let text = Text::new("terminal").monospaced();
 
         assert_eq!(text.font_family, DEFAULT_MONOSPACE_FONT_FAMILY);
+    }
+
+    #[test]
+    fn dynamic_text_can_disable_layout_caching() {
+        let text = Text::new("changing").cache_layout(false);
+
+        assert!(!text.cache_layout);
     }
 }

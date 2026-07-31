@@ -63,7 +63,8 @@ impl<'a> ViewAdapter<'a> {
                     .line_height(properties.line_height)
                     .weight(properties.weight)
                     .alignment(properties.alignment)
-                    .color(properties.color),
+                    .color(properties.color)
+                    .cache_layout(properties.cache_layout),
             ),
 
             ViewNodeKind::Button(properties) => {

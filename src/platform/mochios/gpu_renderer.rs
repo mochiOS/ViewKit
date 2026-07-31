@@ -694,11 +694,7 @@ impl GpuSceneRenderer {
         if command.bounds.intersection(self.current_clip()).is_none() {
             return Ok(());
         }
-        let key = TextLayoutKey::new(command, scale);
-        if !layout_cache.contains_key(&key) {
-            if layout_cache.len() >= TEXT_LAYOUT_CACHE_CAPACITY {
-                layout_cache.clear();
-            }
+        let create_buffer = |font_system: &mut FontSystem| {
             let font_size = (command.font_size * scale).max(1.0);
             let line_height = (command.line_height * scale).max(font_size);
             let mut buffer = Buffer::new(font_system, Metrics::new(font_size, line_height));
@@ -717,11 +713,34 @@ impl GpuSceneRenderer {
                 command.alignment.to_cosmic(),
             );
             drop(borrowed);
-            layout_cache.insert(key.clone(), buffer);
+            buffer
+        };
+        let key = TextLayoutKey::new(command, scale);
+        if !layout_cache.contains_key(&key) {
+            if layout_cache.len() >= TEXT_LAYOUT_CACHE_CAPACITY {
+                layout_cache.clear();
+            }
+            layout_cache.insert(key.clone(), create_buffer(font_system));
         }
         let Some(buffer) = layout_cache.get_mut(&key) else {
             return Ok(());
         };
+        if !command.cache_layout {
+            let mut borrowed = buffer.borrow_with(font_system);
+            borrowed.set_size(
+                Some(command.bounds.size.width * scale),
+                Some(command.bounds.size.height * scale),
+            );
+            let attrs = Attrs::new()
+                .family(Family::Name(command.font_family.as_str()))
+                .weight(Weight(command.weight.clamp(1, 1000)));
+            borrowed.set_text(
+                command.text.as_str(),
+                &attrs,
+                Shaping::Advanced,
+                command.alignment.to_cosmic(),
+            );
+        }
         let origin_x = (command.bounds.origin.x * scale).round();
         let origin_y = command.bounds.origin.y * scale;
         let mut borrowed = buffer.borrow_with(font_system);
