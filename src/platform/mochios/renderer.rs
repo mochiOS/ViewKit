@@ -308,7 +308,13 @@ pub(super) fn render_display_list(
                 if command.bounds.intersection(dirty_bounds).is_none() {
                     continue;
                 }
-                draw_image_command(pixmap, command, scale, clip_masks.get(clip_depth))?;
+                draw_image_command(
+                    pixmap,
+                    command,
+                    scale,
+                    dirty_bounds,
+                    clip_masks.get(clip_depth),
+                )?;
             }
         }
     }
@@ -375,6 +381,7 @@ fn draw_image_command(
     target: &mut Pixmap,
     command: &ImageCommand,
     display_scale: f32,
+    dirty_bounds: Rect,
     clip: Option<&Mask>,
 ) -> Result<(), MochiOsBackendError> {
     let bounds = command.bounds;
@@ -411,6 +418,8 @@ fn draw_image_command(
         translate_y,
         destination_width,
         destination_height,
+        dirty_bounds,
+        display_scale,
         sanitize_image_opacity(command.opacity),
         command.sampling,
         clip,
@@ -428,16 +437,30 @@ fn blit_image(
     y: f32,
     width: f32,
     height: f32,
+    dirty_bounds: Rect,
+    display_scale: f32,
     opacity: f32,
     sampling: ImageSampling,
     clip: Option<&Mask>,
 ) {
     let target_width = target.width() as usize;
     let target_height = target.height() as usize;
-    let left = x.floor().max(0.0) as usize;
-    let top = y.floor().max(0.0) as usize;
-    let right = (x + width).ceil().max(0.0).min(target_width as f32) as usize;
-    let bottom = (y + height).ceil().max(0.0).min(target_height as f32) as usize;
+    let damage_left = (dirty_bounds.origin.x * display_scale).floor();
+    let damage_top = (dirty_bounds.origin.y * display_scale).floor();
+    let damage_right = ((dirty_bounds.origin.x + dirty_bounds.size.width) * display_scale).ceil();
+    let damage_bottom = ((dirty_bounds.origin.y + dirty_bounds.size.height) * display_scale).ceil();
+    let left = x.floor().max(damage_left).max(0.0) as usize;
+    let top = y.floor().max(damage_top).max(0.0) as usize;
+    let right = (x + width)
+        .ceil()
+        .min(damage_right)
+        .max(0.0)
+        .min(target_width as f32) as usize;
+    let bottom = (y + height)
+        .ceil()
+        .min(damage_bottom)
+        .max(0.0)
+        .min(target_height as f32) as usize;
     if left >= right || top >= bottom {
         return;
     }

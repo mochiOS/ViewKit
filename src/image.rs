@@ -126,12 +126,8 @@ impl ImageData {
     }
 
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self, ImageError> {
-        let image = ::image::open(path)?.into_rgba8();
-
-        let width = image.width();
-        let height = image.height();
-
-        Self::from_rgba8(width, height, image.into_raw())
+        let bytes = std::fs::read(path).map_err(::image::ImageError::IoError)?;
+        Self::decode(&bytes)
     }
 
     pub fn thumbnail_from_path(
