@@ -119,6 +119,10 @@ pub enum PlatformEvent {
     SelectAll,
 
     Focused(bool),
+    ContextMenuResult {
+        request_id: u64,
+        command_id: Option<u32>,
+    },
     RedrawRequested,
     CloseRequested,
 }

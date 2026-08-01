@@ -79,7 +79,14 @@ where
     A: App,
 {
     fn handle_platform_message(&mut self, message: &[u8]) -> bool {
-        self.app.handle_platform_message(message)
+        let handled = self.app.handle_platform_message(message);
+        if handled
+            && take_state_changed()
+            && let Some(viewport) = self.viewport
+        {
+            self.rebuild_root(viewport);
+        }
+        handled
     }
 
     fn handle_event(&mut self, event: PlatformEvent, window: &dyn PlatformWindow) {
@@ -102,7 +109,7 @@ where
 
         self.ensure_root(viewport);
 
-        let (redraw_request, cursor_icon) = {
+        let (redraw_request, cursor_icon, context_menu_request) = {
             let root = self
                 .root
                 .as_ref()
@@ -114,11 +121,18 @@ where
             self.event_dispatcher
                 .dispatch(root, viewport.logical_bounds(), &event, &mut context);
 
-            (context.redraw_request(), context.cursor_icon())
+            (
+                context.redraw_request(),
+                context.cursor_icon(),
+                context.take_context_menu_request(),
+            )
         };
 
         if let Some(cursor_icon) = cursor_icon {
             window.set_cursor(cursor_icon);
+        }
+        if let Some(request) = context_menu_request {
+            let _ = window.show_context_menu(&request);
         }
 
         let state_changed = take_state_changed();

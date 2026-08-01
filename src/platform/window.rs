@@ -1,6 +1,7 @@
 //! プラットフォームウィンドウの共通インターフェースを定義
 
 use crate::draw_command::DisplayList;
+use crate::event::ContextMenuRequest;
 use crate::geometry::{Rect, Size};
 use crate::platform::event::PlatformEvent;
 use crate::renderer::Viewport;
@@ -46,6 +47,11 @@ pub trait PlatformWindow {
 
     fn set_cursor(&self, cursor: CursorIcon) {
         let _ = cursor;
+    }
+
+    fn show_context_menu(&self, request: &ContextMenuRequest) -> bool {
+        let _ = request;
+        false
     }
 }
 

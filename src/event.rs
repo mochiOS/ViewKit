@@ -6,6 +6,23 @@ use crate::theme::Theme;
 use crate::typography::{TextMeasurer, Typography};
 use crate::view::View;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContextMenuItem {
+    pub command_id: u32,
+    pub label: String,
+    pub enabled: bool,
+    pub checked: bool,
+    pub destructive: bool,
+    pub separator: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContextMenuRequest {
+    pub request_id: u64,
+    pub position: Point,
+    pub items: Vec<ContextMenuItem>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum ViewEvent {
     PointerMoved {
@@ -59,6 +76,11 @@ pub enum ViewEvent {
     FocusChanged {
         focused: bool,
     },
+
+    ContextMenuResult {
+        request_id: u64,
+        command_id: Option<u32>,
+    },
 }
 
 impl ViewEvent {
@@ -74,6 +96,7 @@ impl ViewEvent {
             | Self::KeyPressed { .. }
             | Self::TextInput { .. }
             | Self::FocusChanged { .. }
+            | Self::ContextMenuResult { .. }
             | Self::Backspace
             | Self::Delete
             | Self::ArrowLeft
@@ -111,6 +134,7 @@ impl ViewEvent {
                 | Self::ArrowLeft
                 | Self::ArrowRight
                 | Self::FocusChanged { .. }
+                | Self::ContextMenuResult { .. }
                 | Self::SelectLeft
                 | Self::SelectRight
                 | Self::SelectHome
@@ -175,6 +199,7 @@ pub struct EventContext<'a> {
 
     redraw_request: RedrawRequest,
     cursor_icon: Option<CursorIcon>,
+    context_menu_request: Option<ContextMenuRequest>,
 }
 
 impl<'a> EventContext<'a> {
@@ -189,6 +214,7 @@ impl<'a> EventContext<'a> {
             text_measurer,
             redraw_request: RedrawRequest::None,
             cursor_icon: None,
+            context_menu_request: None,
         }
     }
 
@@ -222,6 +248,14 @@ impl<'a> EventContext<'a> {
 
     pub fn cursor_icon(&self) -> Option<CursorIcon> {
         self.cursor_icon
+    }
+
+    pub fn show_context_menu(&mut self, request: ContextMenuRequest) {
+        self.context_menu_request = Some(request);
+    }
+
+    pub fn take_context_menu_request(&mut self) -> Option<ContextMenuRequest> {
+        self.context_menu_request.take()
     }
 }
 
@@ -327,6 +361,14 @@ impl EventDispatcher {
 
                 Some(ViewEvent::FocusChanged { focused: *focused })
             }
+
+            PlatformEvent::ContextMenuResult {
+                request_id,
+                command_id,
+            } => Some(ViewEvent::ContextMenuResult {
+                request_id: *request_id,
+                command_id: *command_id,
+            }),
 
             PlatformEvent::TextInput { text } => Some(ViewEvent::TextInput { text: text.clone() }),
             PlatformEvent::Backspace => Some(ViewEvent::Backspace),

@@ -59,6 +59,7 @@ const OP_DESTROY_SURFACE: u32 = 6;
 const OP_SET_CURSOR_POSITION: u32 = 7;
 const OP_SET_CURSOR_IMAGE: u32 = 8;
 const OP_GET_RENDERER_CAPS: u32 = 9;
+const OP_CONTEXT_MENU_SHOW: u32 = 121;
 const ROLE_TOPLEVEL: u32 = 1;
 const ROLE_BACKGROUND: u32 = 3;
 const ROLE_PANEL: u32 = 4;
@@ -80,6 +81,7 @@ const EVENT_FOCUS_LOST: u32 = 9;
 const EVENT_FRAME_DONE: u32 = 10;
 const EVENT_CONFIGURE: u32 = 11;
 const EVENT_POINTER_SCROLL: u32 = 12;
+const EVENT_CONTEXT_MENU_RESULT: u32 = 13;
 const INPUT_SUBSCRIBE_OPCODE: u32 = 0x5355_4253;
 const INPUT_EVENT_SIZE: usize = 32;
 const INPUT_EVENT_KIND_POINTER_MOVE: u16 = 2;
@@ -122,7 +124,7 @@ static mut ATTACH_BUFFER_REQ: [u8; 28] = [0; 28];
 static mut TOKEN_REQ: [u8; 12] = [0; 12];
 static mut DAMAGE_REQ: [u8; 28] = [0; 28];
 static mut IPC_REPLY: [u8; 16] = [0; 16];
-const EVENT_BUFFER_SIZE: usize = 128;
+const EVENT_BUFFER_SIZE: usize = 4096;
 static mut EVENT_BUF: [u8; EVENT_BUFFER_SIZE] = [0; EVENT_BUFFER_SIZE];
 static mut DISPLAY_REQ: [u8; 20] = [0; 20];
 static mut DISPLAY_REPLY: [u8; 32] = [0; 32];
@@ -246,7 +248,6 @@ where
             self.config.size
         };
         let viewport = Viewport::new(logical_size, size.0, size.1, 1.0);
-        let window = MochiOsWindow::new(viewport);
         let role = if self.config.fullscreen {
             ROLE_PANEL
         } else {
@@ -259,6 +260,7 @@ where
         };
         let surface = CompositorSurface::create(compositor, event_endpoint, role, size.0, size.1)?;
         let token = surface.token();
+        let window = MochiOsWindow::new(viewport, compositor, token);
         let mut gpu_enabled = renderer_caps(compositor) & RENDERER_CAP_GPU_SCENE != 0;
         let mut shared_buffer = if gpu_enabled {
             SharedBuffer::new_gpu_scene(size.0 as usize, size.1 as usize)?
@@ -870,6 +872,18 @@ where
                     u32::try_from(b).map_err(|_| MochiOsBackendError::InvalidWindowSize)?;
                 checked_surface_size(Size::new(width as f32, height as f32))?;
                 self.pending_resize = Some((width, height));
+            }
+            EVENT_CONTEXT_MENU_RESULT => {
+                let status = unsafe { read_u32_raw(event.as_ptr(), 4) };
+                let request_id = unsafe { read_u64_raw(event.as_ptr(), 8) };
+                let command_id = unsafe { read_u32_raw(event.as_ptr(), 16) };
+                self.app.handle_event(
+                    PlatformEvent::ContextMenuResult {
+                        request_id,
+                        command_id: (status == 0).then_some(command_id),
+                    },
+                    window,
+                );
             }
             _ => {}
         }
