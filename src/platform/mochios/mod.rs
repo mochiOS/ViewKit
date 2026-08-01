@@ -152,6 +152,90 @@ pub enum MochiOsBackendError {
     InvalidEvent,
 }
 
+/// Owns a compositor background surface for the lifetime of the desktop session.
+#[must_use = "dropping the desktop background removes its compositor surface"]
+pub struct DesktopBackground {
+    _surface: CompositorSurface,
+    _buffer: SharedBuffer,
+}
+
+impl DesktopBackground {
+    /// Creates a screen-filling, aspect-preserving background image.
+    pub fn from_image(image: ImageData) -> Result<Self, MochiOsBackendError> {
+        require_window_overlay_capability()?;
+        let compositor = find_compositor()?;
+        let requested_size =
+            display_surface_size().ok_or(MochiOsBackendError::InvalidWindowSize)?;
+        let (width, height) = checked_surface_size(requested_size)?;
+        let viewport = Viewport::new(requested_size, width, height, 1.0);
+        let surface = CompositorSurface::create(compositor, 0, ROLE_BACKGROUND, width, height)?;
+        let mut buffer = SharedBuffer::new(width as usize, height as usize)?;
+
+        let image_scale =
+            (width as f32 / image.width() as f32).max(height as f32 / image.height() as f32);
+        let image_width = image.width() as f32 * image_scale;
+        let image_height = image.height() as f32 * image_scale;
+        let image_bounds = Rect::new(
+            (width as f32 - image_width) * 0.5,
+            (height as f32 - image_height) * 0.5,
+            image_width,
+            image_height,
+        );
+        let mut display_list = DisplayList::new();
+        display_list.push(DrawCommand::Clear {
+            color: Color::BLACK,
+        });
+        display_list.push(DrawCommand::DrawImage {
+            command: ImageCommand {
+                image,
+                bounds: image_bounds,
+                opacity: 1.0,
+                sampling: ImageSampling::Bicubic,
+            },
+        });
+
+        let mut font_system = create_font_system();
+        let mut swash_cache = SwashCache::new();
+        let mut text_layout_cache = HashMap::new();
+        let mut pixmap = None;
+        let mut clip_masks = Vec::new();
+        let bounds = viewport.logical_bounds();
+        let clear_color = render_display_list(
+            viewport,
+            bounds,
+            &display_list,
+            &mut font_system,
+            &mut swash_cache,
+            &mut text_layout_cache,
+            &mut pixmap,
+            &mut clip_masks,
+            false,
+        )?;
+        let pixmap = pixmap
+            .as_ref()
+            .ok_or(MochiOsBackendError::InvalidWindowSize)?;
+        attach_buffer(
+            compositor,
+            surface.token(),
+            width as usize,
+            height as usize,
+            pixmap,
+            clear_color,
+            &mut buffer,
+            viewport,
+            bounds,
+            PIXEL_FORMAT_XRGB8888,
+        )?;
+        damage_token_request(compositor, surface.token(), viewport, bounds)?;
+        simple_token_request(compositor, OP_COMMIT, surface.token())?;
+
+        Ok(Self {
+            _surface: surface,
+            _buffer: buffer,
+        })
+    }
+}
+
 pub struct MochiOsBackend<A>
 where
     A: PlatformApplication,
