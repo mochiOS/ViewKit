@@ -111,6 +111,13 @@ pub(super) fn require_window_overlay_capability() -> Result<(), MochiOsBackendEr
     Err(MochiOsBackendError::Syscall(mochi_user_syscall::EACCES))
 }
 
+pub(super) fn require_window_secure_overlay_capability() -> Result<(), MochiOsBackendError> {
+    if query_capability(WINDOW_SECURE_OVERLAY_CAPABILITY) {
+        return Ok(());
+    }
+    Err(MochiOsBackendError::Syscall(mochi_user_syscall::EACCES))
+}
+
 pub(super) fn query_capability(capability: &str) -> bool {
     let bytes = capability.as_bytes();
     matches!(

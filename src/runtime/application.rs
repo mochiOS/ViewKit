@@ -221,6 +221,7 @@ where
                 size: options.initial_size(),
                 resizable: options.is_resizable(),
                 fullscreen: options.is_fullscreen(),
+                secure_overlay: options.is_secure_overlay(),
             },
         );
 
@@ -240,6 +241,7 @@ where
                 size: options.initial_size(),
                 resizable: options.is_resizable(),
                 fullscreen: options.is_fullscreen(),
+                secure_overlay: options.is_secure_overlay(),
             },
         );
 

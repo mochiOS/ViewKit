@@ -50,6 +50,7 @@ const COMPOSITOR_SERVICE_NAME: &str = "compositor.service";
 const DISPLAY_SERVICE_NAME: &str = "display.driver";
 const INPUT_SERVICE_NAME: &str = "input.service";
 const WINDOW_OVERLAY_CAPABILITY: &str = "window.overlay";
+const WINDOW_SECURE_OVERLAY_CAPABILITY: &str = "window.secure-overlay";
 const DISPLAY_GET_INFO_OPCODE: u32 = 1;
 const OP_CREATE_SURFACE: u32 = 1;
 const OP_ATTACH_BUFFER: u32 = 2;
@@ -63,6 +64,7 @@ const OP_CONTEXT_MENU_SHOW: u32 = 121;
 const ROLE_TOPLEVEL: u32 = 1;
 const ROLE_BACKGROUND: u32 = 3;
 const ROLE_PANEL: u32 = 4;
+const ROLE_SECURE_OVERLAY: u32 = 5;
 const PIXEL_FORMAT_XRGB8888: u32 = 1;
 const PIXEL_FORMAT_ARGB8888_PREMULTIPLIED: u32 = 2;
 const PIXEL_FORMAT_GPU_SCENE: u32 = 3;
@@ -317,7 +319,9 @@ where
     pub fn run(mut self) -> Result<(), MochiOsBackendError> {
         let compositor = find_compositor()?;
         let event_endpoint = create_event_endpoint()?;
-        if self.config.fullscreen {
+        if self.config.secure_overlay {
+            require_window_secure_overlay_capability()?;
+        } else if self.config.fullscreen {
             require_window_overlay_capability()?;
         }
         let requested_size = if self.config.fullscreen {
@@ -332,7 +336,9 @@ where
             self.config.size
         };
         let viewport = Viewport::new(logical_size, size.0, size.1, 1.0);
-        let role = if self.config.fullscreen {
+        let role = if self.config.secure_overlay {
+            ROLE_SECURE_OVERLAY
+        } else if self.config.fullscreen {
             ROLE_PANEL
         } else {
             ROLE_TOPLEVEL

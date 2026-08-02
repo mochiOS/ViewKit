@@ -4,7 +4,7 @@ use super::{BorderStyle, Rectangle, RectangleColor, Text};
 use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
-use crate::platform::PointerButton;
+use crate::platform::{Key, PointerButton};
 use crate::state::Binding;
 use crate::theme::{Color, CornerRadius, ShadowStyle};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
@@ -15,6 +15,7 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 const CARET_BLINK_INTERVAL: Duration = Duration::from_millis(500);
+const SECURE_GLYPH: char = '\u{2022}';
 
 #[derive(Clone, Debug, Default, PartialEq)]
 struct TextFieldInteractionInner {
@@ -111,6 +112,20 @@ impl TextFieldInteractionState {
         inner.scroll_offset_x = 0.0;
         inner.value = value;
         inner.value_initialized = true;
+        inner.selection_anchor = None;
+        inner.selecting = false;
+    }
+
+    /// 値が保持していた領域をNULで上書きしてから空にします。
+    pub fn clear(&self) {
+        let mut inner = self.inner.borrow_mut();
+        let byte_len = inner.value.len();
+        if byte_len != 0 {
+            inner.value.replace_range(.., &"\0".repeat(byte_len));
+            inner.value.clear();
+        }
+        inner.cursor = 0;
+        inner.scroll_offset_x = 0.0;
         inner.selection_anchor = None;
         inner.selecting = false;
     }
@@ -489,6 +504,8 @@ pub struct TextField {
 
     enabled: bool,
     invalid: bool,
+    secure: bool,
+    on_submit: Option<RefCell<Box<dyn FnMut()>>>,
 }
 
 impl TextField {
@@ -508,6 +525,8 @@ impl TextField {
 
             enabled: true,
             invalid: false,
+            secure: false,
+            on_submit: None,
         }
     }
 
@@ -523,6 +542,8 @@ impl TextField {
 
             enabled: true,
             invalid: false,
+            secure: false,
+            on_submit: None,
         }
     }
 
@@ -558,6 +579,18 @@ impl TextField {
         self
     }
 
+    /// 入力値を伏字で表示します。保持される値自体は変更しません。
+    pub fn secure(mut self, secure: bool) -> Self {
+        self.secure = secure;
+        self
+    }
+
+    /// Enterキーで入力が確定されたときに呼ぶ処理を設定します。
+    pub fn on_submit(mut self, callback: impl FnMut() + 'static) -> Self {
+        self.on_submit = Some(RefCell::new(Box::new(callback)));
+        self
+    }
+
     pub fn interaction(&self) -> &TextFieldInteractionState {
         &self.interaction
     }
@@ -568,8 +601,20 @@ impl TextField {
         if value.is_empty() {
             self.placeholder.clone()
         } else {
-            value
+            self.display_value(&value)
         }
+    }
+
+    fn display_value(&self, value: &str) -> String {
+        if self.secure {
+            core::iter::repeat_n(SECURE_GLYPH, value.chars().count()).collect()
+        } else {
+            value.to_owned()
+        }
+    }
+
+    fn display_prefix(&self, value: &str, byte_index: usize) -> String {
+        self.display_value(&value[..byte_index.min(value.len())])
     }
 
     fn appearance(&self, context: &PaintContext<'_>) -> TextFieldAppearance {
@@ -633,7 +678,8 @@ impl TextField {
         for (index, character) in value.char_indices() {
             let next_index = index + character.len_utf8();
 
-            let next_width = Text::new(&value[..next_index])
+            let prefix = self.display_prefix(&value, next_index);
+            let next_width = Text::new(prefix)
                 .font_size(self.size.font_size())
                 .line_height(self.size.line_height())
                 .measure_unbounded(context.text_measurer)
@@ -719,10 +765,11 @@ impl View for TextField {
 
         let showing_placeholder = value.is_empty();
 
+        let secure_display = self.display_value(&value);
         let display_text = if showing_placeholder {
             self.placeholder.as_str()
         } else {
-            value.as_str()
+            secure_display.as_str()
         };
 
         let horizontal_padding = self.size.horizontal_padding();
@@ -739,7 +786,7 @@ impl View for TextField {
         let text_width = if value.is_empty() {
             0.0
         } else {
-            Text::new(value.as_str())
+            Text::new(display_text)
                 .font_size(self.size.font_size())
                 .line_height(line_height)
                 .measure_unbounded(context.text_measurer)
@@ -749,7 +796,7 @@ impl View for TextField {
         let prefix_width = if cursor == 0 {
             0.0
         } else {
-            Text::new(&value[..cursor])
+            Text::new(self.display_prefix(&value, cursor))
                 .font_size(self.size.font_size())
                 .line_height(line_height)
                 .measure_unbounded(context.text_measurer)
@@ -797,14 +844,14 @@ impl View for TextField {
                     let start_width = if range.start == 0 {
                         0.0
                     } else {
-                        Text::new(&value[..range.start])
+                        Text::new(self.display_prefix(&value, range.start))
                             .font_size(self.size.font_size())
                             .line_height(line_height)
                             .measure_unbounded(context.text_measurer)
                             .width
                     };
 
-                    let end_width = Text::new(&value[..range.end])
+                    let end_width = Text::new(self.display_prefix(&value, range.end))
                         .font_size(self.size.font_size())
                         .line_height(line_height)
                         .measure_unbounded(context.text_measurer)
@@ -997,6 +1044,9 @@ impl View for TextField {
                 button: PointerButton::Primary,
             } => {
                 if !bounds.contains(*position) {
+                    if self.interaction.set_focused(false) {
+                        context.request_redraw_in(bounds.expanded(16.0));
+                    }
                     return EventResult::Ignored;
                 }
 
@@ -1061,6 +1111,18 @@ impl View for TextField {
                     context.request_redraw_in(bounds.expanded(16.0));
                 }
 
+                EventResult::Consumed
+            }
+
+            ViewEvent::KeyPressed {
+                key: Key::Enter, ..
+            } => {
+                if !self.interaction.is_focused() {
+                    return EventResult::Ignored;
+                }
+                if let Some(callback) = self.on_submit.as_ref() {
+                    (callback.borrow_mut())();
+                }
                 EventResult::Consumed
             }
 
@@ -1212,6 +1274,31 @@ impl View for TextField {
 
             _ => EventResult::Ignored,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn secure_field_masks_each_character() {
+        let interaction = TextFieldInteractionState::new();
+        interaction.set_value("secretあ");
+        let field = TextField::with_interaction(interaction).secure(true);
+
+        assert_eq!(field.display_text(), "•••••••");
+    }
+
+    #[test]
+    fn clearing_interaction_removes_secret_and_cursor_state() {
+        let interaction = TextFieldInteractionState::new();
+        interaction.set_value("secret");
+        interaction.clear();
+
+        assert_eq!(interaction.value(), "");
+        assert_eq!(interaction.inner.borrow().cursor, 0);
+        assert_eq!(interaction.inner.borrow().selection_anchor, None);
     }
 }
 

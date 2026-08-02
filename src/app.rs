@@ -54,6 +54,7 @@ pub struct WindowOptions {
     pub(crate) size: Size,
     pub(crate) resizable: bool,
     pub(crate) fullscreen: bool,
+    pub(crate) secure_overlay: bool,
 }
 
 impl WindowOptions {
@@ -67,6 +68,7 @@ impl WindowOptions {
             size: Size::new(800.0, 600.0),
             resizable: true,
             fullscreen: false,
+            secure_overlay: false,
         }
     }
 
@@ -88,6 +90,18 @@ impl WindowOptions {
     #[must_use]
     pub fn fullscreen(mut self, fullscreen: bool) -> Self {
         self.fullscreen = fullscreen;
+        self
+    }
+
+    /// mochiOSのsecure overlayとして表示します。
+    ///
+    /// この指定には`window.secure-overlay` capabilityが必要です。
+    #[must_use]
+    pub fn secure_overlay(mut self, secure_overlay: bool) -> Self {
+        self.secure_overlay = secure_overlay;
+        if secure_overlay {
+            self.fullscreen = true;
+        }
         self
     }
 
@@ -115,6 +129,11 @@ impl WindowOptions {
     #[must_use]
     pub const fn is_fullscreen(&self) -> bool {
         self.fullscreen
+    }
+
+    #[must_use]
+    pub const fn is_secure_overlay(&self) -> bool {
+        self.secure_overlay
     }
 }
 

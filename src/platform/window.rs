@@ -25,6 +25,7 @@ pub struct WindowConfig {
     pub size: Size,
     pub resizable: bool,
     pub fullscreen: bool,
+    pub secure_overlay: bool,
 }
 
 impl Default for WindowConfig {
@@ -34,6 +35,7 @@ impl Default for WindowConfig {
             size: Size::new(800.0, 600.0),
             resizable: true,
             fullscreen: false,
+            secure_overlay: false,
         }
     }
 }
