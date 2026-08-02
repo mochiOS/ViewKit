@@ -138,6 +138,9 @@ pub enum MochiOsBackendError {
     #[error("mochiOS syscall failed: {0}")]
     Syscall(u64),
 
+    #[error("mochiOS {stage} failed: {errno}")]
+    Stage { stage: &'static str, errno: u64 },
+
     #[error("compositor.service was not found")]
     CompositorNotFound,
 
@@ -152,6 +155,15 @@ pub enum MochiOsBackendError {
 
     #[error("invalid compositor event")]
     InvalidEvent,
+}
+
+impl MochiOsBackendError {
+    fn at(self, stage: &'static str) -> Self {
+        match self {
+            Self::Syscall(errno) => Self::Stage { stage, errno },
+            error => error,
+        }
+    }
 }
 
 /// Owns a compositor background surface for the lifetime of the desktop session.
@@ -348,14 +360,17 @@ where
         } else {
             PIXEL_FORMAT_XRGB8888
         };
-        let surface = CompositorSurface::create(compositor, event_endpoint, role, size.0, size.1)?;
+        let surface = CompositorSurface::create(compositor, event_endpoint, role, size.0, size.1)
+            .map_err(|error| error.at("surface creation"))?;
         let token = surface.token();
         let window = MochiOsWindow::new(viewport, compositor, token);
         let mut gpu_enabled = renderer_caps(compositor) & RENDERER_CAP_GPU_SCENE != 0;
         let mut shared_buffer = if gpu_enabled {
-            SharedBuffer::new_gpu_scene(size.0 as usize, size.1 as usize)?
+            SharedBuffer::new_gpu_scene(size.0 as usize, size.1 as usize)
+                .map_err(|error| error.at("GPU shared buffer allocation"))?
         } else {
-            SharedBuffer::new(size.0 as usize, size.1 as usize)?
+            SharedBuffer::new(size.0 as usize, size.1 as usize)
+                .map_err(|error| error.at("pixel shared buffer allocation"))?
         };
         self.pointer_x = (viewport.logical_size.width / 2.0).max(0.0);
         self.pointer_y = (viewport.logical_size.height / 2.0).max(0.0);
@@ -480,7 +495,8 @@ where
                         window.height() as usize,
                         scene,
                         &mut shared_buffer,
-                    )?;
+                    )
+                    .map_err(|error| error.at("GPU scene attach"))?;
                 } else {
                     let pixmap = self
                         .pixmap
@@ -497,14 +513,17 @@ where
                         window.viewport(),
                         dirty_bounds,
                         pixel_format,
-                    )?;
+                    )
+                    .map_err(|error| error.at("pixel buffer attach"))?;
                 }
                 let attach_cycles = perf_counter_elapsed(attach_start);
                 self.metrics.attach_cycles =
                     self.metrics.attach_cycles.saturating_add(attach_cycles);
                 let commit_start = perf_counter();
-                damage_token_request(compositor, token, window.viewport(), dirty_bounds)?;
-                simple_token_request(compositor, OP_COMMIT, token)?;
+                damage_token_request(compositor, token, window.viewport(), dirty_bounds)
+                    .map_err(|error| error.at("surface damage"))?;
+                simple_token_request(compositor, OP_COMMIT, token)
+                    .map_err(|error| error.at("surface commit"))?;
                 let commit_cycles = perf_counter_elapsed(commit_start);
                 self.metrics.commit_cycles =
                     self.metrics.commit_cycles.saturating_add(commit_cycles);
