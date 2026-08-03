@@ -73,4 +73,8 @@ pub trait PlatformApplication {
     fn next_redraw_at(&self) -> Option<Instant> {
         None
     }
+
+    fn exit_requested(&self) -> bool {
+        false
+    }
 }

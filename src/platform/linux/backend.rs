@@ -460,6 +460,10 @@ where
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.flush_pending_pointer_move();
+        if self.application.exit_requested() {
+            event_loop.exit();
+            return;
+        }
         let Some(deadline) = self.application.next_redraw_at() else {
             event_loop.set_control_flow(ControlFlow::Wait);
             return;

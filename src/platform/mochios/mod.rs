@@ -396,7 +396,7 @@ where
                 self.handle_or_queue_event_message(len, event, &window)?;
                 handled_work = true;
             }
-            if self.close_requested {
+            if self.close_requested || self.app.exit_requested() {
                 break 'event_loop Ok(());
             }
             if let Some((width, height)) = self.pending_resize.take() {

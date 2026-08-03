@@ -16,7 +16,7 @@ pub use crate::layout::{
     StackGap, ViewExt,
 };
 pub use crate::platform::{CursorIcon, Key, KeyModifiers};
-pub use crate::runtime::{ViewKitError, run};
+pub use crate::runtime::{ViewKitError, request_exit, run};
 pub use crate::state::{Binding, State};
 pub use crate::svg::{SvgData, SvgError};
 pub use crate::theme::{Color, CornerRadius, ShadowStyle, Theme};

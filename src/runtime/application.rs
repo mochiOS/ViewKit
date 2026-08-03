@@ -1,5 +1,6 @@
 //! ViewKitアプリケーションとプラットフォームバックエンドをガッッッッタイ！します
 
+use std::cell::Cell;
 use std::time::Instant;
 
 use crate::app::{App, ViewContext};
@@ -12,6 +13,26 @@ use crate::state::take_state_changed;
 use crate::theme::Theme;
 use crate::typography::{TextMeasurer, Typography};
 use crate::view::{PaintContext, RedrawSchedule, View};
+
+thread_local! {
+    static EXIT_REQUESTED: Cell<bool> = const { Cell::new(false) };
+}
+
+/// 現在のViewKitアプリケーションへ正常終了を要求します。
+///
+/// プラットフォームのイベントループを抜け、WindowやSurfaceを破棄してから
+/// [`run`]を返します。
+pub fn request_exit() {
+    EXIT_REQUESTED.with(|requested| requested.set(true));
+}
+
+fn exit_requested() -> bool {
+    EXIT_REQUESTED.with(Cell::get)
+}
+
+fn reset_exit_request() {
+    EXIT_REQUESTED.with(|requested| requested.set(false));
+}
 
 /// `App`をプラットフォームバックエンド上で実行するランタイムです。
 pub(crate) struct ApplicationRuntime<A>
@@ -36,6 +57,7 @@ where
     A: App,
 {
     pub(crate) fn new(app: A) -> Self {
+        reset_exit_request();
         Self {
             app,
 
@@ -191,6 +213,10 @@ where
     fn next_redraw_at(&self) -> Option<Instant> {
         self.redraw_schedule.deadline()
     }
+
+    fn exit_requested(&self) -> bool {
+        exit_requested()
+    }
 }
 
 fn redraw_after_event(state_changed: bool, redraw_request: RedrawRequest) -> RedrawRequest {
@@ -292,5 +318,15 @@ mod tests {
     fn component_redraw_stays_regional_without_state_change() {
         let region = RedrawRequest::Region(Rect::new(10.0, 20.0, 30.0, 40.0));
         assert_eq!(redraw_after_event(false, region), region);
+    }
+
+    #[test]
+    fn application_exit_request_can_be_reset() {
+        reset_exit_request();
+        assert!(!exit_requested());
+        request_exit();
+        assert!(exit_requested());
+        reset_exit_request();
+        assert!(!exit_requested());
     }
 }
