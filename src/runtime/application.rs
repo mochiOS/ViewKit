@@ -136,14 +136,10 @@ where
         }
 
         let state_changed = take_state_changed();
+        let redraw_request = redraw_after_event(state_changed, redraw_request);
 
         if state_changed {
-            let redraw = if redraw_request.is_requested() {
-                redraw_request
-            } else {
-                RedrawRequest::Full
-            };
-            self.rebuild_root_with_redraw(viewport, redraw);
+            self.rebuild_root_with_redraw(viewport, redraw_request);
         } else {
             self.pending_redraw = self.pending_redraw.merge(redraw_request);
         }
@@ -194,6 +190,14 @@ where
 
     fn next_redraw_at(&self) -> Option<Instant> {
         self.redraw_schedule.deadline()
+    }
+}
+
+fn redraw_after_event(state_changed: bool, redraw_request: RedrawRequest) -> RedrawRequest {
+    if state_changed {
+        RedrawRequest::Full
+    } else {
+        redraw_request
     }
 }
 
@@ -272,4 +276,21 @@ pub enum ViewKitError {
 
     #[error("現在のプラットフォームはViewKitに対応していません")]
     UnsupportedPlatform,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn state_change_expands_component_redraw_to_full_window() {
+        let region = RedrawRequest::Region(Rect::new(10.0, 20.0, 30.0, 40.0));
+        assert_eq!(redraw_after_event(true, region), RedrawRequest::Full);
+    }
+
+    #[test]
+    fn component_redraw_stays_regional_without_state_change() {
+        let region = RedrawRequest::Region(Rect::new(10.0, 20.0, 30.0, 40.0));
+        assert_eq!(redraw_after_event(false, region), region);
+    }
 }
