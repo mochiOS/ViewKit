@@ -916,6 +916,15 @@ where
             EVENT_POINTER_BUTTON => {
                 let button_id = (c & 0xffff) as u16;
                 let flags = c >> 16;
+                // Motion notifications are best-effort, while button messages
+                // carry the authoritative local pointer position.
+                self.app.handle_event(
+                    PlatformEvent::PointerMoved {
+                        x: a as f32,
+                        y: b as f32,
+                    },
+                    window,
+                );
                 let button = match button_id {
                     1 => PointerButton::Primary,
                     2 => PointerButton::Secondary,
