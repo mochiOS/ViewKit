@@ -7,6 +7,7 @@ use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Point, Rect, Size};
 use crate::layout::{IntoStackChild, StackChild};
+use crate::platform::PointerButton;
 use crate::theme::ScrollBarTokens;
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
@@ -59,6 +60,8 @@ struct ScrollStateInner {
     cached_axis: ScrollAxis,
     cached_viewport_size: Size,
     cached_content_size: Size,
+
+    vertical_drag_offset: Option<f32>,
 }
 
 #[derive(Clone, Default)]
@@ -96,11 +99,11 @@ impl ScrollState {
         let mut inner = self.inner.borrow_mut();
 
         if delta_x.is_finite() {
-            inner.offset_x = (inner.offset_x - delta_x).max(0.0);
+            inner.offset_x = (inner.offset_x + delta_x).max(0.0);
         }
 
         if delta_y.is_finite() {
-            inner.offset_y = (inner.offset_y - delta_y).max(0.0);
+            inner.offset_y = (inner.offset_y + delta_y).max(0.0);
         }
     }
 
@@ -158,6 +161,26 @@ impl ScrollState {
         }
 
         Point::new(inner.offset_x, inner.offset_y)
+    }
+
+    fn vertical_drag_offset(&self) -> Option<f32> {
+        self.inner.borrow().vertical_drag_offset
+    }
+
+    fn begin_vertical_drag(&self, offset: f32) {
+        self.inner.borrow_mut().vertical_drag_offset = Some(finite_non_negative(offset));
+    }
+
+    fn end_vertical_drag(&self) -> bool {
+        self.inner
+            .borrow_mut()
+            .vertical_drag_offset
+            .take()
+            .is_some()
+    }
+
+    fn set_vertical_offset(&self, offset: f32) {
+        self.inner.borrow_mut().offset_y = finite_non_negative(offset);
     }
 }
 
@@ -372,6 +395,99 @@ impl Scroll {
             );
         }
     }
+
+    fn handle_vertical_scrollbar(
+        &self,
+        bounds: Rect,
+        content_size: Size,
+        offset: Point,
+        event: &ViewEvent,
+        context: &mut EventContext<'_>,
+    ) -> EventResult {
+        if !self.axis.allows_vertical() {
+            return EventResult::Ignored;
+        }
+
+        let horizontal_visible = self.axis.allows_horizontal()
+            && self
+                .scrollbar_visibility
+                .should_show(content_size.width > bounds.size.width);
+        let vertical_visible = self
+            .scrollbar_visibility
+            .should_show(content_size.height > bounds.size.height);
+        if !vertical_visible {
+            self.state.end_vertical_drag();
+            return EventResult::Ignored;
+        }
+
+        let Some(geometry) = vertical_scrollbar_geometry(
+            bounds,
+            content_size,
+            offset,
+            horizontal_visible,
+            context.theme.scrollbar,
+        ) else {
+            return EventResult::Ignored;
+        };
+
+        match event {
+            ViewEvent::PointerPressed {
+                position,
+                button: PointerButton::Primary,
+            } if geometry.track.expanded(4.0).contains(*position) => {
+                let grab_offset = if geometry.thumb.contains(*position) {
+                    position.y - geometry.thumb.origin.y
+                } else {
+                    geometry.thumb.size.height / 2.0
+                };
+                self.state.begin_vertical_drag(grab_offset);
+                self.update_vertical_drag(position.y, geometry);
+                context.request_redraw_in(bounds);
+                EventResult::Consumed
+            }
+            ViewEvent::PointerMoved { position } => {
+                let Some(grab_offset) = self.state.vertical_drag_offset() else {
+                    return EventResult::Ignored;
+                };
+                self.update_vertical_drag_with_offset(position.y, grab_offset, geometry);
+                context.request_redraw_in(bounds);
+                EventResult::Consumed
+            }
+            ViewEvent::PointerReleased {
+                button: PointerButton::Primary,
+                ..
+            } if self.state.end_vertical_drag() => {
+                context.request_redraw_in(bounds);
+                EventResult::Consumed
+            }
+            ViewEvent::PointerLeft if self.state.end_vertical_drag() => EventResult::Consumed,
+            _ => EventResult::Ignored,
+        }
+    }
+
+    fn update_vertical_drag(&self, pointer_y: f32, geometry: ScrollbarGeometry) {
+        let grab_offset = self
+            .state
+            .vertical_drag_offset()
+            .unwrap_or(geometry.thumb.size.height / 2.0);
+        self.update_vertical_drag_with_offset(pointer_y, grab_offset, geometry);
+    }
+
+    fn update_vertical_drag_with_offset(
+        &self,
+        pointer_y: f32,
+        grab_offset: f32,
+        geometry: ScrollbarGeometry,
+    ) {
+        let thumb_travel = (geometry.track.size.height - geometry.thumb.size.height).max(0.0);
+        if thumb_travel <= 0.0 || geometry.maximum_offset <= 0.0 {
+            self.state.set_vertical_offset(0.0);
+            return;
+        }
+        let thumb_y = (pointer_y - grab_offset - geometry.track.origin.y).clamp(0.0, thumb_travel);
+        self.state
+            .set_vertical_offset(geometry.maximum_offset * thumb_y / thumb_travel);
+    }
 }
 
 impl View for Scroll {
@@ -455,6 +571,12 @@ impl View for Scroll {
             .state
             .clamp_offset(self.axis, bounds.size, content_size);
 
+        let scrollbar_result =
+            self.handle_vertical_scrollbar(bounds, content_size, offset, event, context);
+        if scrollbar_result.is_consumed() {
+            return scrollbar_result;
+        }
+
         let content_bounds = Rect::new(
             bounds.origin.x - offset.x,
             bounds.origin.y - offset.y,
@@ -525,6 +647,62 @@ impl View for Scroll {
     }
 }
 
+#[derive(Clone, Copy)]
+struct ScrollbarGeometry {
+    track: Rect,
+    thumb: Rect,
+    maximum_offset: f32,
+}
+
+fn vertical_scrollbar_geometry(
+    bounds: Rect,
+    content_size: Size,
+    offset: Point,
+    horizontal_visible: bool,
+    tokens: ScrollBarTokens,
+) -> Option<ScrollbarGeometry> {
+    let thickness = finite_positive(tokens.thickness);
+    let inset = finite_non_negative(tokens.inset);
+    if thickness <= 0.0 {
+        return None;
+    }
+    let reserved_bottom = if horizontal_visible {
+        thickness + inset
+    } else {
+        0.0
+    };
+    let length_inset = finite_non_negative(tokens.length_inset);
+    let track_length =
+        (bounds.size.height - inset * 2.0 - length_inset * 2.0 - reserved_bottom).max(0.0);
+    if track_length <= 0.0 {
+        return None;
+    }
+    let track_x =
+        bounds.origin.x + bounds.size.width - inset - thickness - tokens.horizontal_offset;
+    let track_y = bounds.origin.y + inset + length_inset;
+    let track = Rect::new(track_x, track_y, thickness, track_length);
+    let thumb_length = calculate_thumb_length(
+        track_length,
+        bounds.size.height,
+        content_size.height,
+        tokens.minimum_thumb_length,
+    );
+    let maximum_offset = (content_size.height - bounds.size.height).max(0.0);
+    let progress = calculate_progress(offset.y, maximum_offset);
+    let thumb_travel = (track_length - thumb_length).max(0.0);
+    let thumb = Rect::new(
+        track_x,
+        track_y + thumb_travel * progress,
+        thickness,
+        thumb_length,
+    );
+    Some(ScrollbarGeometry {
+        track,
+        thumb,
+        maximum_offset,
+    })
+}
+
 fn paint_vertical_scrollbar(
     bounds: Rect,
     content_size: Size,
@@ -533,60 +711,21 @@ fn paint_vertical_scrollbar(
     tokens: ScrollBarTokens,
     context: &mut PaintContext<'_>,
 ) {
-    let thickness = finite_positive(tokens.thickness);
-
-    let inset = finite_non_negative(tokens.inset);
-
-    if thickness <= 0.0 {
+    let Some(geometry) =
+        vertical_scrollbar_geometry(bounds, content_size, offset, horizontal_visible, tokens)
+    else {
         return;
-    }
-
-    let reserved_bottom = if horizontal_visible {
-        thickness + inset
-    } else {
-        0.0
     };
 
-    let length_inset = finite_non_negative(tokens.length_inset);
-
-    let track_length =
-        (bounds.size.height - inset * 2.0 - length_inset * 2.0 - reserved_bottom).max(0.0);
-
-    if track_length <= 0.0 {
-        return;
-    }
-
-    let track_x =
-        bounds.origin.x + bounds.size.width - inset - thickness - tokens.horizontal_offset;
-
-    let track_y = bounds.origin.y + inset + length_inset;
-
-    let track_rect = Rect::new(track_x, track_y, thickness, track_length);
-
     context.display_list.push(DrawCommand::FillRoundedRect {
-        rect: track_rect,
-        radius: thickness / 2.0,
+        rect: geometry.track,
+        radius: geometry.track.size.width / 2.0,
         color: tokens.track_color,
     });
 
-    let thumb_length = calculate_thumb_length(
-        track_length,
-        bounds.size.height,
-        content_size.height,
-        tokens.minimum_thumb_length,
-    );
-
-    let maximum_offset = (content_size.height - bounds.size.height).max(0.0);
-
-    let progress = calculate_progress(offset.y, maximum_offset);
-
-    let thumb_travel = (track_length - thumb_length).max(0.0);
-
-    let thumb_y = track_y + thumb_travel * progress;
-
     context.display_list.push(DrawCommand::FillRoundedRect {
-        rect: Rect::new(track_x, thumb_y, thickness, thumb_length),
-        radius: thickness / 2.0,
+        rect: geometry.thumb,
+        radius: geometry.thumb.size.width / 2.0,
         color: tokens.thumb_color,
     });
 }
@@ -703,5 +842,84 @@ fn finite_positive(value: f32) -> f32 {
         value
     } else {
         0.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::theme::Theme;
+    use crate::typography::{TextMeasurer, Typography};
+
+    struct FixedContent;
+
+    impl View for FixedContent {
+        fn measure(&self, constraints: Constraints, _context: &mut MeasureContext<'_>) -> Size {
+            constraints.constrain(Size::new(200.0, 300.0))
+        }
+
+        fn paint(&self, _bounds: Rect, _context: &mut PaintContext<'_>) {}
+    }
+
+    #[test]
+    fn vertical_scroll_preserves_content_taller_than_viewport() {
+        let scroll = Scroll::vertical(FixedContent);
+        let Some(content) = scroll.content.as_ref() else {
+            panic!("scroll content is missing");
+        };
+        let mut text_measurer = TextMeasurer::new();
+        let mut context = MeasureContext {
+            theme: &Theme::DEFAULT,
+            typography: &Typography::DEFAULT,
+            text_measurer: &mut text_measurer,
+        };
+
+        assert_eq!(
+            scroll.measure_content_size(content, Size::new(200.0, 100.0), &mut context),
+            Size::new(200.0, 300.0)
+        );
+    }
+
+    #[test]
+    fn vertical_thumb_reaches_both_ends_of_track() {
+        let bounds = Rect::new(0.0, 0.0, 200.0, 100.0);
+        let content = Size::new(200.0, 300.0);
+        let tokens = Theme::DEFAULT.scrollbar;
+        let Some(start) =
+            vertical_scrollbar_geometry(bounds, content, Point::new(0.0, 0.0), false, tokens)
+        else {
+            panic!("vertical scrollbar geometry is missing");
+        };
+        let Some(end) =
+            vertical_scrollbar_geometry(bounds, content, Point::new(0.0, 200.0), false, tokens)
+        else {
+            panic!("vertical scrollbar geometry is missing");
+        };
+
+        assert_eq!(start.maximum_offset, 200.0);
+        assert_eq!(start.thumb.origin.y, start.track.origin.y);
+        assert_eq!(
+            end.thumb.origin.y + end.thumb.size.height,
+            end.track.origin.y + end.track.size.height
+        );
+    }
+
+    #[test]
+    fn vertical_drag_lifecycle_is_explicit() {
+        let state = ScrollState::new();
+        assert_eq!(state.vertical_drag_offset(), None);
+        state.begin_vertical_drag(7.0);
+        assert_eq!(state.vertical_drag_offset(), Some(7.0));
+        assert!(state.end_vertical_drag());
+        assert!(!state.end_vertical_drag());
+    }
+
+    #[test]
+    fn positive_scroll_delta_moves_content_forward() {
+        let state = ScrollState::new();
+
+        state.scroll_by(0.0, 24.0);
+
+        assert_eq!(state.offset_y(), 24.0);
     }
 }

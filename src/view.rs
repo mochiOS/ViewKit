@@ -24,20 +24,30 @@ impl Constraints {
     }
 
     pub fn constrain(self, size: Size) -> Size {
-        let minimum_width = sanitize_constraint_length(self.minimum.width);
-        let minimum_height = sanitize_constraint_length(self.minimum.height);
-        let maximum_width = sanitize_constraint_length(self.maximum.width).max(minimum_width);
-        let maximum_height = sanitize_constraint_length(self.maximum.height).max(minimum_height);
+        let minimum_width = sanitize_minimum(self.minimum.width);
+        let minimum_height = sanitize_minimum(self.minimum.height);
+        let maximum_width = sanitize_maximum(self.maximum.width).max(minimum_width);
+        let maximum_height = sanitize_maximum(self.maximum.height).max(minimum_height);
 
         Size::new(
-            sanitize_constraint_length(size.width).clamp(minimum_width, maximum_width),
-            sanitize_constraint_length(size.height).clamp(minimum_height, maximum_height),
+            sanitize_minimum(size.width).clamp(minimum_width, maximum_width),
+            sanitize_minimum(size.height).clamp(minimum_height, maximum_height),
         )
     }
 }
 
-fn sanitize_constraint_length(value: f32) -> f32 {
+fn sanitize_minimum(value: f32) -> f32 {
     if value.is_finite() {
+        value.max(0.0)
+    } else {
+        0.0
+    }
+}
+
+fn sanitize_maximum(value: f32) -> f32 {
+    if value == f32::INFINITY {
+        f32::INFINITY
+    } else if value.is_finite() {
         value.max(0.0)
     } else {
         0.0
@@ -193,6 +203,16 @@ pub trait View {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn infinite_maximum_keeps_intrinsic_size_unbounded() {
+        let constraints = Constraints::loose(Size::new(320.0, f32::INFINITY));
+
+        assert_eq!(
+            constraints.constrain(Size::new(280.0, 900.0)),
+            Size::new(280.0, 900.0)
+        );
+    }
 
     #[test]
     fn scheduled_regions_merge_and_remain_pending_until_due() {
