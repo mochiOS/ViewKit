@@ -228,10 +228,12 @@ where
         if appearance == self.appearance {
             return false;
         }
+        let theme = appearance.theme();
+        let font_scale = appearance.font_scale();
         self.appearance = appearance;
-        self.theme = appearance.theme();
+        self.theme = theme;
         Theme::set_current(self.theme);
-        self.text_measurer.set_font_scale(appearance.font_scale());
+        self.text_measurer.set_font_scale(font_scale);
         self.app.appearance_changed();
         self.root = None;
         self.pending_redraw = RedrawRequest::Full;

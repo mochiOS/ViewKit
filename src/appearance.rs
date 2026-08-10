@@ -5,10 +5,11 @@ const SETTINGS_PATH: &str = "/var/config/appearance/settings.conf";
 
 const DEFAULT_FONT_SIZE: f32 = 13.0;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct AppearanceSettings {
     appearance: usize,
     accent: usize,
+    wallpaper: String,
     ui_scale: f32,
     font_size: f32,
 }
@@ -18,6 +19,7 @@ impl Default for AppearanceSettings {
         Self {
             appearance: 2,
             accent: 0,
+            wallpaper: String::from("/libraries/wallpapers/default.png"),
             ui_scale: 1.0,
             font_size: DEFAULT_FONT_SIZE,
         }
@@ -48,6 +50,7 @@ impl AppearanceSettings {
             match key.trim() {
                 "appearance" => settings.appearance = parse_usize(value, 2, 2),
                 "accent" => settings.accent = parse_usize(value, 0, 5),
+                "wallpaper" => settings.wallpaper = value.trim().chars().take(256).collect(),
                 "ui_scale" => settings.ui_scale = parse_f32(value, 1.0, 0.75, 2.0),
                 "font_size" => settings.font_size = parse_f32(value, DEFAULT_FONT_SIZE, 10.0, 24.0),
                 _ => {}
@@ -56,7 +59,7 @@ impl AppearanceSettings {
         settings
     }
 
-    pub(crate) fn theme(self) -> Theme {
+    pub(crate) fn theme(&self) -> Theme {
         let theme = if self.appearance == 1 {
             Theme::DARK
         } else {
@@ -65,11 +68,11 @@ impl AppearanceSettings {
         theme.with_accent(accent_color(self.accent))
     }
 
-    pub(crate) fn ui_scale(self) -> f64 {
+    pub(crate) fn ui_scale(&self) -> f64 {
         self.ui_scale as f64
     }
 
-    pub(crate) fn font_scale(self) -> f32 {
+    pub(crate) fn font_scale(&self) -> f32 {
         self.font_size / DEFAULT_FONT_SIZE
     }
 }
@@ -126,10 +129,12 @@ mod tests {
 
     #[test]
     fn parses_persisted_appearance_values() {
-        let settings =
-            AppearanceSettings::parse("appearance=1\naccent=4\nui_scale=1.5\nfont_size=18\n");
+        let settings = AppearanceSettings::parse(
+            "appearance=1\naccent=4\nwallpaper=/wall.png\nui_scale=1.5\nfont_size=18\n",
+        );
 
         assert_eq!(settings.theme(), Theme::DARK.with_accent(accent_color(4)));
+        assert_eq!(settings.wallpaper, "/wall.png");
         assert_eq!(settings.ui_scale(), 1.5);
         assert_eq!(settings.font_scale(), 18.0 / DEFAULT_FONT_SIZE);
     }
@@ -142,5 +147,13 @@ mod tests {
         assert_eq!(settings.theme(), Theme::LIGHT.with_accent(accent_color(0)));
         assert_eq!(settings.ui_scale(), 2.0);
         assert_eq!(settings.font_scale(), 10.0 / DEFAULT_FONT_SIZE);
+    }
+
+    #[test]
+    fn wallpaper_participates_in_change_detection() {
+        let first = AppearanceSettings::parse("wallpaper=/first.png\n");
+        let second = AppearanceSettings::parse("wallpaper=/second.png\n");
+
+        assert_ne!(first, second);
     }
 }
