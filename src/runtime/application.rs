@@ -4,6 +4,7 @@ use std::cell::Cell;
 use std::time::Instant;
 
 use crate::app::{App, ViewContext};
+use crate::appearance::AppearanceSettings;
 use crate::draw_command::{DisplayList, DrawCommand};
 use crate::event::{EventContext, EventDispatcher, RedrawRequest};
 use crate::geometry::Rect;
@@ -46,6 +47,7 @@ where
     theme: Theme,
     typography: Typography,
     text_measurer: TextMeasurer,
+    appearance: AppearanceSettings,
 
     event_dispatcher: EventDispatcher,
     redraw_schedule: RedrawSchedule,
@@ -58,14 +60,20 @@ where
 {
     pub(crate) fn new(app: A) -> Self {
         reset_exit_request();
+        let appearance = AppearanceSettings::load();
+        let theme = appearance.theme();
+        Theme::set_current(theme);
+        let mut text_measurer = TextMeasurer::new();
+        text_measurer.set_font_scale(appearance.font_scale());
         Self {
             app,
 
             root: None,
             viewport: None,
-            theme: Theme::DEFAULT,
+            theme,
             typography: Typography::DEFAULT,
-            text_measurer: TextMeasurer::new(),
+            text_measurer,
+            appearance,
 
             event_dispatcher: EventDispatcher::new(),
             redraw_schedule: RedrawSchedule::new(),
@@ -80,6 +88,7 @@ where
     fn rebuild_root_with_redraw(&mut self, viewport: Viewport, redraw: RedrawRequest) {
         let context = ViewContext::new(viewport);
 
+        Theme::set_current(self.theme);
         self.root = Some(self.app.body(&context));
         self.viewport = Some(viewport);
         self.pending_redraw = redraw;
@@ -212,6 +221,25 @@ where
 
     fn next_redraw_at(&self) -> Option<Instant> {
         self.redraw_schedule.deadline()
+    }
+
+    fn reload_appearance(&mut self) -> bool {
+        let appearance = AppearanceSettings::load();
+        if appearance == self.appearance {
+            return false;
+        }
+        self.appearance = appearance;
+        self.theme = appearance.theme();
+        Theme::set_current(self.theme);
+        self.text_measurer.set_font_scale(appearance.font_scale());
+        self.app.appearance_changed();
+        self.root = None;
+        self.pending_redraw = RedrawRequest::Full;
+        true
+    }
+
+    fn interface_scale_factor(&self) -> f64 {
+        self.appearance.ui_scale()
     }
 
     fn exit_requested(&self) -> bool {

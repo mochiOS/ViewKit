@@ -74,6 +74,14 @@ pub trait PlatformApplication {
         None
     }
 
+    fn reload_appearance(&mut self) -> bool {
+        false
+    }
+
+    fn interface_scale_factor(&self) -> f64 {
+        1.0
+    }
+
     fn exit_requested(&self) -> bool {
         false
     }

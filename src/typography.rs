@@ -29,6 +29,7 @@ impl TextAlignment {
 
 pub struct TextMeasurer {
     font_system: Option<FontSystem>,
+    font_scale: f32,
 }
 
 impl Default for TextMeasurer {
@@ -39,11 +40,26 @@ impl Default for TextMeasurer {
 
 impl TextMeasurer {
     pub fn new() -> Self {
-        Self { font_system: None }
+        Self {
+            font_system: None,
+            font_scale: 1.0,
+        }
     }
 
     pub(crate) fn font_system_mut(&mut self) -> &mut FontSystem {
         self.font_system.get_or_insert_with(create_font_system)
+    }
+
+    pub(crate) fn font_scale(&self) -> f32 {
+        self.font_scale
+    }
+
+    pub(crate) fn set_font_scale(&mut self, scale: f32) {
+        self.font_scale = if scale.is_finite() && scale > 0.0 {
+            scale
+        } else {
+            1.0
+        };
     }
 }
 

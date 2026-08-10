@@ -1,5 +1,6 @@
 pub mod animation;
 pub mod app;
+pub mod appearance;
 pub mod components;
 pub mod draw_command;
 pub mod edge_insets;

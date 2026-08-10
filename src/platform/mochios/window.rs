@@ -62,11 +62,12 @@ impl PlatformWindow for MochiOsWindow {
         }
         let mut wire = Vec::with_capacity(256);
         wire.resize(32, 0);
+        let scale = self.viewport.get().scale_factor as f32;
         wire[0..4].copy_from_slice(&OP_CONTEXT_MENU_SHOW.to_le_bytes());
         wire[4..12].copy_from_slice(&self.surface.to_le_bytes());
         wire[12..20].copy_from_slice(&request.request_id.to_le_bytes());
-        wire[20..24].copy_from_slice(&(request.position.x.round() as i32).to_le_bytes());
-        wire[24..28].copy_from_slice(&(request.position.y.round() as i32).to_le_bytes());
+        wire[20..24].copy_from_slice(&((request.position.x * scale).round() as i32).to_le_bytes());
+        wire[24..28].copy_from_slice(&((request.position.y * scale).round() as i32).to_le_bytes());
         wire[28..32].copy_from_slice(&(request.items.len() as u32).to_le_bytes());
         for item in &request.items {
             let label = item.label.as_bytes();

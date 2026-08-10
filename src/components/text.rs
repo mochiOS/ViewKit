@@ -6,7 +6,7 @@ use crate::draw_command::{DrawCommand, TextCommand};
 use crate::font::{DEFAULT_MONOSPACE_FONT_FAMILY, DEFAULT_UI_FONT_FAMILY};
 use crate::geometry::{Rect, Size};
 use crate::runtime::{IntoViewNode, TextNode, ViewNode, ViewNodeContext, ViewNodeKind};
-use crate::theme::Color;
+use crate::theme::{Color, Theme};
 use crate::typography::{TextAlignment, TextMeasurer};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
@@ -20,7 +20,7 @@ pub struct Text {
 
     alignment: TextAlignment,
 
-    color: Color,
+    color: Option<Color>,
     cache_layout: bool,
 }
 
@@ -37,7 +37,7 @@ impl Text {
 
             alignment: TextAlignment::Start,
 
-            color: Color::BLACK,
+            color: None,
             cache_layout: true,
         }
     }
@@ -82,7 +82,7 @@ impl Text {
     }
 
     pub fn color(mut self, color: Color) -> Self {
-        self.color = color;
+        self.color = Some(color);
         self
     }
 
@@ -96,8 +96,9 @@ impl Text {
             return Size::new(0.0, 0.0);
         }
 
-        let font_size = resolved_font_size(self.font_size);
-        let line_height = resolved_line_height(font_size, self.line_height);
+        let font_scale = measurer.font_scale();
+        let font_size = resolved_font_size(self.font_size) * font_scale;
+        let line_height = resolved_line_height(font_size, self.line_height * font_scale);
         let metrics = Metrics::new(font_size, line_height);
         let font_system = measurer.font_system_mut();
         let mut buffer = Buffer::new(font_system, metrics);
@@ -126,7 +127,7 @@ impl Text {
         }
 
         if measured_width <= 0.0 || measured_height <= 0.0 {
-            return self.measure_text_without_font(maximum_width);
+            return self.measure_text_without_font(maximum_width, font_scale);
         }
 
         if let Some(maximum_width) = maximum_width {
@@ -149,13 +150,13 @@ impl Text {
             .weight(Weight(self.weight.clamp(1, 1000)))
     }
 
-    fn measure_text_without_font(&self, maximum_width: Option<f32>) -> Size {
+    fn measure_text_without_font(&self, maximum_width: Option<f32>, font_scale: f32) -> Size {
         if self.value.is_empty() {
             return Size::new(0.0, 0.0);
         }
 
-        let font_size = resolved_font_size(self.font_size);
-        let line_height = resolved_line_height(font_size, self.line_height);
+        let font_size = resolved_font_size(self.font_size) * font_scale;
+        let line_height = resolved_line_height(font_size, self.line_height * font_scale);
         let glyph_width = (font_size * 0.56).max(1.0);
         let max_width = normalize_maximum_width(maximum_width);
         let mut line_count = 0usize;
@@ -191,7 +192,9 @@ impl IntoViewNode for Text {
                 line_height: self.line_height,
                 weight: self.weight,
                 alignment: self.alignment,
-                color: self.color,
+                color: self
+                    .color
+                    .unwrap_or_else(|| Theme::current().colors.text_primary),
                 cache_layout: self.cache_layout,
             }),
         )
@@ -216,9 +219,10 @@ impl View for Text {
             return;
         }
 
-        let font_size = resolved_font_size(self.font_size);
+        let font_scale = context.text_measurer.font_scale();
+        let font_size = resolved_font_size(self.font_size) * font_scale;
 
-        let line_height = resolved_line_height(font_size, self.line_height);
+        let line_height = resolved_line_height(font_size, self.line_height * font_scale);
 
         context.display_list.push(DrawCommand::DrawText {
             command: TextCommand {
@@ -237,7 +241,7 @@ impl View for Text {
 
                 alignment: self.alignment,
 
-                color: self.color,
+                color: self.color.unwrap_or(context.theme.colors.text_primary),
             },
         });
     }

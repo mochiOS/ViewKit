@@ -261,4 +261,7 @@ pub trait App: Sized + 'static {
     fn handle_platform_message(&mut self, _message: &[u8]) -> bool {
         false
     }
+
+    /// Called after the persisted system appearance has changed.
+    fn appearance_changed(&mut self) {}
 }

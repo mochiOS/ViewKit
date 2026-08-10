@@ -4,6 +4,7 @@ use super::{
     Color, ColorTokens, DividerTokens, MotionTokens, RadiusTokens, ScrollBarTokens, ShadowTokens,
     SpacingTokens,
 };
+use std::cell::Cell;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Theme {
@@ -57,5 +58,84 @@ impl Theme {
         scrollbar: ScrollBarTokens::DEFAULT,
         motion: MotionTokens::DEFAULT,
     };
+    pub const DARK: Self = Self {
+        colors: ColorTokens {
+            background: Color::from_rgb_hex(0x1c1c1e),
+            surface: Color::from_rgb_hex(0x242426),
+            surface_subtle: Color::from_rgb_hex(0x2c2c2e),
+            surface_muted: Color::from_rgb_hex(0x3a3a3c),
+            elevated_surface: Color::from_rgb_hex(0x323234),
+
+            text_primary: Color::from_rgb_hex(0xf5f5f7),
+            text_secondary: Color::from_rgb_hex(0xaeaeb2),
+            text_tertiary: Color::from_rgb_hex(0x8e8e93),
+            text_disabled: Color::from_rgb_hex(0x636366),
+
+            accent: Color::from_rgb_hex(0x0a84ff),
+            accent_hovered: Color::from_rgb_hex(0x409cff),
+            accent_pressed: Color::from_rgb_hex(0x0071db),
+            accent_soft: Color::rgba(10, 132, 255, 38),
+
+            border: Color::rgba(255, 255, 255, 26),
+            border_strong: Color::rgba(255, 255, 255, 46),
+            focus_ring: Color::rgba(10, 132, 255, 102),
+
+            success: Color::from_rgb_hex(0x32d74b),
+            success_soft: Color::from_rgb_hex(0x17351e),
+
+            warning: Color::from_rgb_hex(0xffd60a),
+            warning_soft: Color::from_rgb_hex(0x3d3308),
+
+            destructive: Color::from_rgb_hex(0xff453a),
+            destructive_hovered: Color::from_rgb_hex(0xff6961),
+            destructive_soft: Color::from_rgb_hex(0x3d1715),
+        },
+
+        radius: RadiusTokens::DEFAULT,
+        spacing: SpacingTokens::DEFAULT,
+        shadows: ShadowTokens::DEFAULT,
+        divider: DividerTokens::DEFAULT,
+        scrollbar: ScrollBarTokens::DEFAULT,
+        motion: MotionTokens::DEFAULT,
+    };
     pub const DEFAULT: Self = Theme::LIGHT;
+
+    #[must_use]
+    pub fn with_accent(mut self, accent: Color) -> Self {
+        let dark = self.colors.background == Self::DARK.colors.background;
+        self.colors.accent = accent;
+        self.colors.accent_hovered = mix(accent, Color::WHITE, 36);
+        self.colors.accent_pressed = mix(accent, Color::BLACK, 28);
+        self.colors.accent_soft = accent.with_alpha(if dark { 38 } else { 25 });
+        self.colors.focus_ring = accent.with_alpha(if dark { 102 } else { 71 });
+        self
+    }
+
+    /// Returns the theme currently used while constructing a View tree.
+    #[must_use]
+    pub fn current() -> Self {
+        CURRENT_THEME.with(Cell::get)
+    }
+
+    pub(crate) fn set_current(theme: Self) {
+        CURRENT_THEME.with(|current| current.set(theme));
+    }
+}
+
+thread_local! {
+    static CURRENT_THEME: Cell<Theme> = const { Cell::new(Theme::DEFAULT) };
+}
+
+fn mix(base: Color, other: Color, other_weight: u8) -> Color {
+    let weight = u16::from(other_weight.min(100));
+    let base_weight = 100 - weight;
+    let channel = |base: u8, other: u8| {
+        ((u16::from(base) * base_weight + u16::from(other) * weight) / 100) as u8
+    };
+    Color::rgba(
+        channel(base.red, other.red),
+        channel(base.green, other.green),
+        channel(base.blue, other.blue),
+        base.alpha,
+    )
 }

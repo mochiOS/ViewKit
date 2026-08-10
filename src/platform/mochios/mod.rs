@@ -61,6 +61,7 @@ const OP_SET_CURSOR_POSITION: u32 = 7;
 const OP_SET_CURSOR_IMAGE: u32 = 8;
 const OP_GET_RENDERER_CAPS: u32 = 9;
 const OP_CONTEXT_MENU_SHOW: u32 = 121;
+const OP_APPEARANCE_CHANGED: u32 = 123;
 const ROLE_TOPLEVEL: u32 = 1;
 const ROLE_BACKGROUND: u32 = 3;
 const ROLE_PANEL: u32 = 4;
@@ -84,6 +85,7 @@ const EVENT_FRAME_DONE: u32 = 10;
 const EVENT_CONFIGURE: u32 = 11;
 const EVENT_POINTER_SCROLL: u32 = 12;
 const EVENT_CONTEXT_MENU_RESULT: u32 = 13;
+const EVENT_APPEARANCE_CHANGED: u32 = 14;
 const INPUT_SUBSCRIBE_OPCODE: u32 = 0x5355_4253;
 const INPUT_EVENT_SIZE: usize = 32;
 const INPUT_EVENT_KIND_POINTER_MOVE: u16 = 2;
@@ -342,12 +344,7 @@ where
             self.config.size
         };
         let size = checked_surface_size(requested_size)?;
-        let logical_size = if self.config.fullscreen {
-            requested_size
-        } else {
-            self.config.size
-        };
-        let viewport = Viewport::new(logical_size, size.0, size.1, 1.0);
+        let viewport = scaled_viewport(size.0, size.1, self.app.interface_scale_factor());
         let role = if self.config.secure_overlay {
             ROLE_SECURE_OVERLAY
         } else if self.config.fullscreen {
@@ -400,8 +397,7 @@ where
                 break 'event_loop Ok(());
             }
             if let Some((width, height)) = self.pending_resize.take() {
-                let viewport =
-                    Viewport::new(Size::new(width as f32, height as f32), width, height, 1.0);
+                let viewport = scaled_viewport(width, height, self.app.interface_scale_factor());
                 window.set_viewport(viewport);
                 shared_buffer = if gpu_enabled {
                     SharedBuffer::new_gpu_scene(width as usize, height as usize)?
@@ -545,7 +541,13 @@ where
                     let frame_start = perf_counter();
                     let frame_tick_start = perf_tick();
                     let commit_start = perf_counter();
-                    set_cursor_position(compositor, self.pointer_x, self.pointer_y, true)?;
+                    let scale = window.viewport().scale_factor as f32;
+                    set_cursor_position(
+                        compositor,
+                        self.pointer_x * scale,
+                        self.pointer_y * scale,
+                        true,
+                    )?;
                     let commit_cycles = perf_counter_elapsed(commit_start);
                     self.metrics.commit_cycles =
                         self.metrics.commit_cycles.saturating_add(commit_cycles);
@@ -669,17 +671,19 @@ where
 
         let bounds = window.viewport().logical_bounds();
         if let Some((x, y)) = self.pending_pointer_motion.compositor_position.take() {
-            self.pointer_x = x;
-            self.pointer_y = y;
+            let scale = window.viewport().scale_factor as f32;
+            self.pointer_x = x / scale;
+            self.pointer_y = y / scale;
         } else if let Some((raw_x, raw_y)) = self.pending_pointer_motion.absolute.take() {
             self.pointer_x = bounds.origin.x + (raw_x / 32_767.0) * bounds.size.width;
             self.pointer_y = bounds.origin.y + (raw_y / 32_767.0) * bounds.size.height;
         }
         let max_x = (bounds.origin.x + bounds.size.width).max(bounds.origin.x);
         let max_y = (bounds.origin.y + bounds.size.height).max(bounds.origin.y);
-        self.pointer_x = (self.pointer_x + self.pending_pointer_motion.relative_dx)
+        let scale = window.viewport().scale_factor as f32;
+        self.pointer_x = (self.pointer_x + self.pending_pointer_motion.relative_dx / scale)
             .clamp(bounds.origin.x, max_x);
-        self.pointer_y = (self.pointer_y + self.pending_pointer_motion.relative_dy)
+        self.pointer_y = (self.pointer_y + self.pending_pointer_motion.relative_dy / scale)
             .clamp(bounds.origin.y, max_y);
 
         self.pending_pointer_motion.relative_dx = 0.0;
@@ -706,8 +710,9 @@ where
                 let bounds = window.viewport().logical_bounds();
                 let max_x = (bounds.origin.x + bounds.size.width).max(bounds.origin.x);
                 let max_y = (bounds.origin.y + bounds.size.height).max(bounds.origin.y);
-                self.pointer_x = (self.pointer_x + dx).clamp(bounds.origin.x, max_x);
-                self.pointer_y = (self.pointer_y + dy).clamp(bounds.origin.y, max_y);
+                let scale = window.viewport().scale_factor as f32;
+                self.pointer_x = (self.pointer_x + dx / scale).clamp(bounds.origin.x, max_x);
+                self.pointer_y = (self.pointer_y + dy / scale).clamp(bounds.origin.y, max_y);
                 self.app.handle_event(
                     PlatformEvent::PointerMoved {
                         x: self.pointer_x,
@@ -899,13 +904,16 @@ where
         let a = unsafe { read_i32_raw(event.as_ptr(), 4) };
         let b = unsafe { read_i32_raw(event.as_ptr(), 8) };
         let c = unsafe { read_u32_raw(event.as_ptr(), 12) };
+        let scale = window.viewport().scale_factor as f32;
+        let logical_x = a as f32 / scale;
+        let logical_y = b as f32 / scale;
 
         match kind {
             EVENT_POINTER_ENTER | EVENT_POINTER_MOTION => {
                 self.app.handle_event(
                     PlatformEvent::PointerMoved {
-                        x: a as f32,
-                        y: b as f32,
+                        x: logical_x,
+                        y: logical_y,
                     },
                     window,
                 );
@@ -920,8 +928,8 @@ where
                 // carry the authoritative local pointer position.
                 self.app.handle_event(
                     PlatformEvent::PointerMoved {
-                        x: a as f32,
-                        y: b as f32,
+                        x: logical_x,
+                        y: logical_y,
                     },
                     window,
                 );
@@ -1002,6 +1010,24 @@ where
                     },
                     window,
                 );
+            }
+            EVENT_APPEARANCE_CHANGED => {
+                if self.app.reload_appearance() {
+                    let previous_scale = window.viewport().scale_factor as f32;
+                    let viewport = scaled_viewport(
+                        window.width(),
+                        window.height(),
+                        self.app.interface_scale_factor(),
+                    );
+                    let physical_x = self.pointer_x * previous_scale;
+                    let physical_y = self.pointer_y * previous_scale;
+                    self.pointer_x = physical_x / viewport.scale_factor as f32;
+                    self.pointer_y = physical_y / viewport.scale_factor as f32;
+                    window.set_viewport(viewport);
+                    self.app
+                        .handle_event(PlatformEvent::ScaleFactorChanged { viewport }, window);
+                    window.request_redraw();
+                }
             }
             _ => {}
         }
@@ -1084,6 +1110,37 @@ where
             ButtonState::Pressed
         }
     }
+}
+
+fn scaled_viewport(width: u32, height: u32, scale_factor: f64) -> Viewport {
+    let scale_factor = if scale_factor.is_finite() && scale_factor > 0.0 {
+        scale_factor.clamp(0.75, 2.0)
+    } else {
+        1.0
+    };
+    Viewport::new(
+        Size::new(
+            width as f32 / scale_factor as f32,
+            height as f32 / scale_factor as f32,
+        ),
+        width,
+        height,
+        scale_factor,
+    )
+}
+
+pub fn notify_appearance_changed() -> Result<(), MochiOsBackendError> {
+    let compositor = find_compositor()?;
+    let request = OP_APPEARANCE_CHANGED.to_le_bytes();
+    let mut reply = [0u8; 16];
+    let len = ipc_call_raw(
+        compositor,
+        request.as_ptr(),
+        request.len(),
+        reply.as_mut_ptr(),
+        reply.len(),
+    )?;
+    status_from_raw(reply.as_ptr(), len)
 }
 
 fn key_modifiers_from_wire(modifiers: u32) -> KeyModifiers {
