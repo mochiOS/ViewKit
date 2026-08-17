@@ -114,10 +114,10 @@ const INPUT_MOD_CONTROL: u32 = 1 << 1;
 const INPUT_MOD_ALT: u32 = 1 << 2;
 const TEXT_LAYOUT_CACHE_CAPACITY: usize = 1024;
 const CURSOR_SVG_PATH: &str = "/system/icons/cursor.svg";
-const CURSOR_WIDTH: u32 = 12;
-const CURSOR_HEIGHT: u32 = 20;
+const CURSOR_WIDTH: u32 = 24;
+const CURSOR_HEIGHT: u32 = 41;
 const CURSOR_HOTSPOT_X: f32 = 1.0;
-const CURSOR_HOTSPOT_Y: f32 = 1.0;
+const CURSOR_HOTSPOT_Y: f32 = 2.0;
 const PERF_LOG_ENABLED: bool = false;
 const METRICS_INTERVAL_TICKS: u64 = 500;
 const SLOW_FRAME_THRESHOLD_TICKS: u64 = 16;
@@ -129,6 +129,7 @@ static mut TOKEN_REQ: [u8; 12] = [0; 12];
 static mut DAMAGE_REQ: [u8; 28] = [0; 28];
 static mut IPC_REPLY: [u8; 16] = [0; 16];
 const EVENT_BUFFER_SIZE: usize = 4096;
+const _: () = assert!(20 + CURSOR_WIDTH as usize * CURSOR_HEIGHT as usize * 4 <= 4128);
 static mut EVENT_BUF: [u8; EVENT_BUFFER_SIZE] = [0; EVENT_BUFFER_SIZE];
 static mut DISPLAY_REQ: [u8; 20] = [0; 20];
 static mut DISPLAY_REPLY: [u8; 32] = [0; 32];
@@ -372,10 +373,16 @@ where
         self.pointer_x = (viewport.logical_size.width / 2.0).max(0.0);
         self.pointer_y = (viewport.logical_size.height / 2.0).max(0.0);
         self.direct_input = false;
-        if self.config.fullscreen {
+        if self.config.fullscreen || self.config.secure_overlay {
             let cursor_image = load_cursor_image();
             if let Some(image) = cursor_image.as_ref() {
                 set_cursor_image(compositor, image)?;
+                set_cursor_position(
+                    compositor,
+                    self.pointer_x * viewport.scale_factor as f32,
+                    self.pointer_y * viewport.scale_factor as f32,
+                    true,
+                )?;
             }
             self.cursor_image = cursor_image;
         }
@@ -422,6 +429,8 @@ where
 
             let redraw_requested = window.take_redraw_requested();
             if redraw_requested || redraw_due {
+                let cursor_position_dirty =
+                    self.cursor_dirty.is_some() && self.cursor_image.is_some();
                 if self.font_system.is_none() {
                     self.font_system = Some(create_font_system());
                 }
@@ -520,6 +529,15 @@ where
                     .map_err(|error| error.at("surface damage"))?;
                 simple_token_request(compositor, OP_COMMIT, token)
                     .map_err(|error| error.at("surface commit"))?;
+                if cursor_position_dirty {
+                    let scale = window.viewport().scale_factor as f32;
+                    set_cursor_position(
+                        compositor,
+                        self.pointer_x * scale,
+                        self.pointer_y * scale,
+                        true,
+                    )?;
+                }
                 let commit_cycles = perf_counter_elapsed(commit_start);
                 self.metrics.commit_cycles =
                     self.metrics.commit_cycles.saturating_add(commit_cycles);

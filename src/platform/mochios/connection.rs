@@ -156,7 +156,10 @@ pub(super) fn display_surface_size() -> Option<crate::geometry::Size> {
 }
 
 pub(super) fn load_cursor_image() -> Option<ImageData> {
-    let svg = SvgData::from_path(CURSOR_SVG_PATH).ok()?;
+    const FALLBACK_CURSOR_SVG: &[u8] = include_bytes!("../../../resources/cursor.svg");
+    let svg = SvgData::from_path(CURSOR_SVG_PATH)
+        .or_else(|_| SvgData::decode(FALLBACK_CURSOR_SVG))
+        .ok()?;
     ImageData::from_svg(&svg, CURSOR_WIDTH, CURSOR_HEIGHT).ok()
 }
 
