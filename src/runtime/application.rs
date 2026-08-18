@@ -182,6 +182,9 @@ where
 
     fn draw(&mut self, viewport: Viewport, display_list: &mut DisplayList) -> Rect {
         self.ensure_root(viewport);
+        if take_state_changed() {
+            self.rebuild_root(viewport);
+        }
 
         let viewport_bounds = viewport.logical_bounds();
         let scheduled_redraw = self.redraw_schedule.take_due(Instant::now());
@@ -337,6 +340,11 @@ pub enum ViewKitError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::WindowOptions;
+    use crate::geometry::Size;
+    use crate::state::State;
+    use crate::view::{Constraints, MeasureContext};
+    use std::rc::Rc;
 
     #[test]
     fn state_change_expands_component_redraw_to_full_window() {
@@ -358,5 +366,70 @@ mod tests {
         assert!(exit_requested());
         reset_exit_request();
         assert!(!exit_requested());
+    }
+
+    #[test]
+    fn state_changed_during_paint_rebuilds_before_the_next_draw() {
+        let _ = take_state_changed();
+        let builds = Rc::new(Cell::new(0));
+        let state = State::new(false);
+        let app = PaintMutationApp {
+            state: state.clone(),
+            builds: Rc::clone(&builds),
+        };
+        let mut runtime = ApplicationRuntime::new(app);
+        let viewport = Viewport::new(Size::new(100.0, 100.0), 100, 100, 1.0);
+        let mut display_list = DisplayList::default();
+
+        let _ = runtime.draw(viewport, &mut display_list);
+        assert!(state.get());
+        assert_eq!(builds.get(), 1);
+
+        let _ = runtime.draw(viewport, &mut display_list);
+        assert_eq!(builds.get(), 2);
+    }
+
+    struct PaintMutationApp {
+        state: State<bool>,
+        builds: Rc<Cell<usize>>,
+    }
+
+    impl App for PaintMutationApp {
+        type Body = PaintMutationView;
+
+        fn new() -> Self {
+            Self {
+                state: State::new(false),
+                builds: Rc::new(Cell::new(0)),
+            }
+        }
+
+        fn window(&self) -> WindowOptions {
+            WindowOptions::new("paint mutation test")
+        }
+
+        fn body(&self, _context: &ViewContext) -> Self::Body {
+            self.builds.set(self.builds.get() + 1);
+            PaintMutationView {
+                state: self.state.clone(),
+            }
+        }
+    }
+
+    struct PaintMutationView {
+        state: State<bool>,
+    }
+
+    impl View for PaintMutationView {
+        fn measure(&self, constraints: Constraints, _context: &mut MeasureContext<'_>) -> Size {
+            constraints.constrain(Size::new(100.0, 100.0))
+        }
+
+        fn paint(&self, _bounds: Rect, context: &mut PaintContext<'_>) {
+            if !self.state.get() {
+                self.state.set(true);
+                context.request_redraw_at(Instant::now());
+            }
+        }
     }
 }
