@@ -373,7 +373,7 @@ where
         self.pointer_x = (viewport.logical_size.width / 2.0).max(0.0);
         self.pointer_y = (viewport.logical_size.height / 2.0).max(0.0);
         self.direct_input = false;
-        if self.config.fullscreen || self.config.secure_overlay {
+        if self.config.fullscreen {
             let cursor_image = load_cursor_image();
             if let Some(image) = cursor_image.as_ref() {
                 set_cursor_image(compositor, image)?;
