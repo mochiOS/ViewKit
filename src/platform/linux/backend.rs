@@ -5,9 +5,9 @@ use super::super::{
     PointerButton, WindowConfig,
 };
 
+use super::SoftwareRenderer;
 use crate::draw_command::DisplayList;
 use crate::geometry::Size;
-use crate::platform::linux::SoftwareRenderer;
 use crate::renderer::{Renderer, Viewport};
 
 use softbuffer::Context;
@@ -22,7 +22,7 @@ use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, OwnedDisplayHandle};
 use winit::keyboard::{Key as WinitKey, NamedKey};
 use winit::window::CursorIcon as WinitCursorIcon;
-use winit::window::{Window, WindowId};
+use winit::window::{Fullscreen, Window, WindowId};
 
 const LINE_SCROLL_PIXELS: f32 = 40.0;
 
@@ -38,7 +38,7 @@ pub enum LinuxBackendError {
     Window(#[from] OsError),
 
     #[error("レンダラーの処理に失敗しました: {0}")]
-    Renderer(#[from] crate::platform::linux::SoftwareRendererError),
+    Renderer(#[from] super::SoftwareRendererError),
 
     #[error("softbufferの初期化に失敗しました: {0}")]
     SoftBuffer(#[from] softbuffer::SoftBufferError),
@@ -216,7 +216,12 @@ where
                 self.config.size.width as f64,
                 self.config.size.height as f64,
             ))
-            .with_resizable(self.config.resizable);
+            .with_resizable(self.config.resizable)
+            .with_fullscreen(
+                self.config
+                    .fullscreen
+                    .then_some(Fullscreen::Borderless(None)),
+            );
 
         let window = match event_loop.create_window(attributes) {
             Ok(window) => Rc::new(window),

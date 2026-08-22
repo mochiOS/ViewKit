@@ -36,7 +36,7 @@
 //! }
 //! ```
 //!
-//! ViewKitは、mochiOSおよびLinuxで動作するGUIフレームワークです。
+//! ViewKitは、mochiOS、LinuxおよびWindowsで動作するGUIフレームワークです。
 //!
 //! 主にKome言語からの利用を想定していますが、Rustから直接利用することもできます。
 

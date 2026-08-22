@@ -1,8 +1,8 @@
 //! ViewKit全体の外観テーマを定義
 
 use super::{
-    Color, ColorTokens, DividerTokens, MotionTokens, RadiusTokens, ScrollBarTokens, ShadowTokens,
-    SpacingTokens,
+    BrowserTokens, Color, ColorTokens, DividerTokens, MotionTokens, RadiusTokens, ScrollBarTokens,
+    ShadowTokens, ShellTokens, SpacingTokens,
 };
 use std::cell::Cell;
 
@@ -15,6 +15,8 @@ pub struct Theme {
     pub divider: DividerTokens,
     pub scrollbar: ScrollBarTokens,
     pub motion: MotionTokens,
+    pub shell: ShellTokens,
+    pub browser: BrowserTokens,
 }
 
 impl Theme {
@@ -57,6 +59,8 @@ impl Theme {
         divider: DividerTokens::DEFAULT,
         scrollbar: ScrollBarTokens::DEFAULT,
         motion: MotionTokens::DEFAULT,
+        shell: ShellTokens::LIGHT,
+        browser: BrowserTokens::LIGHT,
     };
     pub const DARK: Self = Self {
         colors: ColorTokens {
@@ -97,6 +101,8 @@ impl Theme {
         divider: DividerTokens::DEFAULT,
         scrollbar: ScrollBarTokens::DEFAULT,
         motion: MotionTokens::DEFAULT,
+        shell: ShellTokens::DARK,
+        browser: BrowserTokens::DARK,
     };
     pub const DEFAULT: Self = Theme::LIGHT;
 
@@ -108,6 +114,12 @@ impl Theme {
         self.colors.accent_pressed = mix(accent, Color::BLACK, 28);
         self.colors.accent_soft = accent.with_alpha(if dark { 38 } else { 25 });
         self.colors.focus_ring = accent.with_alpha(if dark { 102 } else { 71 });
+        self.shell.action = accent;
+        self.shell.action_hover = self.colors.accent_hovered;
+        self.shell.action_pressed = self.colors.accent_pressed;
+        self.shell.selection_soft = accent.with_alpha(if dark { 48 } else { 28 });
+        self.shell.selection_border = accent.with_alpha(if dark { 112 } else { 72 });
+        self.browser.selection = accent;
         self
     }
 
@@ -138,4 +150,30 @@ fn mix(base: Color, other: Color, other_weight: u8) -> Color {
         channel(base.blue, other.blue),
         base.alpha,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accent_is_applied_to_application_tokens() {
+        let accent = Color::from_rgb_hex(0x7651c9);
+        let theme = Theme::LIGHT.with_accent(accent);
+
+        assert_eq!(theme.colors.accent, accent);
+        assert_eq!(theme.shell.action, accent);
+        assert_eq!(theme.shell.selection_soft, accent.with_alpha(28));
+        assert_eq!(theme.shell.selection_border, accent.with_alpha(72));
+        assert_eq!(theme.browser.selection, accent);
+    }
+
+    #[test]
+    fn dark_accent_uses_dark_selection_opacity() {
+        let accent = Color::from_rgb_hex(0x7651c9);
+        let theme = Theme::DARK.with_accent(accent);
+
+        assert_eq!(theme.shell.selection_soft, accent.with_alpha(48));
+        assert_eq!(theme.shell.selection_border, accent.with_alpha(112));
+    }
 }

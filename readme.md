@@ -1,5 +1,8 @@
 # ViewKit
 
+ViewKit provides the same Rust and C UI runtime on mochiOS, Linux, and Windows.
+Linux and Windows use the shared winit/softbuffer desktop backend.
+
 ### Build
 
 1. cbindgenをインストールします: `cargo install --force cbindgen` or `brew install cbindgen`

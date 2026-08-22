@@ -313,7 +313,27 @@ where
         Ok(())
     }
 
-    #[cfg(not(any(target_os = "linux", target_os = "mochios")))]
+    #[cfg(target_os = "windows")]
+    {
+        use crate::platform::windows::WindowsBackend;
+
+        let backend = WindowsBackend::new(
+            runtime,
+            WindowConfig {
+                title: options.title().to_owned(),
+                size: options.initial_size(),
+                resizable: options.is_resizable(),
+                fullscreen: options.is_fullscreen(),
+                secure_overlay: options.is_secure_overlay(),
+            },
+        );
+
+        backend.run()?;
+
+        Ok(())
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "mochios", target_os = "windows")))]
     {
         let _ = runtime;
         let _ = options;
@@ -332,6 +352,10 @@ pub enum ViewKitError {
     #[cfg(target_os = "mochios")]
     #[error(transparent)]
     MochiOs(#[from] crate::platform::mochios::MochiOsBackendError),
+
+    #[cfg(target_os = "windows")]
+    #[error(transparent)]
+    Windows(#[from] crate::platform::windows::WindowsBackendError),
 
     #[error("現在のプラットフォームはViewKitに対応していません")]
     UnsupportedPlatform,
