@@ -4,7 +4,7 @@ use std::fmt::Write as _;
 use std::time::Instant;
 
 use cosmic_text::{
-    Attrs, Buffer, Color as CosmicColor, Family, FontSystem, Metrics, Shaping, SwashCache, Weight,
+    Attrs, Buffer, Color as CosmicColor, FontSystem, Metrics, Shaping, SwashCache, Weight,
 };
 use mochi_user_syscall as syscall;
 use tiny_skia::{
@@ -15,7 +15,7 @@ use tiny_skia::{
 use crate::draw_command::{
     DisplayList, DrawCommand, ImageCommand, ImageSampling, SvgCommand, TextCommand,
 };
-use crate::font::create_font_system;
+use crate::font::{create_font_system, resolve_font_family};
 use crate::geometry::{Rect, Size};
 use crate::image::ImageData;
 use crate::platform::{

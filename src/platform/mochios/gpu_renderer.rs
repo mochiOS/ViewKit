@@ -704,7 +704,7 @@ impl GpuSceneRenderer {
                 Some(command.bounds.size.height * scale),
             );
             let attrs = Attrs::new()
-                .family(Family::Name(command.font_family.as_str()))
+                .family(resolve_font_family(command.font_family.as_str()))
                 .weight(Weight(command.weight.clamp(1, 1000)));
             borrowed.set_text(
                 command.text.as_str(),
@@ -732,7 +732,7 @@ impl GpuSceneRenderer {
                 Some(command.bounds.size.height * scale),
             );
             let attrs = Attrs::new()
-                .family(Family::Name(command.font_family.as_str()))
+                .family(resolve_font_family(command.font_family.as_str()))
                 .weight(Weight(command.weight.clamp(1, 1000)));
             borrowed.set_text(
                 command.text.as_str(),

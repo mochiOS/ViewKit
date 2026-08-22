@@ -1,9 +1,9 @@
 //! 文字列を描画するTextを定義
 
-use cosmic_text::{Attrs, Buffer, Family, Metrics, Shaping, Weight};
+use cosmic_text::{Attrs, Buffer, Metrics, Shaping, Weight};
 
 use crate::draw_command::{DrawCommand, TextCommand};
-use crate::font::{DEFAULT_MONOSPACE_FONT_FAMILY, DEFAULT_UI_FONT_FAMILY};
+use crate::font::{DEFAULT_MONOSPACE_FONT_FAMILY, DEFAULT_UI_FONT_FAMILY, resolve_font_family};
 use crate::geometry::{Rect, Size};
 use crate::runtime::{IntoViewNode, TextNode, ViewNode, ViewNodeContext, ViewNodeKind};
 use crate::theme::{Color, Theme};
@@ -146,7 +146,7 @@ impl Text {
 
     fn create_attrs(&self) -> Attrs<'_> {
         Attrs::new()
-            .family(Family::Name(self.font_family.as_str()))
+            .family(resolve_font_family(self.font_family.as_str()))
             .weight(Weight(self.weight.clamp(1, 1000)))
     }
 

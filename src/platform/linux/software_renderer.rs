@@ -15,13 +15,13 @@ use winit::window::Window;
 use crate::draw_command::{
     DisplayList, DrawCommand, ImageCommand, ImageSampling, SvgCommand, TextCommand,
 };
-use crate::font::create_font_system;
+use crate::font::{create_font_system, resolve_font_family};
 use crate::geometry::Rect;
 use crate::renderer::{Renderer, Viewport};
 use crate::theme::Color;
 use crate::typography::TextAlignment;
 use cosmic_text::{
-    Attrs, Buffer, Color as CosmicColor, Family, FontSystem, Metrics, Shaping, SwashCache, Weight,
+    Attrs, Buffer, Color as CosmicColor, FontSystem, Metrics, Shaping, SwashCache, Weight,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -1080,7 +1080,7 @@ fn draw_text_command(
             buffer_with_font_system.set_size(Some(width), Some(height));
 
             let attrs = Attrs::new()
-                .family(Family::Name(command.font_family.as_str()))
+                .family(resolve_font_family(command.font_family.as_str()))
                 .weight(Weight(command.weight.clamp(1, 1000)));
 
             buffer_with_font_system.set_text(

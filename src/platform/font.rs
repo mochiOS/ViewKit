@@ -1,11 +1,17 @@
 #[cfg(target_os = "linux")]
-pub(crate) const DEFAULT_UI_FONT_FAMILY: &str = env!("VIEWKIT_DEFAULT_UI_FONT_FAMILY");
+pub(crate) const DEFAULT_UI_FONT_FAMILY: &str = "sans-serif";
+#[cfg(target_os = "linux")]
+pub(crate) const DEFAULT_MONOSPACE_FONT_FAMILY: &str = "monospace";
 
 #[cfg(target_os = "linux")]
-pub(crate) fn load_platform_fonts(_db: &mut cosmic_text::fontdb::Database) {}
+pub(crate) fn load_platform_fonts(db: &mut cosmic_text::fontdb::Database) {
+    db.load_system_fonts();
+}
 
 #[cfg(target_os = "windows")]
-pub(crate) const DEFAULT_UI_FONT_FAMILY: &str = env!("VIEWKIT_DEFAULT_UI_FONT_FAMILY");
+pub(crate) const DEFAULT_UI_FONT_FAMILY: &str = "sans-serif";
+#[cfg(target_os = "windows")]
+pub(crate) const DEFAULT_MONOSPACE_FONT_FAMILY: &str = "monospace";
 
 #[cfg(target_os = "windows")]
 pub(crate) fn load_platform_fonts(db: &mut cosmic_text::fontdb::Database) {
@@ -14,12 +20,17 @@ pub(crate) fn load_platform_fonts(db: &mut cosmic_text::fontdb::Database) {
 
 #[cfg(target_os = "mochios")]
 pub(crate) const DEFAULT_UI_FONT_FAMILY: &str = env!("VIEWKIT_DEFAULT_UI_FONT_FAMILY");
+#[cfg(target_os = "mochios")]
+pub(crate) const DEFAULT_MONOSPACE_FONT_FAMILY: &str =
+    env!("VIEWKIT_DEFAULT_MONOSPACE_FONT_FAMILY");
 
 #[cfg(target_os = "mochios")]
 pub(crate) fn load_platform_fonts(_db: &mut cosmic_text::fontdb::Database) {}
 
 #[cfg(target_os = "macos")]
-pub(crate) const DEFAULT_UI_FONT_FAMILY: &str = env!("VIEWKIT_DEFAULT_UI_FONT_FAMILY");
+pub(crate) const DEFAULT_UI_FONT_FAMILY: &str = "sans-serif";
+#[cfg(target_os = "macos")]
+pub(crate) const DEFAULT_MONOSPACE_FONT_FAMILY: &str = "monospace";
 
 #[cfg(target_os = "macos")]
 pub(crate) fn load_platform_fonts(db: &mut cosmic_text::fontdb::Database) {

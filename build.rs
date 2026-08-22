@@ -4,71 +4,22 @@ use std::path::PathBuf;
 
 struct FontCandidate {
     path: PathBuf,
-    family: &'static str,
-}
-
-fn select_font<'a>(candidates: &'a [FontCandidate]) -> Option<&'a FontCandidate> {
-    candidates.iter().find(|candidate| candidate.path.exists())
+    family: String,
 }
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-env-changed=VIEWKIT_UI_FONT_PATH");
+    println!("cargo:rerun-if-env-changed=VIEWKIT_MONOSPACE_FONT_PATH");
+    println!("cargo:rerun-if-env-changed=VIEWKIT_UI_FONT_FAMILY");
+    println!("cargo:rerun-if-env-changed=VIEWKIT_MONOSPACE_FONT_FAMILY");
 
-    let Some(manifest_dir) = env::var_os("CARGO_MANIFEST_DIR") else {
-        panic!("CARGO_MANIFEST_DIR is not set");
-    };
-    let manifest_dir = PathBuf::from(manifest_dir);
-    let repository_fonts = manifest_dir.join("../fonts/out/fonts");
-    let repository_ui_font = repository_fonts.join("InterVariable.ttf");
-    let repository_monospace_font = repository_fonts.join("UDEVGothic-Regular.ttf");
-    println!("cargo:rerun-if-changed={}", repository_ui_font.display());
-    println!(
-        "cargo:rerun-if-changed={}",
-        repository_monospace_font.display()
-    );
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("mochios") {
+        return;
+    }
 
-    let candidates = [
-        FontCandidate {
-            path: repository_ui_font,
-            family: "Inter Variable",
-        },
-        FontCandidate {
-            path: PathBuf::from("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
-            family: "DejaVu Sans",
-        },
-        FontCandidate {
-            path: PathBuf::from("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"),
-            family: "Noto Sans",
-        },
-        FontCandidate {
-            path: PathBuf::from("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"),
-            family: "Liberation Sans",
-        },
-    ];
-
-    let Some(candidate) = select_font(&candidates) else {
-        panic!("no usable font found for ViewKit; run `make fonts` from the mochiOS root");
-    };
-
-    let monospace_candidates = [
-        FontCandidate {
-            path: repository_monospace_font,
-            family: "UDEV Gothic",
-        },
-        FontCandidate {
-            path: PathBuf::from("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"),
-            family: "DejaVu Sans Mono",
-        },
-        FontCandidate {
-            path: PathBuf::from("/usr/share/fonts/truetype/liberation2/LiberationMono-Regular.ttf"),
-            family: "Liberation Mono",
-        },
-        FontCandidate {
-            path: PathBuf::from("/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf"),
-            family: "Liberation Mono",
-        },
-    ];
-    let monospace = select_font(&monospace_candidates).unwrap_or(candidate);
+    let candidate = required_font("VIEWKIT_UI_FONT_PATH", "Inter Variable");
+    let monospace = required_font("VIEWKIT_MONOSPACE_FONT_PATH", "UDEV Gothic");
 
     let Some(out_dir) = env::var_os("OUT_DIR") else {
         panic!("OUT_DIR is not set");
@@ -89,4 +40,23 @@ fn main() {
         "cargo:rustc-env=VIEWKIT_DEFAULT_MONOSPACE_FONT_FAMILY={}",
         monospace.family
     );
+}
+
+fn required_font(path_variable: &str, default_family: &'static str) -> FontCandidate {
+    let Some(path) = env::var_os(path_variable) else {
+        panic!("{path_variable} must point to a font file when building ViewKit for mochiOS");
+    };
+    let candidate = FontCandidate {
+        path: PathBuf::from(path),
+        family: (match path_variable {
+            "VIEWKIT_UI_FONT_PATH" => env::var("VIEWKIT_UI_FONT_FAMILY"),
+            _ => env::var("VIEWKIT_MONOSPACE_FONT_FAMILY"),
+        })
+        .unwrap_or_else(|_| default_family.to_owned()),
+    };
+    println!("cargo:rerun-if-changed={}", candidate.path.display());
+    if !candidate.path.is_file() {
+        panic!("{path_variable} does not point to a readable font file");
+    }
+    candidate
 }

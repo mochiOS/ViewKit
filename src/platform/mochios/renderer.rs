@@ -692,7 +692,7 @@ fn draw_text_command(
             buffer_with_font_system.set_size(Some(width), Some(height));
 
             let attrs = Attrs::new()
-                .family(Family::Name(command.font_family.as_str()))
+                .family(resolve_font_family(command.font_family.as_str()))
                 .weight(Weight(command.weight.clamp(1, 1000)));
 
             buffer_with_font_system.set_text(
@@ -718,7 +718,7 @@ fn draw_text_command(
         let mut buffer = buffer.borrow_with(font_system);
         buffer.set_size(Some(width), Some(height));
         let attrs = Attrs::new()
-            .family(Family::Name(command.font_family.as_str()))
+            .family(resolve_font_family(command.font_family.as_str()))
             .weight(Weight(command.weight.clamp(1, 1000)));
         buffer.set_text(
             command.text.as_str(),

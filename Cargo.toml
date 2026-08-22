@@ -1,6 +1,8 @@
 [package]
 name = "viewkit"
 description = "A UI kit for mochiOS"
+repository = "https://github.com/mochiOS/ViewKit"
+homepage = "https://github.com/mochiOS/ViewKit"
 keywords = ["uikit", "mochios", "viewkit", "ui", "kagami"]
 categories = ["gui"]
 license = "Apache-2.0"
@@ -31,16 +33,16 @@ winit = {
     features = [
         "wayland",
         "wayland-dlopen",
+        "x11",
+        "x11-dl",
         "rwh_06",
     ],
 }
 softbuffer = {
     version = "0.4.8",
     default-features = false,
-    features = ["wayland", "wayland-dlopen"],
+    features = ["wayland", "wayland-dlopen", "x11", "x11-dlopen"],
 }
-
-thiserror = "2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winit = {
@@ -49,7 +51,6 @@ winit = {
     features = ["rwh_06"],
 }
 softbuffer = { version = "0.4.8", default-features = false }
-thiserror = "2"
 
 [target.'cfg(target_os = "mochios")'.dependencies]
 mochi-user-syscall = { git = "https://github.com/mochiOS/syscalls", package = "mochi-user-syscall" }
@@ -58,6 +59,9 @@ mochios-viewkit-gpu-protocol = { git = "https://github.com/mochiOS/syscalls", pa
 [lib]
 name = "viewkit"
 crate-type = ["cdylib", "rlib"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("mochios"))'] }
 
 [[example]]
 name = "button"

@@ -1,14 +1,26 @@
 //! ViewKitで使用するフォントシステムを定義
 
-pub(crate) use crate::platform::{DEFAULT_UI_FONT_FAMILY, load_platform_fonts};
-use cosmic_text::{FontSystem, fontdb};
+pub(crate) use crate::platform::{
+    DEFAULT_MONOSPACE_FONT_FAMILY, DEFAULT_UI_FONT_FAMILY, load_platform_fonts,
+};
+#[cfg(target_os = "mochios")]
+use cosmic_text::fontdb;
+use cosmic_text::{Family, FontSystem};
 
-pub(crate) const DEFAULT_MONOSPACE_FONT_FAMILY: &str =
-    env!("VIEWKIT_DEFAULT_MONOSPACE_FONT_FAMILY");
+#[cfg(target_os = "mochios")]
 const DEFAULT_UI_FONT_BYTES: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/default_ui_font.ttf"));
+#[cfg(target_os = "mochios")]
 const DEFAULT_MONOSPACE_FONT_BYTES: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/default_monospace_font.ttf"));
+
+pub(crate) fn resolve_font_family(name: &str) -> Family<'_> {
+    match name {
+        "sans-serif" => Family::SansSerif,
+        "monospace" => Family::Monospace,
+        _ => Family::Name(name),
+    }
+}
 
 #[cfg(target_os = "mochios")]
 pub(crate) fn create_font_system() -> FontSystem {
@@ -25,20 +37,6 @@ pub(crate) fn create_font_system() -> FontSystem {
 #[cfg(not(target_os = "mochios"))]
 pub(crate) fn create_font_system() -> FontSystem {
     let mut font_system = FontSystem::new();
-    font_system
-        .db_mut()
-        .load_font_data(DEFAULT_UI_FONT_BYTES.to_vec());
-    font_system
-        .db_mut()
-        .load_font_data(DEFAULT_MONOSPACE_FONT_BYTES.to_vec());
     load_platform_fonts(font_system.db_mut());
-
-    font_system
-        .db_mut()
-        .set_sans_serif_family(DEFAULT_UI_FONT_FAMILY);
-    font_system
-        .db_mut()
-        .set_monospace_family(DEFAULT_MONOSPACE_FONT_FAMILY);
-
     font_system
 }
