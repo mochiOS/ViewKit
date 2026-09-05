@@ -1,4 +1,4 @@
-use super::layout::valid_scale_factor;
+use super::renderer::valid_scale_factor;
 use super::*;
 use crate::gpu_clip::{ClipRegion, ClipShape, ClipVertex, clip_polygon, premultiplied_color};
 use cosmic_text::{CacheKey, SwashContent, SwashImage};
