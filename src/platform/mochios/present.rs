@@ -1,7 +1,14 @@
 use super::*;
 
 use super::connection::{ipc_call_raw, put_u32_raw, put_u64_raw, status_from_raw, zero_raw};
-use super::renderer::valid_scale_factor;
+use super::layout::valid_scale_factor;
+
+pub(super) struct PhysicalDirtyRect {
+    pub(super) x: usize,
+    pub(super) y: usize,
+    pub(super) width: usize,
+    pub(super) height: usize,
+}
 
 pub(super) fn physical_dirty_rect(viewport: Viewport, dirty_bounds: Rect) -> PhysicalDirtyRect {
     let viewport_bounds = viewport.logical_bounds();

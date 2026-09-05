@@ -7,10 +7,7 @@ use cosmic_text::{
     Attrs, Buffer, Color as CosmicColor, FontSystem, Metrics, Shaping, SwashCache, Weight,
 };
 use mochi_user_syscall as syscall;
-use tiny_skia::{
-    BlendMode, FillRule, FilterQuality, Mask, Paint, Path, PathBuilder, Pixmap, PixmapPaint,
-    Rect as SkiaRect, Stroke, Transform,
-};
+use tiny_skia::{Pixmap, Transform};
 
 use crate::draw_command::{
     DisplayList, DrawCommand, ImageCommand, ImageSampling, SvgCommand, TextCommand,
@@ -29,20 +26,19 @@ use crate::theme::Color;
 mod buffer;
 mod connection;
 mod gpu_renderer;
+mod layout;
 mod present;
-mod renderer;
 mod surface;
 mod window;
 
-use buffer::{PhysicalDirtyRect, SharedBuffer};
+use buffer::SharedBuffer;
 use connection::*;
 use gpu_renderer::GpuSceneRenderer;
+use layout::TextLayoutKey;
 use present::damage_token_request;
-pub use renderer::render_offscreen_xrgb;
-use renderer::{TextLayoutKey, render_display_list};
 use surface::{
-    CompositorSurface, attach_buffer, attach_gpu_scene, renderer_caps, set_cursor_image,
-    set_cursor_position, simple_token_request,
+    CompositorSurface, attach_gpu_scene, renderer_caps, set_cursor_image, set_cursor_position,
+    simple_token_request,
 };
 use window::{MochiOsWindow, checked_surface_size};
 
@@ -66,8 +62,6 @@ const ROLE_TOPLEVEL: u32 = 1;
 const ROLE_BACKGROUND: u32 = 3;
 const ROLE_PANEL: u32 = 4;
 const ROLE_SECURE_OVERLAY: u32 = 5;
-const PIXEL_FORMAT_XRGB8888: u32 = 1;
-const PIXEL_FORMAT_ARGB8888_PREMULTIPLIED: u32 = 2;
 const PIXEL_FORMAT_GPU_SCENE: u32 = 3;
 const RENDERER_CAP_GPU_SCENE: u32 = 1;
 const PAGE_SIZE: usize = 4096;
