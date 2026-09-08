@@ -878,29 +878,29 @@ impl GpuSceneRenderer {
         colors: [Color; 3],
         viewport: Viewport,
     ) {
-        let mut polygon = positions
-            .into_iter()
-            .zip(uv)
-            .zip(colors)
-            .map(|((position, uv), color)| ClipVertex {
-                position,
-                uv,
-                color: premultiplied_color(color),
-            })
-            .collect::<Vec<_>>();
+        let triangle: [_; 3] = core::array::from_fn(|index| ClipVertex {
+            position: positions[index],
+            uv: uv[index],
+            color: premultiplied_color(colors[index]),
+        });
         let Some(clip) = self.clips.last() else {
             return;
         };
-        if !clip
+        if clip
             .shapes
             .iter()
-            .all(|shape| polygon.iter().all(|vertex| shape.contains(vertex.position)))
+            .all(|shape| triangle.iter().all(|vertex| shape.contains(vertex.position)))
         {
-            for shape in &clip.shapes {
-                polygon = clip_polygon(polygon, shape.polygon());
-                if polygon.len() < 3 {
-                    return;
-                }
+            for vertex in triangle {
+                self.push_clipped_vertex(vertex, viewport);
+            }
+            return;
+        }
+        let mut polygon = triangle.to_vec();
+        for shape in &clip.shapes {
+            polygon = clip_polygon(polygon, shape.polygon());
+            if polygon.len() < 3 {
+                return;
             }
         }
         for index in 1..polygon.len() - 1 {

@@ -63,25 +63,27 @@ pub(crate) fn clip_polygon(mut subject: Vec<ClipVertex>, clip: Vec<(f32, f32)>) 
         return Vec::new();
     }
     let clockwise = polygon_area(&clip) >= 0.0;
+    let mut scratch = Vec::new();
     for index in 0..clip.len() {
         let start = clip[index];
         let end = clip[(index + 1) % clip.len()];
-        let input = core::mem::take(&mut subject);
-        let Some(mut previous) = input.last().copied() else {
-            return Vec::new();
+        let Some(mut previous) = subject.last().copied() else {
+            return subject;
         };
+        scratch.clear();
         let mut previous_inside = edge_contains(start, end, previous.position, clockwise);
-        for current in input {
+        for current in subject.iter().copied() {
             let current_inside = edge_contains(start, end, current.position, clockwise);
             if current_inside != previous_inside {
-                subject.push(intersect_edge(previous, current, start, end));
+                scratch.push(intersect_edge(previous, current, start, end));
             }
             if current_inside {
-                subject.push(current);
+                scratch.push(current);
             }
             previous = current;
             previous_inside = current_inside;
         }
+        core::mem::swap(&mut subject, &mut scratch);
         if subject.is_empty() {
             return subject;
         }
