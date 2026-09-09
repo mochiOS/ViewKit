@@ -9,8 +9,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use super::{
-    Button, ButtonInteractionState, ButtonStyle, HStack, Icon, IconName, Padding, Text, VStack,
-    ZStackAlignment,
+    Avatar, Button, ButtonInteractionState, ButtonStyle, Ellipse, EllipseColor, HStack, Icon,
+    IconName, Padding, Text, VStack, ZStackAlignment,
 };
 
 pub struct ListRow {
@@ -24,6 +24,8 @@ pub struct ListRow {
     interaction: ButtonInteractionState,
     on_select: Option<Rc<RefCell<Box<dyn FnMut()>>>>,
     icon: Option<IconName>,
+    leading_avatar: Option<String>,
+    status_marker: bool,
 }
 
 impl ListRow {
@@ -39,6 +41,8 @@ impl ListRow {
             interaction: ButtonInteractionState::new(),
             on_select: None,
             icon: None,
+            leading_avatar: None,
+            status_marker: false,
         }
     }
 
@@ -54,6 +58,18 @@ impl ListRow {
 
     pub fn icon(mut self, icon: IconName) -> Self {
         self.icon = Some(icon);
+        self.leading_avatar = None;
+        self
+    }
+
+    pub fn leading_avatar(mut self, initials: impl Into<String>) -> Self {
+        self.leading_avatar = Some(initials.into());
+        self.icon = None;
+        self
+    }
+
+    pub fn status_marker(mut self, visible: bool) -> Self {
+        self.status_marker = visible;
         self
     }
 
@@ -105,7 +121,9 @@ impl ListRow {
             .alignment(StackAlignment::Center)
             .gap(StackGap::Small);
 
-        if let Some(icon) = self.icon {
+        if let Some(initials) = self.leading_avatar.as_ref() {
+            row = row.child(Avatar::new(initials.clone()).frame(32.0, 32.0));
+        } else if let Some(icon) = self.icon {
             row = row.child(
                 Icon::new(icon)
                     .size(14.0)
@@ -122,6 +140,14 @@ impl ListRow {
                     .font_size(11.0)
                     .line_height(16.0)
                     .color(theme.colors.text_secondary),
+            );
+        }
+
+        if self.status_marker {
+            row = row.child(
+                Ellipse::new()
+                    .color(EllipseColor::Custom(theme.colors.accent))
+                    .frame(8.0, 8.0),
             );
         }
 
@@ -175,18 +201,7 @@ impl View for ListRow {
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
-        let result = self
-            .button(context.theme)
-            .handle_event(bounds, event, context);
-
-        if self.interaction.take_clicked() {
-            if let Some(callback) = self.on_select.as_ref() {
-                callback.borrow_mut();
-            }
-
-            return EventResult::Consumed;
-        }
-
-        result
+        self.button(context.theme)
+            .handle_event(bounds, event, context)
     }
 }

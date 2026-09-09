@@ -24,10 +24,11 @@ impl ComponentLab {
         let selected = self.selected_conversation.get() == index;
         let selected_conversation = self.selected_conversation.clone();
 
-        ConversationRow::new(initials, name)
-            .preview(preview)
-            .time(time)
-            .unread(unread)
+        ListRow::new(name)
+            .subtitle(preview)
+            .leading_avatar(initials)
+            .trailing(time)
+            .status_marker(unread)
             .selected(selected)
             .on_select(move || selected_conversation.set(index))
             .height(64.0)
