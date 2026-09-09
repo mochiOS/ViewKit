@@ -3,12 +3,11 @@ use crate::geometry::{Rect, Size};
 use crate::layout::{StackAlignment, StackGap, ViewExt};
 use crate::state::Binding;
 use crate::theme::{Color, CornerRadius, ShadowStyle, Theme};
-use crate::typography::TextAlignment;
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 use super::{
-    BorderStyle, Button, ButtonInteractionState, ButtonStyle, HStack, Padding, Rectangle,
-    RectangleColor, Text, ZStackAlignment,
+    BorderStyle, Button, ButtonInteractionState, ButtonStyle, HStack, Icon, IconName, Padding,
+    Rectangle, RectangleColor, Text, ZStackAlignment,
 };
 
 pub struct Checkbox {
@@ -53,21 +52,15 @@ impl Checkbox {
                     checked,
                     enabled: self.enabled,
                 }
-                .frame(12.0, 12.0),
+                .frame(theme.layout.checkbox_size, theme.layout.checkbox_size),
             );
 
         if let Some(label) = self.label.as_ref() {
-            content = content.child(
-                Text::new(label.clone())
-                    .font_size(13.0)
-                    .line_height(18.0)
-                    .weight(500)
-                    .color(if self.enabled {
-                        theme.colors.text_primary
-                    } else {
-                        theme.colors.text_disabled
-                    }),
-            );
+            content = content.child(Text::label(label.clone()).color(if self.enabled {
+                theme.colors.text_primary
+            } else {
+                theme.colors.text_disabled
+            }));
         }
 
         let checked = self.checked.clone();
@@ -84,7 +77,7 @@ impl Checkbox {
             .shadow(ShadowStyle::None)
             .alignment(ZStackAlignment::Leading)
             .enabled(self.enabled)
-            .content(Padding::symmetric(4.0, 4.0).content(content))
+            .content(Padding::all(theme.spacing.extra_small).content(content))
             .on_click(move || {
                 checked.set(!checked.get());
             })
@@ -117,8 +110,9 @@ struct CheckboxMark {
 }
 
 impl View for CheckboxMark {
-    fn measure(&self, constraints: Constraints, _context: &mut MeasureContext<'_>) -> Size {
-        constraints.constrain(Size::new(12.0, 12.0))
+    fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
+        let size = context.theme.layout.checkbox_size;
+        constraints.constrain(Size::new(size, size))
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
@@ -131,15 +125,11 @@ impl View for CheckboxMark {
 
             Rectangle::new()
                 .color(RectangleColor::Custom(color))
-                .radius(CornerRadius::Custom(4.0))
+                .radius(CornerRadius::Custom(context.theme.layout.checkbox_radius))
                 .paint(bounds, context);
 
-            // TODO: SVGとかにする
-            Text::new("✓")
-                .font_size(9.0)
-                .line_height(12.0)
-                .weight(700)
-                .alignment(TextAlignment::Center)
+            Icon::new(IconName::Check)
+                .size(context.theme.layout.checkbox_glyph_size)
                 .color(Color::WHITE)
                 .paint(bounds, context);
         } else {
@@ -151,7 +141,7 @@ impl View for CheckboxMark {
 
             Rectangle::new()
                 .color(RectangleColor::Custom(context.theme.colors.surface_muted))
-                .radius(CornerRadius::Custom(4.0))
+                .radius(CornerRadius::Custom(context.theme.layout.checkbox_radius))
                 .border(BorderStyle::custom(border, 1.0))
                 .paint(bounds, context);
         }

@@ -5,6 +5,12 @@ const SETTINGS_PATH: &str = "/var/config/appearance/settings.conf";
 
 const DEFAULT_FONT_SIZE: f32 = 13.0;
 
+#[cfg(target_os = "mochios")]
+const DEFAULT_ACCENT: usize = 0;
+
+#[cfg(not(target_os = "mochios"))]
+const DEFAULT_ACCENT: usize = 6;
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct AppearanceSettings {
     appearance: usize,
@@ -18,7 +24,7 @@ impl Default for AppearanceSettings {
     fn default() -> Self {
         Self {
             appearance: 2,
-            accent: 0,
+            accent: DEFAULT_ACCENT,
             wallpaper: String::from("/libraries/wallpapers/default.png"),
             ui_scale: 1.0,
             font_size: DEFAULT_FONT_SIZE,
@@ -49,7 +55,7 @@ impl AppearanceSettings {
             };
             match key.trim() {
                 "appearance" => settings.appearance = parse_usize(value, 2, 2),
-                "accent" => settings.accent = parse_usize(value, 0, 5),
+                "accent" => settings.accent = parse_usize(value, DEFAULT_ACCENT, 5),
                 "wallpaper" => settings.wallpaper = value.trim().chars().take(256).collect(),
                 "ui_scale" => settings.ui_scale = parse_f32(value, 1.0, 0.75, 2.0),
                 "font_size" => settings.font_size = parse_f32(value, DEFAULT_FONT_SIZE, 10.0, 24.0),
@@ -65,7 +71,7 @@ impl AppearanceSettings {
         } else {
             Theme::LIGHT
         };
-        theme.with_accent(accent_color(self.accent))
+        accent_color(self.accent).map_or(theme, |accent| theme.with_accent(accent))
     }
 
     pub(crate) fn ui_scale(&self) -> f64 {
@@ -93,14 +99,15 @@ pub fn notify_changed() -> bool {
     }
 }
 
-fn accent_color(accent: usize) -> Color {
+fn accent_color(accent: usize) -> Option<Color> {
     match accent {
-        1 => Color::from_rgb_hex(0xaf52de),
-        2 => Color::from_rgb_hex(0xff2d55),
-        3 => Color::from_rgb_hex(0xff3b30),
-        4 => Color::from_rgb_hex(0x34c759),
-        5 => Color::from_rgb_hex(0x6e6e73),
-        _ => Color::from_rgb_hex(0x0a84ff),
+        0 => Some(Color::from_rgb_hex(0x0a84ff)),
+        1 => Some(Color::from_rgb_hex(0xaf52de)),
+        2 => Some(Color::from_rgb_hex(0xff2d55)),
+        3 => Some(Color::from_rgb_hex(0xff3b30)),
+        4 => Some(Color::from_rgb_hex(0x34c759)),
+        5 => Some(Color::from_rgb_hex(0x6e6e73)),
+        _ => None,
     }
 }
 
@@ -133,7 +140,10 @@ mod tests {
             "appearance=1\naccent=4\nwallpaper=/wall.png\nui_scale=1.5\nfont_size=18\n",
         );
 
-        assert_eq!(settings.theme(), Theme::DARK.with_accent(accent_color(4)));
+        assert_eq!(
+            settings.theme(),
+            Theme::DARK.with_accent(accent_color(4).unwrap())
+        );
         assert_eq!(settings.wallpaper, "/wall.png");
         assert_eq!(settings.ui_scale(), 1.5);
         assert_eq!(settings.font_scale(), 18.0 / DEFAULT_FONT_SIZE);
@@ -144,7 +154,7 @@ mod tests {
         let settings =
             AppearanceSettings::parse("appearance=9\naccent=invalid\nui_scale=8\nfont_size=2\n");
 
-        assert_eq!(settings.theme(), Theme::LIGHT.with_accent(accent_color(0)));
+        assert_eq!(settings.theme(), Theme::LIGHT);
         assert_eq!(settings.ui_scale(), 2.0);
         assert_eq!(settings.font_scale(), 10.0 / DEFAULT_FONT_SIZE);
     }

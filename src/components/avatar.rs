@@ -1,6 +1,6 @@
 use crate::geometry::{Rect, Size};
 use crate::theme::Color;
-use crate::typography::TextAlignment;
+use crate::typography::{TextAlignment, TextRole};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 use super::{Ellipse, EllipseColor, Text};
@@ -14,31 +14,17 @@ pub enum AvatarSize {
 }
 
 impl AvatarSize {
-    const fn length(self) -> f32 {
+    fn length(self, context: &MeasureContext<'_>) -> f32 {
         match self {
-            Self::Small => 24.0,
-            Self::Medium => 32.0,
+            Self::Small => context.theme.layout.avatar_small_size,
+            Self::Medium => context.theme.layout.avatar_size,
         }
     }
 
-    const fn font_size(self) -> f32 {
+    const fn text_role(self) -> TextRole {
         match self {
-            Self::Small => 12.0,
-            Self::Medium => 13.0,
-        }
-    }
-
-    const fn line_height(self) -> f32 {
-        match self {
-            Self::Small => 16.0,
-            Self::Medium => 18.0,
-        }
-    }
-
-    const fn weight(self) -> u16 {
-        match self {
-            Self::Small => 400,
-            Self::Medium => 500,
+            Self::Small => TextRole::Caption,
+            Self::Medium => TextRole::Label,
         }
     }
 }
@@ -77,8 +63,8 @@ impl Avatar {
 }
 
 impl View for Avatar {
-    fn measure(&self, constraints: Constraints, _context: &mut MeasureContext<'_>) -> Size {
-        let length = self.size.length();
+    fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
+        let length = self.size.length(context);
         constraints.constrain(Size::new(length, length))
     }
 
@@ -94,7 +80,11 @@ impl View for Avatar {
             ))
             .paint(bounds, context);
 
-        let line_height = self.size.line_height().min(bounds.size.height);
+        let line_height = context
+            .typography
+            .style(self.size.text_role())
+            .line_height
+            .min(bounds.size.height);
         let text_bounds = Rect::new(
             bounds.origin.x,
             bounds.origin.y + (bounds.size.height - line_height) / 2.0,
@@ -102,10 +92,7 @@ impl View for Avatar {
             line_height,
         );
 
-        Text::new(self.initials.clone())
-            .font_size(self.size.font_size())
-            .line_height(self.size.line_height())
-            .weight(self.size.weight())
+        Text::styled(self.initials.clone(), self.size.text_role())
             .alignment(TextAlignment::Center)
             .color(
                 self.foreground

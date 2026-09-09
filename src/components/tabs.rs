@@ -91,13 +91,8 @@ impl Tabs {
             .alignment(ZStackAlignment::Center)
             .enabled(enabled)
             .content(
-                Padding::symmetric(8.0, 2.0).content(
-                    Text::new(item.label.clone())
-                        .font_size(13.0)
-                        .line_height(18.0)
-                        .weight(500)
-                        .color(foreground),
-                ),
+                Padding::symmetric(theme.spacing.small, theme.spacing.micro)
+                    .content(Text::label(item.label.clone()).color(foreground)),
             )
             .on_click(move || selection.set(value))
     }
@@ -107,11 +102,12 @@ impl View for Tabs {
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
         HStack::new()
             .gap(StackGap::Small)
-            .children(
-                self.items
-                    .iter()
-                    .map(|item| self.item_button(item, context.theme).frame(72.0, 24.0)),
-            )
+            .children(self.items.iter().map(|item| {
+                self.item_button(item, context.theme).frame(
+                    context.theme.layout.tab_width,
+                    context.theme.layout.compact_control_height,
+                )
+            }))
             .measure(constraints, context)
     }
 
@@ -119,11 +115,12 @@ impl View for Tabs {
         HStack::new()
             .alignment(StackAlignment::Center)
             .gap(StackGap::Small)
-            .children(
-                self.items
-                    .iter()
-                    .map(|item| self.item_button(item, context.theme).frame(72.0, 24.0)),
-            )
+            .children(self.items.iter().map(|item| {
+                self.item_button(item, context.theme).frame(
+                    context.theme.layout.tab_width,
+                    context.theme.layout.compact_control_height,
+                )
+            }))
             .paint(bounds, context);
     }
 
@@ -136,11 +133,12 @@ impl View for Tabs {
         HStack::new()
             .alignment(StackAlignment::Center)
             .gap(StackGap::Small)
-            .children(
-                self.items
-                    .iter()
-                    .map(|item| self.item_button(item, context.theme).frame(72.0, 24.0)),
-            )
+            .children(self.items.iter().map(|item| {
+                self.item_button(item, context.theme).frame(
+                    context.theme.layout.tab_width,
+                    context.theme.layout.compact_control_height,
+                )
+            }))
             .handle_event(bounds, event, context)
     }
 }

@@ -23,7 +23,7 @@ impl MessageBubble {
         Self {
             text: text.into(),
             direction: MessageDirection::Received,
-            maximum_width: 360.0,
+            maximum_width: crate::theme::LayoutTokens::DEFAULT.message_max_width,
         }
     }
 
@@ -55,8 +55,6 @@ impl MessageBubble {
 
     fn text_view(&self, color: Color) -> Text {
         Text::new(self.text.clone())
-            .font_size(15.0)
-            .line_height(22.0)
             .alignment(TextAlignment::Start)
             .color(color)
     }
@@ -64,12 +62,21 @@ impl MessageBubble {
 
 impl View for MessageBubble {
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
-        let max_text_width = (self.maximum_width - 24.0).max(0.0);
+        let horizontal = context.theme.spacing.medium;
+        let vertical = context.theme.spacing.small;
+        let max_text_width = (self.maximum_width - horizontal * 2.0).max(0.0);
         let measured = self
             .text_view(context.theme.colors.text_primary)
-            .measure_text(context.text_measurer, Some(max_text_width));
+            .measure_text_with_typography(
+                context.text_measurer,
+                context.typography,
+                Some(max_text_width),
+            );
 
-        constraints.constrain(Size::new(measured.width + 24.0, measured.height + 16.0))
+        constraints.constrain(Size::new(
+            measured.width + horizontal * 2.0,
+            measured.height + vertical * 2.0,
+        ))
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
@@ -82,8 +89,50 @@ impl View for MessageBubble {
             .radius(CornerRadius::ExtraLarge)
             .paint(bounds, context);
 
-        Padding::only(8.0, 12.0, 8.0, 12.0)
+        Padding::symmetric(context.theme.spacing.medium, context.theme.spacing.small)
             .content(self.text_view(self.foreground(context)))
             .paint(bounds, context);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::theme::Theme;
+    use crate::typography::{TextMeasurer, Typography};
+
+    fn measure(text: &str) -> Size {
+        let mut text_measurer = TextMeasurer::new();
+        let mut context = MeasureContext {
+            theme: &Theme::DEFAULT,
+            typography: &Typography::DEFAULT,
+            text_measurer: &mut text_measurer,
+        };
+        MessageBubble::new(text).measure(
+            Constraints::loose(Size::new(f32::INFINITY, f32::INFINITY)),
+            &mut context,
+        )
+    }
+
+    #[test]
+    fn chat_reference_bubbles_use_intrinsic_figma_dimensions() {
+        let measured = [
+            measure("Hey! Are we still on for this afternoon?"),
+            measure(
+                "We've encountered a problem with the project\nand would like to discuss it with someone.",
+            ),
+            measure("Yes — 3:00 works for me."),
+            measure("Let’s meet in the studio.\nI’ll have the notes ready."),
+            measure("Perfect. See you then!"),
+        ];
+        let expected = [
+            Size::new(295.0, 38.0),
+            Size::new(351.0, 60.0),
+            Size::new(206.0, 38.0),
+            Size::new(196.0, 60.0),
+            Size::new(182.0, 38.0),
+        ];
+
+        assert_eq!(measured, expected);
     }
 }

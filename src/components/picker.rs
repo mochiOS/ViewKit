@@ -49,15 +49,12 @@ impl Picker {
             .alignment(ZStackAlignment::Leading)
             .enabled(self.enabled)
             .content(
-                Padding::symmetric(8.0, 2.0).content(
+                Padding::symmetric(theme.spacing.small, theme.spacing.micro).content(
                     HStack::new()
                         .alignment(StackAlignment::Center)
                         .gap(StackGap::Small)
                         .child(
-                            Text::new(self.label.clone())
-                                .font_size(13.0)
-                                .line_height(18.0)
-                                .weight(500)
+                            Text::label(self.label.clone())
                                 .color(foreground)
                                 .layout()
                                 .flex_grow(1.0),
@@ -65,9 +62,12 @@ impl Picker {
                         .child(Spacer::new())
                         .child(
                             Icon::new(IconName::ChevronDown)
-                                .size(12.0)
+                                .size(theme.layout.compact_icon_size)
                                 .color(theme.colors.text_secondary)
-                                .frame(12.0, 12.0),
+                                .frame(
+                                    theme.layout.compact_icon_size,
+                                    theme.layout.compact_icon_size,
+                                ),
                         ),
                 ),
             )
@@ -77,7 +77,13 @@ impl Picker {
 impl View for Picker {
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
         constraints.constrain(self.button(context.theme).measure(
-            Constraints::new(Size::new(120.0, 24.0), Size::new(f32::INFINITY, 24.0)),
+            Constraints::new(
+                Size::new(
+                    context.theme.layout.control_min_width,
+                    context.theme.layout.compact_control_height,
+                ),
+                Size::new(f32::INFINITY, context.theme.layout.compact_control_height),
+            ),
             context,
         ))
     }

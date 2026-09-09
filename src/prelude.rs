@@ -20,5 +20,5 @@ pub use crate::runtime::{ViewKitError, request_exit, run};
 pub use crate::state::{Binding, State};
 pub use crate::svg::{SvgData, SvgError};
 pub use crate::theme::{Color, CornerRadius, ShadowStyle, Theme};
-pub use crate::typography::TextAlignment;
+pub use crate::typography::{TextAlignment, TextRole};
 pub use crate::view::View;

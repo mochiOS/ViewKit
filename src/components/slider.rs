@@ -11,15 +11,6 @@ use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 use super::{Ellipse, EllipseColor, Rectangle, RectangleColor, Text};
 
-const DEFAULT_WIDTH: f32 = 160.0;
-const SLIDER_HEIGHT: f32 = 24.0;
-const LABEL_HEIGHT: f32 = 18.0;
-const LABEL_SPACING: f32 = 4.0;
-const TRACK_HEIGHT: f32 = 4.0;
-const DRAGGING_KNOB_SIZE: f32 = 12.0;
-const HIT_PADDING: f32 = 8.0;
-const KNOB_SIZE: f32 = 12.0;
-
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct SliderInteractionInner {
     hovered: bool,
@@ -193,57 +184,95 @@ impl Slider {
         ((self.current_value() - self.minimum) / range).clamp(0.0, 1.0)
     }
 
-    fn slider_bounds(&self, bounds: Rect) -> Rect {
+    fn slider_bounds(&self, bounds: Rect, label_height: f32, label_spacing: f32) -> Rect {
         if self.label.is_some() {
             Rect::new(
                 bounds.origin.x,
-                bounds.origin.y + LABEL_HEIGHT + LABEL_SPACING,
+                bounds.origin.y + label_height + label_spacing,
                 bounds.size.width,
-                (bounds.size.height - LABEL_HEIGHT - LABEL_SPACING).max(0.0),
+                (bounds.size.height - label_height - label_spacing).max(0.0),
             )
         } else {
             bounds
         }
     }
 
-    fn track_bounds(&self, bounds: Rect) -> Rect {
-        let knob_radius = KNOB_SIZE / 2.0;
+    fn track_bounds(&self, bounds: Rect, knob_size: f32, track_height: f32) -> Rect {
+        let knob_radius = knob_size / 2.0;
 
-        let width = (bounds.size.width - KNOB_SIZE).max(0.0);
+        let width = (bounds.size.width - knob_size).max(0.0);
 
         Rect::new(
             bounds.origin.x + knob_radius,
-            bounds.origin.y + (bounds.size.height - TRACK_HEIGHT) / 2.0,
+            bounds.origin.y + (bounds.size.height - track_height) / 2.0,
             width,
-            TRACK_HEIGHT,
+            track_height,
         )
     }
 
-    fn hit_bounds(&self, bounds: Rect) -> Rect {
-        self.slider_bounds(bounds).expanded(HIT_PADDING)
+    fn hit_bounds(
+        &self,
+        bounds: Rect,
+        label_height: f32,
+        label_spacing: f32,
+        padding: f32,
+    ) -> Rect {
+        self.slider_bounds(bounds, label_height, label_spacing)
+            .expanded(padding)
     }
 
-    fn knob_center_x(&self, bounds: Rect) -> f32 {
-        let track = self.track_bounds(self.slider_bounds(bounds));
+    fn knob_center_x(
+        &self,
+        bounds: Rect,
+        label_height: f32,
+        label_spacing: f32,
+        knob_size: f32,
+        track_height: f32,
+    ) -> f32 {
+        let track = self.track_bounds(
+            self.slider_bounds(bounds, label_height, label_spacing),
+            knob_size,
+            track_height,
+        );
 
         track.origin.x + track.size.width * self.progress()
     }
 
-    fn knob_bounds(&self, bounds: Rect) -> Rect {
-        let slider_bounds = self.slider_bounds(bounds);
+    fn knob_bounds(
+        &self,
+        bounds: Rect,
+        label_height: f32,
+        label_spacing: f32,
+        knob_size: f32,
+        track_height: f32,
+    ) -> Rect {
+        let slider_bounds = self.slider_bounds(bounds, label_height, label_spacing);
 
-        let center_x = self.knob_center_x(bounds);
+        let center_x =
+            self.knob_center_x(bounds, label_height, label_spacing, knob_size, track_height);
 
         Rect::new(
-            center_x - KNOB_SIZE / 2.0,
-            slider_bounds.origin.y + (slider_bounds.size.height - KNOB_SIZE) / 2.0,
-            KNOB_SIZE,
-            KNOB_SIZE,
+            center_x - knob_size / 2.0,
+            slider_bounds.origin.y + (slider_bounds.size.height - knob_size) / 2.0,
+            knob_size,
+            knob_size,
         )
     }
 
-    fn value_from_pointer(&self, bounds: Rect, pointer_x: f32) -> f32 {
-        let track = self.track_bounds(self.slider_bounds(bounds));
+    fn value_from_pointer(
+        &self,
+        bounds: Rect,
+        pointer_x: f32,
+        label_height: f32,
+        label_spacing: f32,
+        knob_size: f32,
+        track_height: f32,
+    ) -> f32 {
+        let track = self.track_bounds(
+            self.slider_bounds(bounds, label_height, label_spacing),
+            knob_size,
+            track_height,
+        );
 
         if track.size.width <= 0.0 {
             return self.minimum;
@@ -254,8 +283,24 @@ impl Slider {
         self.sanitize_value(self.minimum + (self.maximum - self.minimum) * progress)
     }
 
-    fn update_from_pointer(&self, bounds: Rect, pointer_x: f32, drag_offset_x: f32) -> bool {
-        let value = self.value_from_pointer(bounds, pointer_x - drag_offset_x);
+    fn update_from_pointer(
+        &self,
+        bounds: Rect,
+        pointer_x: f32,
+        drag_offset_x: f32,
+        label_height: f32,
+        label_spacing: f32,
+        knob_size: f32,
+        track_height: f32,
+    ) -> bool {
+        let value = self.value_from_pointer(
+            bounds,
+            pointer_x - drag_offset_x,
+            label_height,
+            label_spacing,
+            knob_size,
+            track_height,
+        );
 
         let current = self.current_value();
 
@@ -270,14 +315,17 @@ impl Slider {
 }
 
 impl View for Slider {
-    fn measure(&self, constraints: Constraints, _context: &mut MeasureContext<'_>) -> Size {
+    fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
+        let label_height = context.typography.label.line_height;
+        let label_spacing = context.theme.spacing.extra_small;
+        let slider_height = context.theme.layout.range_control_height;
         let height = if self.label.is_some() {
-            LABEL_HEIGHT + LABEL_SPACING + SLIDER_HEIGHT
+            label_height + label_spacing + slider_height
         } else {
-            SLIDER_HEIGHT
+            slider_height
         };
 
-        constraints.constrain(Size::new(DEFAULT_WIDTH, height))
+        constraints.constrain(Size::new(context.theme.layout.range_control_width, height))
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
@@ -288,10 +336,7 @@ impl View for Slider {
         self.interaction.set_enabled(self.enabled);
 
         if let Some(label) = self.label.as_ref() {
-            Text::new(label.as_str())
-                .font_size(13.0)
-                .line_height(LABEL_HEIGHT)
-                .weight(500)
+            Text::label(label.as_str())
                 .color(if self.enabled {
                     context.theme.colors.text_primary
                 } else {
@@ -302,15 +347,19 @@ impl View for Slider {
                         bounds.origin.x,
                         bounds.origin.y,
                         bounds.size.width,
-                        LABEL_HEIGHT,
+                        context.typography.label.line_height,
                     ),
                     context,
                 );
         }
 
-        let slider_bounds = self.slider_bounds(bounds);
+        let label_height = context.typography.label.line_height;
+        let label_spacing = context.theme.spacing.extra_small;
+        let knob_size = context.theme.layout.range_knob_size;
+        let track_height = context.theme.layout.range_track_height;
+        let slider_bounds = self.slider_bounds(bounds, label_height, label_spacing);
 
-        let track_bounds = self.track_bounds(slider_bounds);
+        let track_bounds = self.track_bounds(slider_bounds, knob_size, track_height);
 
         let progress = self.progress();
 
@@ -361,9 +410,9 @@ impl View for Slider {
         let knob_center_x = track_bounds.origin.x + track_bounds.size.width * progress;
 
         let knob_size = if dragging {
-            DRAGGING_KNOB_SIZE
+            context.theme.layout.range_dragging_knob_size
         } else {
-            KNOB_SIZE
+            knob_size
         };
 
         let knob_bounds = Rect::new(
@@ -419,7 +468,16 @@ impl View for Slider {
             return EventResult::Ignored;
         }
 
-        let hit_bounds = self.hit_bounds(bounds);
+        let label_height = context.typography().label.line_height;
+        let label_spacing = context.theme().spacing.extra_small;
+        let knob_size = context.theme().layout.range_knob_size;
+        let track_height = context.theme().layout.range_track_height;
+        let hit_bounds = self.hit_bounds(
+            bounds,
+            label_height,
+            label_spacing,
+            context.theme().layout.range_hit_padding,
+        );
 
         match event {
             ViewEvent::PointerMoved { position } => {
@@ -436,7 +494,15 @@ impl View for Slider {
                 };
 
                 let value_changed = if dragging {
-                    self.update_from_pointer(bounds, position.x, drag_offset_x)
+                    self.update_from_pointer(
+                        bounds,
+                        position.x,
+                        drag_offset_x,
+                        label_height,
+                        label_spacing,
+                        knob_size,
+                        track_height,
+                    )
                 } else {
                     false
                 };
@@ -460,12 +526,20 @@ impl View for Slider {
                     return EventResult::Ignored;
                 }
 
-                let knob_bounds = self.knob_bounds(bounds);
+                let knob_bounds =
+                    self.knob_bounds(bounds, label_height, label_spacing, knob_size, track_height);
 
                 let pressed_inside_knob = knob_bounds.contains(*position);
 
                 let drag_offset_x = if pressed_inside_knob {
-                    position.x - self.knob_center_x(bounds)
+                    position.x
+                        - self.knob_center_x(
+                            bounds,
+                            label_height,
+                            label_spacing,
+                            knob_size,
+                            track_height,
+                        )
                 } else {
                     0.0
                 };
@@ -479,7 +553,15 @@ impl View for Slider {
                 }
 
                 if !pressed_inside_knob {
-                    self.update_from_pointer(bounds, position.x, 0.0);
+                    self.update_from_pointer(
+                        bounds,
+                        position.x,
+                        0.0,
+                        label_height,
+                        label_spacing,
+                        knob_size,
+                        track_height,
+                    );
                 }
 
                 context.request_redraw_in(bounds.expanded(16.0));
@@ -509,7 +591,15 @@ impl View for Slider {
                     return EventResult::Ignored;
                 }
 
-                self.update_from_pointer(bounds, position.x, drag_offset_x);
+                self.update_from_pointer(
+                    bounds,
+                    position.x,
+                    drag_offset_x,
+                    label_height,
+                    label_spacing,
+                    knob_size,
+                    track_height,
+                );
 
                 self.value.commit();
 

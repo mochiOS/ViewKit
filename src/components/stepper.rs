@@ -65,23 +65,20 @@ impl Stepper {
             .alignment(ZStackAlignment::Center)
             .enabled(self.enabled)
             .content(
-                Padding::symmetric(8.0, 2.0).content(
+                Padding::symmetric(theme.spacing.small, theme.spacing.micro).content(
                     HStack::new()
                         .alignment(StackAlignment::Center)
                         .distribution(StackDistribution::SpaceBetween)
                         .gap(StackGap::Small)
-                        .child(label("−", foreground))
+                        .child(label("−", foreground, theme.layout.stepper_icon_size))
                         .child(
-                            Text::new(self.value.get().to_string())
-                                .font_size(13.0)
-                                .line_height(18.0)
-                                .weight(500)
+                            Text::label(self.value.get().to_string())
                                 .alignment(TextAlignment::Center)
                                 .color(foreground)
                                 .layout()
                                 .flex_grow(1.0),
                         )
-                        .child(label("+", foreground)),
+                        .child(label("+", foreground, theme.layout.stepper_icon_size)),
                 ),
             )
     }
@@ -100,7 +97,16 @@ impl Stepper {
 impl View for Stepper {
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
         constraints.constrain(self.button(context.theme).measure(
-            Constraints::new(Size::new(120.0, 24.0), Size::new(120.0, 24.0)),
+            Constraints::new(
+                Size::new(
+                    context.theme.layout.control_min_width,
+                    context.theme.layout.compact_control_height,
+                ),
+                Size::new(
+                    context.theme.layout.control_min_width,
+                    context.theme.layout.compact_control_height,
+                ),
+            ),
             context,
         ))
     }
@@ -136,12 +142,9 @@ impl View for Stepper {
     }
 }
 
-fn label(text: &'static str, color: Color) -> crate::layout::StackChild {
-    Text::new(text)
-        .font_size(13.0)
-        .line_height(18.0)
-        .weight(500)
+fn label(text: &'static str, color: Color, size: f32) -> crate::layout::StackChild {
+    Text::label(text)
         .alignment(TextAlignment::Center)
         .color(color)
-        .frame(18.0, 18.0)
+        .frame(size, size)
 }

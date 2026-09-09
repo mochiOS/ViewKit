@@ -7,7 +7,7 @@ use crate::theme::Color;
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 use std::sync::OnceLock;
 
-const DEFAULT_ICON_SIZE: f32 = 24.0;
+const DEFAULT_ICON_SIZE: f32 = crate::theme::LayoutTokens::DEFAULT.icon_button_size;
 
 macro_rules! viewkit_svg {
     ($name:literal) => {{
@@ -37,6 +37,7 @@ pub enum IconName {
     ChevronLeft,
     ChevronRight,
     ChevronDown,
+    ArrowUp,
 
     House,
     AppWindow,
@@ -99,6 +100,10 @@ impl IconName {
 
             Self::ChevronDown => {
                 viewkit_svg!("chevron-down")
+            }
+
+            Self::ArrowUp => {
+                viewkit_svg!("arrow-up")
             }
 
             Self::House => {
@@ -170,6 +175,13 @@ impl IconName {
             }
         }
     }
+
+    pub(crate) const fn control_size(self) -> f32 {
+        match self {
+            Self::ArrowUp => 12.0,
+            _ => 14.0,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -223,10 +235,60 @@ impl View for Icon {
     }
 
     fn paint(&self, bounds: crate::geometry::Rect, context: &mut PaintContext<'_>) {
+        let side = self.size.min(bounds.size.width).min(bounds.size.height);
+        let icon_bounds = crate::geometry::Rect::new(
+            bounds.origin.x + (bounds.size.width - side) / 2.0,
+            bounds.origin.y + (bounds.size.height - side) / 2.0,
+            side,
+            side,
+        );
+
         Svg::new(self.name.svg())
             .tint(self.color)
             .opacity(self.opacity)
-            .paint(bounds, context);
+            .paint(icon_bounds, context);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bundled_icons_parse() {
+        let icons = [
+            IconName::Search,
+            IconName::Plus,
+            IconName::Minus,
+            IconName::Check,
+            IconName::X,
+            IconName::Settings,
+            IconName::ChevronLeft,
+            IconName::ChevronRight,
+            IconName::ChevronDown,
+            IconName::ArrowUp,
+            IconName::House,
+            IconName::AppWindow,
+            IconName::Download,
+            IconName::HardDrive,
+            IconName::Folder,
+            IconName::FolderOpen,
+            IconName::FolderPlus,
+            IconName::File,
+            IconName::FileText,
+            IconName::FileImage,
+            IconName::FileArchive,
+            IconName::ExternalLink,
+            IconName::LayoutList,
+            IconName::LayoutGrid,
+            IconName::Columns3,
+            IconName::Eye,
+            IconName::Volume2,
+        ];
+
+        for icon in icons {
+            let _ = icon.svg();
+        }
     }
 }
 

@@ -7,20 +7,24 @@ use crate::font::{DEFAULT_MONOSPACE_FONT_FAMILY, DEFAULT_UI_FONT_FAMILY, resolve
 use crate::geometry::{Rect, Size};
 use crate::runtime::{IntoViewNode, TextNode, ViewNode, ViewNodeContext, ViewNodeKind};
 use crate::theme::{Color, Theme};
-use crate::typography::{TextAlignment, TextMeasurer};
+use crate::typography::{
+    FontFamily, FontWeight, TextAlignment, TextMeasurer, TextRole, Typography,
+};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 pub struct Text {
     value: String,
 
-    font_family: String,
-    font_size: f32,
-    line_height: f32,
-    weight: u16,
+    role: TextRole,
+    font_family: Option<String>,
+    font_size: Option<f32>,
+    line_height: Option<f32>,
+    weight: Option<u16>,
 
     alignment: TextAlignment,
 
     color: Option<Color>,
+    tone: TextTone,
     cache_layout: bool,
 }
 
@@ -29,15 +33,16 @@ impl Text {
         Self {
             value: value.into(),
 
-            font_family: DEFAULT_UI_FONT_FAMILY.to_owned(),
-
-            font_size: 16.0,
-            line_height: 24.0,
-            weight: 400,
+            role: TextRole::Body,
+            font_family: None,
+            font_size: None,
+            line_height: None,
+            weight: None,
 
             alignment: TextAlignment::Start,
 
             color: None,
+            tone: TextTone::Primary,
             cache_layout: true,
         }
     }
@@ -46,31 +51,64 @@ impl Text {
         &self.value
     }
 
+    pub fn styled(value: impl Into<String>, role: TextRole) -> Self {
+        Self::new(value).style(role)
+    }
+
+    pub fn body(value: impl Into<String>) -> Self {
+        Self::styled(value, TextRole::Body)
+    }
+
+    pub fn body_emphasized(value: impl Into<String>) -> Self {
+        Self::new(value).weight(FontWeight::MEDIUM.0)
+    }
+
+    pub fn label(value: impl Into<String>) -> Self {
+        Self::styled(value, TextRole::Label)
+    }
+
+    pub fn caption(value: impl Into<String>) -> Self {
+        Self::styled(value, TextRole::Caption)
+    }
+
+    pub fn metadata(value: impl Into<String>) -> Self {
+        Self::caption(value).tone(TextTone::Tertiary)
+    }
+
+    pub fn style(mut self, role: TextRole) -> Self {
+        self.role = role;
+        self
+    }
+
     pub fn font_family(mut self, font_family: impl Into<String>) -> Self {
-        self.font_family = font_family.into();
+        self.font_family = Some(font_family.into());
 
         self
     }
 
     pub fn monospaced(mut self) -> Self {
-        self.font_family = DEFAULT_MONOSPACE_FONT_FAMILY.to_owned();
+        self.font_family = Some(DEFAULT_MONOSPACE_FONT_FAMILY.to_owned());
         self
     }
 
     pub fn font_size(mut self, font_size: f32) -> Self {
-        self.font_size = finite_positive_or(font_size, 16.0);
+        self.font_size = Some(finite_positive_or(font_size, Typography::DEFAULT.body.size));
 
         self
     }
 
     pub fn line_height(mut self, line_height: f32) -> Self {
-        self.line_height = finite_positive_or(line_height, self.font_size);
+        self.line_height = Some(finite_positive_or(
+            line_height,
+            self.font_size
+                .unwrap_or(Typography::DEFAULT.body.line_height),
+        ));
 
         self
     }
 
     pub fn weight(mut self, weight: u16) -> Self {
-        self.weight = weight.clamp(1, 1000);
+        self.weight = Some(weight.clamp(1, 1000));
 
         self
     }
@@ -92,17 +130,32 @@ impl Text {
     }
 
     pub fn measure_text(&self, measurer: &mut TextMeasurer, maximum_width: Option<f32>) -> Size {
+        self.measure_text_with_typography(measurer, &Typography::DEFAULT, maximum_width)
+    }
+
+    pub fn tone(mut self, tone: TextTone) -> Self {
+        self.tone = tone;
+        self
+    }
+
+    pub(crate) fn measure_text_with_typography(
+        &self,
+        measurer: &mut TextMeasurer,
+        typography: &Typography,
+        maximum_width: Option<f32>,
+    ) -> Size {
         if self.value.is_empty() {
             return Size::new(0.0, 0.0);
         }
 
+        let style = self.resolved_style(typography);
         let font_scale = measurer.font_scale();
-        let font_size = resolved_font_size(self.font_size) * font_scale;
-        let line_height = resolved_line_height(font_size, self.line_height * font_scale);
+        let font_size = resolved_font_size(style.size) * font_scale;
+        let line_height = resolved_line_height(font_size, style.line_height * font_scale);
         let metrics = Metrics::new(font_size, line_height);
         let font_system = measurer.font_system_mut();
         let mut buffer = Buffer::new(font_system, metrics);
-        let attrs = self.create_attrs();
+        let attrs = self.create_attrs(typography);
         let maximum_width = normalize_maximum_width(maximum_width);
         let mut buffer = buffer.borrow_with(font_system);
 
@@ -127,7 +180,7 @@ impl Text {
         }
 
         if measured_width <= 0.0 || measured_height <= 0.0 {
-            return self.measure_text_without_font(maximum_width, font_scale);
+            return self.measure_text_without_font(typography, maximum_width, font_scale);
         }
 
         if let Some(maximum_width) = maximum_width {
@@ -144,19 +197,34 @@ impl Text {
         self.measure_text(measurer, None)
     }
 
-    fn create_attrs(&self) -> Attrs<'_> {
-        Attrs::new()
-            .family(resolve_font_family(self.font_family.as_str()))
-            .weight(Weight(self.weight.clamp(1, 1000)))
+    pub(crate) fn measure_unbounded_with_typography(
+        &self,
+        measurer: &mut TextMeasurer,
+        typography: &Typography,
+    ) -> Size {
+        self.measure_text_with_typography(measurer, typography, None)
     }
 
-    fn measure_text_without_font(&self, maximum_width: Option<f32>, font_scale: f32) -> Size {
+    fn create_attrs(&self, typography: &Typography) -> Attrs<'_> {
+        let style = self.resolved_style(typography);
+        Attrs::new()
+            .family(resolve_font_family(self.resolved_family(style.family)))
+            .weight(Weight(style.weight.0.clamp(1, 1000)))
+    }
+
+    fn measure_text_without_font(
+        &self,
+        typography: &Typography,
+        maximum_width: Option<f32>,
+        font_scale: f32,
+    ) -> Size {
         if self.value.is_empty() {
             return Size::new(0.0, 0.0);
         }
 
-        let font_size = resolved_font_size(self.font_size) * font_scale;
-        let line_height = resolved_line_height(font_size, self.line_height * font_scale);
+        let style = self.resolved_style(typography);
+        let font_size = resolved_font_size(style.size) * font_scale;
+        let line_height = resolved_line_height(font_size, style.line_height * font_scale);
         let glyph_width = (font_size * 0.56).max(1.0);
         let max_width = normalize_maximum_width(maximum_width);
         let mut line_count = 0usize;
@@ -179,22 +247,47 @@ impl Text {
             (line_count.max(1) as f32 * line_height).ceil(),
         )
     }
+
+    fn resolved_style(&self, typography: &Typography) -> crate::typography::TextStyle {
+        let mut style = typography.style(self.role);
+        if let Some(size) = self.font_size {
+            style.size = size;
+        }
+        if let Some(line_height) = self.line_height {
+            style.line_height = line_height;
+        }
+        if let Some(weight) = self.weight {
+            style.weight = FontWeight(weight);
+        }
+        style
+    }
+
+    fn resolved_family(&self, family: FontFamily) -> &str {
+        self.font_family.as_deref().unwrap_or(match family {
+            FontFamily::Sans => DEFAULT_UI_FONT_FAMILY,
+            FontFamily::Monospace => DEFAULT_MONOSPACE_FONT_FAMILY,
+        })
+    }
 }
 
 impl IntoViewNode for Text {
     fn into_view_node(self, context: &mut ViewNodeContext) -> ViewNode {
+        let typography = Typography::DEFAULT;
+        let style = self.resolved_style(&typography);
+        let font_family = self.resolved_family(style.family).to_owned();
+
         ViewNode::new(
             context.allocate_node_id(),
             ViewNodeKind::Text(TextNode {
                 content: self.value,
-                font_family: self.font_family,
-                font_size: self.font_size,
-                line_height: self.line_height,
-                weight: self.weight,
+                font_family,
+                font_size: style.size,
+                line_height: style.line_height,
+                weight: style.weight.0,
                 alignment: self.alignment,
                 color: self
                     .color
-                    .unwrap_or_else(|| Theme::current().colors.text_primary),
+                    .unwrap_or_else(|| self.tone.resolve(&Theme::current())),
                 cache_layout: self.cache_layout,
             }),
         )
@@ -209,7 +302,11 @@ impl View for Text {
             None
         };
 
-        let measured = self.measure_text(context.text_measurer, maximum_width);
+        let measured = self.measure_text_with_typography(
+            context.text_measurer,
+            context.typography,
+            maximum_width,
+        );
 
         constraints.constrain(measured)
     }
@@ -219,10 +316,11 @@ impl View for Text {
             return;
         }
 
+        let style = self.resolved_style(context.typography);
         let font_scale = context.text_measurer.font_scale();
-        let font_size = resolved_font_size(self.font_size) * font_scale;
+        let font_size = resolved_font_size(style.size) * font_scale;
 
-        let line_height = resolved_line_height(font_size, self.line_height * font_scale);
+        let line_height = resolved_line_height(font_size, style.line_height * font_scale);
 
         context.display_list.push(DrawCommand::DrawText {
             command: TextCommand {
@@ -231,19 +329,45 @@ impl View for Text {
                 bounds,
                 cache_layout: self.cache_layout,
 
-                font_family: self.font_family.clone(),
+                font_family: self.resolved_family(style.family).to_owned(),
 
                 font_size,
 
                 line_height,
 
-                weight: self.weight.clamp(1, 1000),
+                weight: style.weight.0.clamp(1, 1000),
 
                 alignment: self.alignment,
 
-                color: self.color.unwrap_or(context.theme.colors.text_primary),
+                color: self
+                    .color
+                    .unwrap_or_else(|| self.tone.resolve(context.theme)),
             },
         });
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TextTone {
+    #[default]
+    Primary,
+    Secondary,
+    Tertiary,
+    Disabled,
+    Accent,
+    Destructive,
+}
+
+impl TextTone {
+    fn resolve(self, theme: &Theme) -> Color {
+        match self {
+            Self::Primary => theme.colors.text_primary,
+            Self::Secondary => theme.colors.text_secondary,
+            Self::Tertiary => theme.colors.text_tertiary,
+            Self::Disabled => theme.colors.text_disabled,
+            Self::Accent => theme.colors.accent,
+            Self::Destructive => theme.colors.destructive,
+        }
     }
 }
 
@@ -282,7 +406,10 @@ mod tests {
     fn monospaced_uses_the_embedded_monospace_family() {
         let text = Text::new("terminal").monospaced();
 
-        assert_eq!(text.font_family, DEFAULT_MONOSPACE_FONT_FAMILY);
+        assert_eq!(
+            text.font_family.as_deref(),
+            Some(DEFAULT_MONOSPACE_FONT_FAMILY)
+        );
     }
 
     #[test]

@@ -1,8 +1,8 @@
 //! ViewKit全体の外観テーマを定義
 
 use super::{
-    BrowserTokens, Color, ColorTokens, DividerTokens, MotionTokens, RadiusTokens, ScrollBarTokens,
-    ShadowTokens, ShellTokens, SpacingTokens,
+    BrowserTokens, Color, ColorTokens, DividerTokens, LayoutTokens, MotionTokens, RadiusTokens,
+    ScrollBarTokens, ShadowTokens, ShellTokens, SpacingTokens,
 };
 use std::cell::Cell;
 
@@ -13,6 +13,7 @@ pub struct Theme {
     pub spacing: SpacingTokens,
     pub shadows: ShadowTokens,
     pub divider: DividerTokens,
+    pub layout: LayoutTokens,
     pub scrollbar: ScrollBarTokens,
     pub motion: MotionTokens,
     pub shell: ShellTokens,
@@ -57,6 +58,7 @@ impl Theme {
         spacing: SpacingTokens::DEFAULT,
         shadows: ShadowTokens::DEFAULT,
         divider: DividerTokens::DEFAULT,
+        layout: LayoutTokens::DEFAULT,
         scrollbar: ScrollBarTokens::DEFAULT,
         motion: MotionTokens::DEFAULT,
         shell: ShellTokens::LIGHT,
@@ -99,6 +101,7 @@ impl Theme {
         spacing: SpacingTokens::DEFAULT,
         shadows: ShadowTokens::DEFAULT,
         divider: DividerTokens::DEFAULT,
+        layout: LayoutTokens::DEFAULT,
         scrollbar: ScrollBarTokens::DEFAULT,
         motion: MotionTokens::DEFAULT,
         shell: ShellTokens::DARK,

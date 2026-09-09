@@ -7,10 +7,6 @@ use crate::theme::{CornerRadius, Motion, ShadowStyle};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 use std::time::Instant;
 
-const CONTROL_INSET: f32 = 2.0;
-const SEGMENT_HEIGHT: f32 = 30.0;
-const SEGMENT_MIN_WIDTH: f32 = 64.0;
-
 struct SegmentedItem {
     value: usize,
     label: String,
@@ -86,16 +82,16 @@ impl SegmentedControl {
         self.items.iter().position(|item| item.value == value)
     }
 
-    fn segment_bounds(&self, bounds: Rect) -> Vec<Rect> {
+    fn segment_bounds(&self, bounds: Rect, inset: f32) -> Vec<Rect> {
         if self.items.is_empty() {
             return Vec::new();
         }
 
         let inner_bounds = Rect::new(
-            bounds.origin.x + CONTROL_INSET,
-            bounds.origin.y + CONTROL_INSET,
-            (bounds.size.width - CONTROL_INSET * 2.0).max(0.0),
-            (bounds.size.height - CONTROL_INSET * 2.0).max(0.0),
+            bounds.origin.x + inset,
+            bounds.origin.y + inset,
+            (bounds.size.width - inset * 2.0).max(0.0),
+            (bounds.size.height - inset * 2.0).max(0.0),
         );
 
         let segment_width = inner_bounds.size.width / self.items.len() as f32;
@@ -157,11 +153,13 @@ impl View for SegmentedControl {
             return constraints.constrain(Size::ZERO);
         }
 
-        let mut maximum_width = SEGMENT_MIN_WIDTH;
+        let inset = context.theme.layout.segmented_control_inset;
+        let segment_height = context.theme.layout.segmented_control_height;
+        let mut maximum_width = context.theme.layout.segmented_item_min_width;
 
         for item in &self.items {
             let measured = self.item_button(item).measure(
-                Constraints::loose(Size::new(f32::INFINITY, SEGMENT_HEIGHT)),
+                Constraints::loose(Size::new(f32::INFINITY, segment_height)),
                 context,
             );
 
@@ -169,8 +167,8 @@ impl View for SegmentedControl {
         }
 
         constraints.constrain(Size::new(
-            maximum_width * self.items.len() as f32 + CONTROL_INSET * 2.0,
-            SEGMENT_HEIGHT + CONTROL_INSET * 2.0,
+            maximum_width * self.items.len() as f32 + inset * 2.0,
+            segment_height + inset * 2.0,
         ))
     }
 
@@ -186,7 +184,8 @@ impl View for SegmentedControl {
             .border(BorderStyle::standard(1.0))
             .paint(bounds, context);
 
-        let segment_bounds = self.segment_bounds(bounds);
+        let inset = context.theme.layout.segmented_control_inset;
+        let segment_bounds = self.segment_bounds(bounds, inset);
 
         if segment_bounds.is_empty() {
             return;
@@ -217,7 +216,7 @@ impl View for SegmentedControl {
                 bounds.size.height,
             );
 
-            let indicator_radius = (outer_radius - CONTROL_INSET).max(0.0);
+            let indicator_radius = (outer_radius - inset).max(0.0);
 
             Rectangle::new()
                 .color(RectangleColor::Surface)
@@ -238,7 +237,8 @@ impl View for SegmentedControl {
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
-        let segment_bounds = self.segment_bounds(bounds);
+        let segment_bounds =
+            self.segment_bounds(bounds, context.theme().layout.segmented_control_inset);
 
         let broadcast = event.requires_broadcast();
         let mut result = EventResult::Ignored;

@@ -118,22 +118,14 @@ impl MenuItem {
             .alignment(StackAlignment::Center)
             .gap(StackGap::Medium)
             .child(
-                Text::new(self.label.clone())
-                    .font_size(13.0)
-                    .line_height(18.0)
-                    .weight(500)
+                Text::label(self.label.clone())
                     .color(foreground)
                     .layout()
                     .flex_grow(1.0),
             );
 
         if let Some(shortcut) = self.shortcut.as_ref() {
-            content = content.child(
-                Text::new(shortcut.clone())
-                    .font_size(12.0)
-                    .line_height(18.0)
-                    .color(shortcut_color),
-            );
+            content = content.child(Text::caption(shortcut.clone()).color(shortcut_color));
         }
 
         let style = if self.danger {
@@ -160,7 +152,7 @@ impl MenuItem {
             .shadow(ShadowStyle::None)
             .alignment(ZStackAlignment::Leading)
             .enabled(self.enabled)
-            .content(Padding::symmetric(8.0, 2.0).content(content));
+            .content(Padding::symmetric(theme.spacing.small, theme.spacing.micro).content(content));
 
         if let Some(on_select) = self.on_select.as_ref() {
             let on_select = Rc::clone(on_select);
@@ -214,25 +206,28 @@ impl Menu {
     }
 
     pub fn item(mut self, item: MenuItem) -> Self {
-        self.content = std::mem::take(&mut self.content).child(item.height(24.0));
+        self.content = std::mem::take(&mut self.content)
+            .child(item.height(Theme::current().layout.compact_control_height));
         self
     }
 
     pub fn separator(mut self) -> Self {
+        let spacing = Theme::current().spacing.extra_small;
         self.content = std::mem::take(&mut self.content)
-            .child(Spacer::new().into_stack_child().height(4.0))
+            .child(Spacer::new().into_stack_child().height(spacing))
             .child(Divider::new())
-            .child(Spacer::new().into_stack_child().height(4.0));
+            .child(Spacer::new().into_stack_child().height(spacing));
 
         self
     }
 
-    fn card(&self) -> Card<Padding<ViewRef<'_, VStack>>> {
+    fn card(&self) -> Card<ViewRef<'_, VStack>> {
         Card::new()
+            .compact()
             .radius(CornerRadius::Medium)
             .shadow(ShadowStyle::Card)
             .border(BorderStyle::Standard { width: 1.0 })
-            .content(Padding::all(8.0).content(ViewRef::new(&self.content)))
+            .content(ViewRef::new(&self.content))
     }
 }
 

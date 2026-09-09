@@ -52,7 +52,7 @@ impl IconButton {
     }
 
     pub(crate) fn button(&self, theme: &Theme) -> Button {
-        let (style, icon_color) = match self.tone {
+        let (style, icon_color, control_size, radius) = match self.tone {
             IconButtonTone::Plain => {
                 let icon_color = if self.enabled {
                     theme.colors.text_primary
@@ -69,6 +69,8 @@ impl IconButton {
                         foreground: icon_color,
                     },
                     icon_color,
+                    theme.layout.icon_button_size,
+                    CornerRadius::Small,
                 )
             }
             IconButtonTone::Accent => {
@@ -82,21 +84,23 @@ impl IconButton {
                         foreground: icon_color,
                     },
                     icon_color,
+                    theme.layout.prominent_icon_button_size,
+                    CornerRadius::Medium,
                 )
             }
         };
 
         let mut button = Button::with_interaction(self.interaction.clone())
             .style(style)
-            .radius(CornerRadius::Small)
+            .radius(radius)
             .shadow(ShadowStyle::None)
             .alignment(ZStackAlignment::Center)
             .enabled(self.enabled)
             .content(
                 Icon::new(self.icon)
-                    .size(14.0)
+                    .size(self.icon.control_size())
                     .color(icon_color)
-                    .frame(24.0, 24.0),
+                    .frame(control_size, control_size),
             );
 
         if let Some(on_click) = self.on_click.as_ref() {

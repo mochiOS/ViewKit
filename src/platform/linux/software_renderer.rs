@@ -152,9 +152,11 @@ impl SoftwareRenderer {
             return Ok(());
         }
 
-        let width = NonZeroU32::new(viewport.physical_width).expect("幅は0ではない");
+        let width =
+            NonZeroU32::new(viewport.physical_width).expect("Viewport width must be non-zero");
 
-        let height = NonZeroU32::new(viewport.physical_height).expect("高さは0ではない");
+        let height =
+            NonZeroU32::new(viewport.physical_height).expect("Viewport height must be non-zero");
 
         self.surface.resize(width, height)?;
 

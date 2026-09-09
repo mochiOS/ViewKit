@@ -7,6 +7,7 @@ use crate::geometry::{Rect, Size};
 use crate::platform::{Key, PointerButton};
 use crate::state::Binding;
 use crate::theme::{Color, CornerRadius, ShadowStyle};
+use crate::typography::{TextRole, Typography};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 use std::cell::RefCell;
 use std::ops::Range;
@@ -453,36 +454,27 @@ pub enum TextFieldSize {
 }
 
 impl TextFieldSize {
-    pub const fn height(self) -> f32 {
+    fn height(self, theme: &crate::theme::Theme) -> f32 {
         match self {
-            Self::Small => 24.0,
-            Self::Medium => 32.0,
-            Self::Large => 40.0,
+            Self::Small => theme.layout.compact_control_height,
+            Self::Medium => theme.layout.control_height,
+            Self::Large => theme.layout.large_control_height,
         }
     }
 
-    const fn horizontal_padding(self) -> f32 {
+    fn horizontal_padding(self, theme: &crate::theme::Theme) -> f32 {
+        theme.spacing.medium
+    }
+
+    const fn text_role(self) -> TextRole {
         match self {
-            Self::Small => 12.0,
-            Self::Medium => 12.0,
-            Self::Large => 14.0,
+            Self::Small => TextRole::Label,
+            Self::Medium | Self::Large => TextRole::Body,
         }
     }
 
-    const fn font_size(self) -> f32 {
-        match self {
-            Self::Small => 13.0,
-            Self::Medium => 15.0,
-            Self::Large => 15.0,
-        }
-    }
-
-    const fn line_height(self) -> f32 {
-        match self {
-            Self::Small => 18.0,
-            Self::Medium => 22.0,
-            Self::Large => 22.0,
-        }
+    fn text_style(self, typography: &Typography) -> crate::typography::TextStyle {
+        typography.style(self.text_role())
     }
 }
 
@@ -566,6 +558,11 @@ impl TextField {
 
     pub fn radius(mut self, radius: CornerRadius) -> Self {
         self.radius = radius;
+        self
+    }
+
+    pub fn capsule(mut self) -> Self {
+        self.radius = CornerRadius::Full;
         self
     }
 
@@ -668,7 +665,7 @@ impl TextField {
             return 0;
         }
 
-        let text_origin_x = bounds.origin.x + self.size.horizontal_padding();
+        let text_origin_x = bounds.origin.x + self.size.horizontal_padding(context.theme);
 
         let target_x = (pointer_x - text_origin_x + scroll_offset_x).max(0.0);
 
@@ -679,10 +676,8 @@ impl TextField {
             let next_index = index + character.len_utf8();
 
             let prefix = self.display_prefix(&value, next_index);
-            let next_width = Text::new(prefix)
-                .font_size(self.size.font_size())
-                .line_height(self.size.line_height())
-                .measure_unbounded(context.text_measurer)
+            let next_width = Text::styled(prefix, self.size.text_role())
+                .measure_unbounded_with_typography(context.text_measurer, context.typography)
                 .width;
 
             let midpoint = (previous_width + next_width) / 2.0;
@@ -702,15 +697,15 @@ impl TextField {
 impl View for TextField {
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
         let display_text = self.display_text();
-        let text = Text::new(display_text)
-            .font_size(self.size.font_size())
-            .line_height(self.size.line_height());
+        let text = Text::styled(display_text, self.size.text_role());
 
-        let measured_text = text.measure_unbounded(context.text_measurer);
+        let measured_text =
+            text.measure_unbounded_with_typography(context.text_measurer, context.typography);
 
-        let width = (measured_text.width + self.size.horizontal_padding() * 2.0).max(100.0);
+        let width =
+            (measured_text.width + self.size.horizontal_padding(context.theme) * 2.0).max(100.0);
 
-        constraints.constrain(Size::new(width, self.size.height()))
+        constraints.constrain(Size::new(width, self.size.height(context.theme)))
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
@@ -772,9 +767,10 @@ impl View for TextField {
             secure_display.as_str()
         };
 
-        let horizontal_padding = self.size.horizontal_padding();
+        let horizontal_padding = self.size.horizontal_padding(context.theme);
 
-        let line_height = self.size.line_height();
+        let text_style = self.size.text_style(context.typography);
+        let line_height = text_style.line_height;
 
         let text_bounds = Rect::new(
             bounds.origin.x + horizontal_padding,
@@ -786,20 +782,16 @@ impl View for TextField {
         let text_width = if value.is_empty() {
             0.0
         } else {
-            Text::new(display_text)
-                .font_size(self.size.font_size())
-                .line_height(line_height)
-                .measure_unbounded(context.text_measurer)
+            Text::styled(display_text, self.size.text_role())
+                .measure_unbounded_with_typography(context.text_measurer, context.typography)
                 .width
         };
 
         let prefix_width = if cursor == 0 {
             0.0
         } else {
-            Text::new(self.display_prefix(&value, cursor))
-                .font_size(self.size.font_size())
-                .line_height(line_height)
-                .measure_unbounded(context.text_measurer)
+            Text::styled(self.display_prefix(&value, cursor), self.size.text_role())
+                .measure_unbounded_with_typography(context.text_measurer, context.typography)
                 .width
         };
 
@@ -827,9 +819,7 @@ impl View for TextField {
 
         if !display_text.is_empty() {
             if showing_placeholder {
-                Text::new(display_text)
-                    .font_size(self.size.font_size())
-                    .line_height(line_height)
+                Text::styled(display_text, self.size.text_role())
                     .color(appearance.foreground)
                     .paint(text_bounds, context);
             } else {
@@ -844,18 +834,23 @@ impl View for TextField {
                     let start_width = if range.start == 0 {
                         0.0
                     } else {
-                        Text::new(self.display_prefix(&value, range.start))
-                            .font_size(self.size.font_size())
-                            .line_height(line_height)
-                            .measure_unbounded(context.text_measurer)
-                            .width
+                        Text::styled(
+                            self.display_prefix(&value, range.start),
+                            self.size.text_role(),
+                        )
+                        .measure_unbounded_with_typography(
+                            context.text_measurer,
+                            context.typography,
+                        )
+                        .width
                     };
 
-                    let end_width = Text::new(self.display_prefix(&value, range.end))
-                        .font_size(self.size.font_size())
-                        .line_height(line_height)
-                        .measure_unbounded(context.text_measurer)
-                        .width;
+                    let end_width = Text::styled(
+                        self.display_prefix(&value, range.end),
+                        self.size.text_role(),
+                    )
+                    .measure_unbounded_with_typography(context.text_measurer, context.typography)
+                    .width;
 
                     let viewport_left = text_bounds.origin.x;
                     let viewport_right = text_bounds.origin.x + text_bounds.size.width;
@@ -865,8 +860,9 @@ impl View for TextField {
                         (text_bounds.origin.x + end_width - scroll_offset_x).min(viewport_right);
 
                     if selection_right > selection_left {
-                        let selection_height =
-                            (self.size.font_size() + 4.0).min(text_bounds.size.height);
+                        let selection_height = (text_style.size
+                            + context.theme.spacing.extra_small)
+                            .min(text_bounds.size.height);
                         let selection_y = text_bounds.origin.y
                             + (text_bounds.size.height - selection_height) / 2.0;
 
@@ -897,9 +893,7 @@ impl View for TextField {
                     context.display_list.push(DrawCommand::PopClip);
                 }
 
-                Text::new(display_text)
-                    .font_size(self.size.font_size())
-                    .line_height(line_height)
+                Text::styled(display_text, self.size.text_role())
                     .color(appearance.foreground)
                     .paint(content_bounds, context);
             }

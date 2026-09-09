@@ -15,13 +15,31 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-const TRACK_WIDTH: f32 = 40.0;
-const TRACK_HEIGHT: f32 = 22.0;
-const KNOB_SIZE: f32 = 18.0;
-const PRESSED_KNOB_WIDTH: f32 = 22.0;
-const KNOB_INSET: f32 = 2.0;
-const DRAG_THRESHOLD: f32 = 3.0;
-const DRAG_HIT_PADDING: f32 = 6.0;
+#[derive(Clone, Copy)]
+struct SwitchMetrics {
+    track_width: f32,
+    track_height: f32,
+    knob_size: f32,
+    pressed_knob_width: f32,
+    knob_inset: f32,
+    drag_threshold: f32,
+    hit_padding: f32,
+}
+
+impl SwitchMetrics {
+    fn from_theme(theme: &Theme) -> Self {
+        let layout = theme.layout;
+        Self {
+            track_width: layout.switch_track_width,
+            track_height: layout.switch_track_height,
+            knob_size: layout.switch_knob_size,
+            pressed_knob_width: layout.switch_pressed_knob_width,
+            knob_inset: layout.switch_knob_inset,
+            drag_threshold: layout.switch_drag_threshold,
+            hit_padding: layout.switch_hit_padding,
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 struct SwitchPositionAnimation {
@@ -111,22 +129,20 @@ impl Switch {
     }
 
     fn button(&self, theme: &Theme) -> Button {
+        let metrics = SwitchMetrics::from_theme(theme);
         let mut content = HStack::new()
             .alignment(StackAlignment::Center)
             .gap(StackGap::Small);
 
         if let Some(label) = self.label.as_ref() {
             content = content.child(
-                Text::new(label.clone())
-                    .font_size(13.0)
-                    .line_height(18.0)
-                    .weight(500)
+                Text::label(label.clone())
                     .color(if self.enabled {
                         theme.colors.text_primary
                     } else {
                         theme.colors.text_disabled
                     })
-                    .height(18.0)
+                    .layout()
                     .flex_shrink(0.0),
             );
         }
@@ -141,7 +157,7 @@ impl Switch {
                 drag: self.drag.clone(),
                 checked_binding: self.checked.clone(),
             }
-            .frame(TRACK_WIDTH, TRACK_HEIGHT)
+            .frame(metrics.track_width, metrics.track_height)
             .flex_shrink(0.0),
         );
 
@@ -156,7 +172,7 @@ impl Switch {
             .shadow(ShadowStyle::None)
             .alignment(ZStackAlignment::Leading)
             .enabled(self.enabled)
-            .content(Padding::symmetric(4.0, 4.0).content(content))
+            .content(Padding::all(theme.spacing.extra_small).content(content))
     }
 
     fn handle_switch_event(
@@ -168,6 +184,8 @@ impl Switch {
         if !self.enabled {
             return EventResult::Ignored;
         }
+
+        let metrics = SwitchMetrics::from_theme(context.theme());
 
         match event {
             ViewEvent::PointerPressed {
@@ -185,17 +203,27 @@ impl Switch {
                 let mark_bounds = drag.mark_bounds;
 
                 let drag_candidate = mark_bounds
-                    .map(|mark_bounds| mark_bounds.expanded(DRAG_HIT_PADDING).contains(*position))
+                    .map(|mark_bounds| {
+                        mark_bounds
+                            .expanded(metrics.hit_padding)
+                            .contains(*position)
+                    })
                     .unwrap_or(false);
 
                 let drag_offset_x = mark_bounds
                     .filter(|mark_bounds| {
-                        knob_bounds_at(*mark_bounds, KNOB_SIZE, checked_position)
-                            .expanded(DRAG_HIT_PADDING)
+                        knob_bounds_at(*mark_bounds, metrics.knob_size, checked_position, metrics)
+                            .expanded(metrics.hit_padding)
                             .contains(*position)
                     })
                     .map(|mark_bounds| {
-                        position.x - knob_center_x(mark_bounds, KNOB_SIZE, checked_position)
+                        position.x
+                            - knob_center_x(
+                                mark_bounds,
+                                metrics.knob_size,
+                                checked_position,
+                                metrics,
+                            )
                     })
                     .unwrap_or(0.0);
 
@@ -225,7 +253,7 @@ impl Switch {
                     if !drag.dragging {
                         let moved = (position.x - drag.press_x).abs();
 
-                        if drag.drag_candidate && moved >= DRAG_THRESHOLD {
+                        if drag.drag_candidate && moved >= metrics.drag_threshold {
                             drag.dragging = true;
                         }
                     }
@@ -236,6 +264,7 @@ impl Switch {
                                 mark_bounds,
                                 position.x,
                                 drag.drag_offset_x,
+                                metrics,
                             ));
                         }
                     }
@@ -265,6 +294,7 @@ impl Switch {
                                         mark_bounds,
                                         position.x,
                                         drag.drag_offset_x,
+                                        metrics,
                                     )
                                 })
                                 .or(drag.drag_position)
@@ -395,8 +425,9 @@ struct SwitchMark {
 }
 
 impl View for SwitchMark {
-    fn measure(&self, constraints: Constraints, _context: &mut MeasureContext<'_>) -> Size {
-        constraints.constrain(Size::new(TRACK_WIDTH, TRACK_HEIGHT))
+    fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
+        let metrics = SwitchMetrics::from_theme(context.theme);
+        constraints.constrain(Size::new(metrics.track_width, metrics.track_height))
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
@@ -408,10 +439,11 @@ impl View for SwitchMark {
 
         let now = Instant::now();
         let motion = context.theme.motion.toggle;
+        let metrics = SwitchMetrics::from_theme(context.theme);
 
         let (position, position_redraw) = self.visual_position(now, motion);
 
-        let (knob_width, width_redraw) = self.animated_knob_width(now, motion, pressed);
+        let (knob_width, width_redraw) = self.animated_knob_width(now, motion, pressed, metrics);
 
         if let Some(next_redraw) = position_redraw.into_iter().chain(width_redraw).min() {
             context.request_redraw_in_at(bounds.expanded(16.0), next_redraw);
@@ -424,14 +456,14 @@ impl View for SwitchMark {
             .radius(CornerRadius::Full)
             .paint(bounds, context);
 
-        let knob_left = bounds.origin.x + KNOB_INSET;
+        let knob_left = bounds.origin.x + metrics.knob_inset;
 
-        let knob_right = bounds.origin.x + bounds.size.width - KNOB_INSET - knob_width;
+        let knob_right = bounds.origin.x + bounds.size.width - metrics.knob_inset - knob_width;
 
         let knob_x = interpolate(knob_left, knob_right, position);
-        let knob_y = bounds.origin.y + (bounds.size.height - KNOB_SIZE) / 2.0;
+        let knob_y = bounds.origin.y + (bounds.size.height - metrics.knob_size) / 2.0;
 
-        let knob_bounds = Rect::new(knob_x, knob_y, knob_width, KNOB_SIZE);
+        let knob_bounds = Rect::new(knob_x, knob_y, knob_width, metrics.knob_size);
 
         let knob_color = if self.enabled {
             Color::WHITE
@@ -554,6 +586,7 @@ impl SwitchMark {
         now: Instant,
         motion: Motion,
         pressed: bool,
+        metrics: SwitchMetrics,
     ) -> (f32, Option<Instant>) {
         let mut state = self
             .knob_width_animation
@@ -568,20 +601,20 @@ impl SwitchMark {
 
                 interpolate(animation.from, animation.to, sample.progress)
             }
-            None => knob_width_for_pressed(state.pressed),
+            None => knob_width_for_pressed(state.pressed, metrics),
         };
 
         if state.pressed != pressed {
             state.pressed = pressed;
             state.animation = Some(KnobWidthAnimation {
                 from: current_width,
-                to: knob_width_for_pressed(pressed),
+                to: knob_width_for_pressed(pressed, metrics),
                 started_at: now,
             });
         }
 
         let Some(animation) = state.animation else {
-            return (knob_width_for_pressed(pressed), None);
+            return (knob_width_for_pressed(pressed, metrics), None);
         };
 
         let sample = Animation::new(animation.started_at, motion.duration)
@@ -613,39 +646,44 @@ fn bool_position(value: bool) -> f32 {
     if value { 1.0 } else { 0.0 }
 }
 
-fn knob_width_for_pressed(pressed: bool) -> f32 {
+fn knob_width_for_pressed(pressed: bool, metrics: SwitchMetrics) -> f32 {
     if pressed {
-        PRESSED_KNOB_WIDTH
+        metrics.pressed_knob_width
     } else {
-        KNOB_SIZE
+        metrics.knob_size
     }
 }
 
-fn knob_center_x(bounds: Rect, knob_width: f32, progress: f32) -> f32 {
-    let left = bounds.origin.x + KNOB_INSET + knob_width / 2.0;
+fn knob_center_x(bounds: Rect, knob_width: f32, progress: f32, metrics: SwitchMetrics) -> f32 {
+    let left = bounds.origin.x + metrics.knob_inset + knob_width / 2.0;
 
-    let right = bounds.origin.x + bounds.size.width - KNOB_INSET - knob_width / 2.0;
+    let right = bounds.origin.x + bounds.size.width - metrics.knob_inset - knob_width / 2.0;
 
     interpolate(left, right, progress.clamp(0.0, 1.0))
 }
 
-fn knob_bounds_at(bounds: Rect, knob_width: f32, progress: f32) -> Rect {
-    let center_x = knob_center_x(bounds, knob_width, progress);
+fn knob_bounds_at(bounds: Rect, knob_width: f32, progress: f32, metrics: SwitchMetrics) -> Rect {
+    let center_x = knob_center_x(bounds, knob_width, progress, metrics);
 
     Rect::new(
         center_x - knob_width / 2.0,
-        bounds.origin.y + (bounds.size.height - KNOB_SIZE) / 2.0,
+        bounds.origin.y + (bounds.size.height - metrics.knob_size) / 2.0,
         knob_width,
-        KNOB_SIZE,
+        metrics.knob_size,
     )
 }
 
-fn drag_progress_from_pointer(bounds: Rect, pointer_x: f32, drag_offset_x: f32) -> f32 {
-    let knob_width = PRESSED_KNOB_WIDTH;
+fn drag_progress_from_pointer(
+    bounds: Rect,
+    pointer_x: f32,
+    drag_offset_x: f32,
+    metrics: SwitchMetrics,
+) -> f32 {
+    let knob_width = metrics.pressed_knob_width;
 
-    let left = bounds.origin.x + KNOB_INSET + knob_width / 2.0;
+    let left = bounds.origin.x + metrics.knob_inset + knob_width / 2.0;
 
-    let right = bounds.origin.x + bounds.size.width - KNOB_INSET - knob_width / 2.0;
+    let right = bounds.origin.x + bounds.size.width - metrics.knob_inset - knob_width / 2.0;
 
     let width = right - left;
 

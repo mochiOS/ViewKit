@@ -468,10 +468,8 @@ impl View for Button {
             return;
         }
 
-        const HORIZONTAL_PADDING: f32 = 8.0;
-        const FONT_SIZE: f32 = 13.0;
-        const LINE_HEIGHT: f32 = 18.0;
-        const FONT_WEIGHT: u16 = 500;
+        let horizontal_padding = context.theme.spacing.small;
+        let label_style = context.typography.label;
 
         self.interaction.set_enabled(self.enabled);
 
@@ -504,22 +502,19 @@ impl View for Button {
             .paint(bounds, context);
 
         if let Some(label) = self.label.as_ref() {
-            let text_height = LINE_HEIGHT.min(bounds.size.height);
+            let text_height = label_style.line_height.min(bounds.size.height);
 
             let text_y =
                 bounds.origin.y + (bounds.size.height - text_height) * self.label_vertical_factor();
 
             let text_bounds = Rect::new(
-                bounds.origin.x + HORIZONTAL_PADDING,
+                bounds.origin.x + horizontal_padding,
                 text_y,
-                (bounds.size.width - HORIZONTAL_PADDING * 2.0).max(0.0),
+                (bounds.size.width - horizontal_padding * 2.0).max(0.0),
                 text_height,
             );
 
-            Text::new(label.as_str())
-                .font_size(FONT_SIZE)
-                .line_height(LINE_HEIGHT)
-                .weight(FONT_WEIGHT)
+            Text::label(label.as_str())
                 .alignment(self.label_text_alignment())
                 .color(appearance.foreground)
                 .paint(text_bounds, context);
@@ -690,11 +685,8 @@ impl View for Button {
     }
 
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
-        const HORIZONTAL_PADDING: f32 = 8.0;
-        const INTRINSIC_HEIGHT: f32 = 24.0;
-        const FONT_SIZE: f32 = 13.0;
-        const LINE_HEIGHT: f32 = 18.0;
-        const FONT_WEIGHT: u16 = 500;
+        let horizontal_padding = context.theme.spacing.small;
+        let intrinsic_height = context.theme.layout.compact_control_height;
 
         let width_is_fixed = constraints.minimum.width.is_finite()
             && constraints.maximum.width.is_finite()
@@ -716,21 +708,17 @@ impl View for Button {
             constraints.minimum.width
         } else if let Some(label) = self.label.as_ref() {
             let maximum_text_width = if constraints.maximum.width.is_finite() {
-                (constraints.maximum.width - HORIZONTAL_PADDING * 2.0).max(0.0)
+                (constraints.maximum.width - horizontal_padding * 2.0).max(0.0)
             } else {
                 f32::INFINITY
             };
 
-            let measured = Text::new(label.as_str())
-                .font_size(FONT_SIZE)
-                .line_height(LINE_HEIGHT)
-                .weight(FONT_WEIGHT)
-                .measure(
-                    Constraints::loose(Size::new(maximum_text_width, f32::INFINITY)),
-                    context,
-                );
+            let measured = Text::label(label.as_str()).measure(
+                Constraints::loose(Size::new(maximum_text_width, f32::INFINITY)),
+                context,
+            );
 
-            measured.width + HORIZONTAL_PADDING * 2.0
+            measured.width + horizontal_padding * 2.0
         } else {
             0.0
         };
@@ -738,7 +726,7 @@ impl View for Button {
         let height = if height_is_fixed {
             constraints.minimum.height
         } else {
-            INTRINSIC_HEIGHT
+            intrinsic_height
         };
 
         constraints.constrain(Size::new(width, height))

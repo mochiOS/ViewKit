@@ -93,11 +93,29 @@ pub struct TextStyle {
     pub letter_spacing: f32,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum TextRole {
+    DisplayLarge,
+    DisplayMedium,
+    TitleLarge,
+    TitleMedium,
+    TitleSmall,
+
+    #[default]
+    Body,
+
+    Label,
+    Caption,
+    Code,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Typography {
-    pub large_title: TextStyle,
-    pub title: TextStyle,
-    pub headline: TextStyle,
+    pub display_large: TextStyle,
+    pub display_medium: TextStyle,
+    pub title_large: TextStyle,
+    pub title_medium: TextStyle,
+    pub title_small: TextStyle,
     pub body: TextStyle,
     pub label: TextStyle,
     pub caption: TextStyle,
@@ -106,21 +124,35 @@ pub struct Typography {
 
 impl Typography {
     pub const DEFAULT: Self = Self {
-        large_title: TextStyle {
+        display_large: TextStyle {
             family: FontFamily::Sans,
-            size: 32.0,
-            weight: FontWeight::BOLD,
-            line_height: 40.0,
-            letter_spacing: 0.0,
-        },
-        title: TextStyle {
-            family: FontFamily::Sans,
-            size: 24.0,
+            size: 56.0,
             weight: FontWeight::SEMIBOLD,
-            line_height: 32.0,
+            line_height: 64.0,
             letter_spacing: 0.0,
         },
-        headline: TextStyle {
+        display_medium: TextStyle {
+            family: FontFamily::Sans,
+            size: 40.0,
+            weight: FontWeight::SEMIBOLD,
+            line_height: 48.0,
+            letter_spacing: 0.0,
+        },
+        title_large: TextStyle {
+            family: FontFamily::Sans,
+            size: 28.0,
+            weight: FontWeight::SEMIBOLD,
+            line_height: 36.0,
+            letter_spacing: 0.0,
+        },
+        title_medium: TextStyle {
+            family: FontFamily::Sans,
+            size: 20.0,
+            weight: FontWeight::SEMIBOLD,
+            line_height: 28.0,
+            letter_spacing: 0.0,
+        },
+        title_small: TextStyle {
             family: FontFamily::Sans,
             size: 17.0,
             weight: FontWeight::SEMIBOLD,
@@ -129,16 +161,16 @@ impl Typography {
         },
         body: TextStyle {
             family: FontFamily::Sans,
-            size: 16.0,
+            size: 15.0,
             weight: FontWeight::REGULAR,
-            line_height: 24.0,
+            line_height: 22.0,
             letter_spacing: 0.0,
         },
         label: TextStyle {
             family: FontFamily::Sans,
-            size: 14.0,
+            size: 13.0,
             weight: FontWeight::MEDIUM,
-            line_height: 20.0,
+            line_height: 18.0,
             letter_spacing: 0.0,
         },
         caption: TextStyle {
@@ -156,4 +188,18 @@ impl Typography {
             letter_spacing: 0.0,
         },
     };
+
+    pub const fn style(self, role: TextRole) -> TextStyle {
+        match role {
+            TextRole::DisplayLarge => self.display_large,
+            TextRole::DisplayMedium => self.display_medium,
+            TextRole::TitleLarge => self.title_large,
+            TextRole::TitleMedium => self.title_medium,
+            TextRole::TitleSmall => self.title_small,
+            TextRole::Body => self.body,
+            TextRole::Label => self.label,
+            TextRole::Caption => self.caption,
+            TextRole::Code => self.code,
+        }
+    }
 }

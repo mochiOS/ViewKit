@@ -183,6 +183,10 @@ impl RedrawSchedule {
 }
 
 pub trait View {
+    fn stack_flex_shrink(&self) -> f32 {
+        1.0
+    }
+
     fn measure(&self, constraints: Constraints, _context: &mut MeasureContext<'_>) -> Size {
         constraints.constrain(Size::new(0.0, 0.0))
     }

@@ -93,65 +93,81 @@ impl ListRow {
     }
 
     fn content_view(&self, theme: &Theme) -> Padding<HStack> {
-        let mut labels = VStack::new()
-            .alignment(StackAlignment::Stretch)
-            .gap(StackGap::None)
+        let mut title_row = HStack::new()
+            .alignment(StackAlignment::Center)
+            .gap(StackGap::Small)
             .child(
-                Text::new(self.title.clone())
-                    .font_size(13.0)
-                    .line_height(18.0)
-                    .weight(500)
+                Text::label(self.title.clone())
                     .color(if self.selected {
                         theme.colors.accent
                     } else {
                         theme.colors.text_primary
-                    }),
+                    })
+                    .layout()
+                    .flex_grow(1.0),
             );
 
-        if let Some(subtitle) = self.subtitle.as_ref() {
-            labels = labels.child(
-                Text::new(subtitle.clone())
-                    .font_size(11.0)
-                    .line_height(16.0)
-                    .color(theme.colors.text_secondary),
-            );
+        if let Some(trailing) = self.trailing.as_ref() {
+            title_row =
+                title_row.child(Text::caption(trailing.clone()).color(theme.colors.text_secondary));
+        }
+
+        let mut labels = VStack::new()
+            .alignment(StackAlignment::Stretch)
+            .gap(StackGap::ExtraSmall)
+            .child(title_row);
+
+        if self.subtitle.is_some() || self.status_marker {
+            let mut subtitle_row = HStack::new()
+                .alignment(StackAlignment::Center)
+                .gap(StackGap::Small);
+
+            if let Some(subtitle) = self.subtitle.as_ref() {
+                subtitle_row = subtitle_row.child(
+                    Text::caption(subtitle.clone())
+                        .color(theme.colors.text_secondary)
+                        .layout()
+                        .flex_grow(1.0),
+                );
+            } else {
+                subtitle_row = subtitle_row.child(super::Spacer::new());
+            }
+
+            if self.status_marker {
+                subtitle_row = subtitle_row.child(
+                    Ellipse::new()
+                        .color(EllipseColor::Custom(theme.colors.accent))
+                        .frame(
+                            theme.layout.status_marker_size,
+                            theme.layout.status_marker_size,
+                        ),
+                );
+            }
+
+            labels = labels.child(subtitle_row);
         }
 
         let mut row = HStack::new()
             .alignment(StackAlignment::Center)
-            .gap(StackGap::Small);
+            .gap(StackGap::Medium);
 
         if let Some(initials) = self.leading_avatar.as_ref() {
-            row = row.child(Avatar::new(initials.clone()).frame(32.0, 32.0));
+            row = row.child(Avatar::new(initials.clone()));
         } else if let Some(icon) = self.icon {
             row = row.child(
                 Icon::new(icon)
-                    .size(14.0)
+                    .size(theme.layout.compact_icon_size)
                     .color(theme.colors.text_secondary)
-                    .frame(24.0, 24.0),
+                    .frame(
+                        theme.layout.list_leading_size,
+                        theme.layout.list_leading_size,
+                    ),
             );
         }
 
         row = row.child(labels.layout().flex_grow(1.0));
 
-        if let Some(trailing) = self.trailing.as_ref() {
-            row = row.child(
-                Text::new(trailing.clone())
-                    .font_size(11.0)
-                    .line_height(16.0)
-                    .color(theme.colors.text_secondary),
-            );
-        }
-
-        if self.status_marker {
-            row = row.child(
-                Ellipse::new()
-                    .color(EllipseColor::Custom(theme.colors.accent))
-                    .frame(8.0, 8.0),
-            );
-        }
-
-        Padding::symmetric(12.0, 8.0).content(row)
+        Padding::all(theme.spacing.small).content(row)
     }
 
     fn button(&self, theme: &Theme) -> Button {
@@ -188,7 +204,11 @@ impl ListRow {
 
 impl View for ListRow {
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
-        self.button(context.theme).measure(constraints, context)
+        let measured = self.button(context.theme).measure(constraints, context);
+        constraints.constrain(Size::new(
+            measured.width,
+            measured.height.max(context.theme.layout.list_row_height),
+        ))
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {

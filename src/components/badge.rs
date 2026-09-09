@@ -52,12 +52,12 @@ impl Badge {
 
 impl View for Badge {
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
-        let measured = Text::new(self.label.as_str())
-            .font_size(12.0)
-            .line_height(16.0)
-            .measure_unbounded(context.text_measurer);
+        let measured = Text::caption(self.label.as_str())
+            .measure_unbounded_with_typography(context.text_measurer, context.typography);
 
-        constraints.constrain(Size::new((measured.width + 16.0).max(20.0), 20.0))
+        let horizontal = context.theme.spacing.small * 2.0;
+        let height = context.typography.caption.line_height + context.theme.spacing.micro * 2.0;
+        constraints.constrain(Size::new((measured.width + horizontal).max(height), height))
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
@@ -72,17 +72,16 @@ impl View for Badge {
             .radius(CornerRadius::Small)
             .paint(bounds, context);
 
-        Text::new(self.label.clone())
-            .font_size(12.0)
-            .line_height(16.0)
+        let line_height = context.typography.caption.line_height;
+        Text::caption(self.label.clone())
             .alignment(TextAlignment::Center)
             .color(foreground)
             .paint(
                 Rect::new(
                     bounds.origin.x,
-                    bounds.origin.y + 2.0,
+                    bounds.origin.y + context.theme.spacing.micro,
                     bounds.size.width,
-                    16.0,
+                    line_height,
                 ),
                 context,
             );

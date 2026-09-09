@@ -62,22 +62,19 @@ impl RadioButton {
                     selected,
                     enabled: self.enabled,
                 }
-                .frame(22.0, 22.0)
+                .frame(theme.layout.radio_size, theme.layout.radio_size)
                 .flex_shrink(0.0),
             );
 
         if let Some(label) = self.label.as_ref() {
             content = content.child(
-                Text::new(label.clone())
-                    .font_size(13.0)
-                    .line_height(18.0)
-                    .weight(500)
+                Text::label(label.clone())
                     .color(if self.enabled {
                         theme.colors.text_primary
                     } else {
                         theme.colors.text_disabled
                     })
-                    .height(18.0)
+                    .layout()
                     .flex_shrink(0.0),
             );
         }
@@ -97,7 +94,7 @@ impl RadioButton {
             .shadow(ShadowStyle::None)
             .alignment(ZStackAlignment::Leading)
             .enabled(self.enabled)
-            .content(Padding::symmetric(4.0, 4.0).content(content))
+            .content(Padding::all(theme.spacing.extra_small).content(content))
             .on_click(move || {
                 selection.set(value);
             })
@@ -130,8 +127,9 @@ struct RadioMark {
 }
 
 impl View for RadioMark {
-    fn measure(&self, constraints: Constraints, _context: &mut MeasureContext<'_>) -> Size {
-        constraints.constrain(Size::new(22.0, 22.0))
+    fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
+        let size = context.theme.layout.radio_size;
+        constraints.constrain(Size::new(size, size))
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
@@ -149,11 +147,12 @@ impl View for RadioMark {
             context.theme.colors.border
         };
 
+        let inset = context.theme.layout.radio_inset;
         let indicator_bounds = Rect::new(
-            bounds.origin.x + 3.0,
-            bounds.origin.y + 3.0,
-            (bounds.size.width - 6.0).max(0.0),
-            (bounds.size.height - 6.0).max(0.0),
+            bounds.origin.x + inset,
+            bounds.origin.y + inset,
+            (bounds.size.width - inset * 2.0).max(0.0),
+            (bounds.size.height - inset * 2.0).max(0.0),
         );
 
         Rectangle::new()
@@ -170,7 +169,7 @@ impl View for RadioMark {
             return;
         }
 
-        let dot_size = 6.0;
+        let dot_size = context.theme.layout.radio_dot_size;
         let dot_bounds = Rect::new(
             bounds.origin.x + (bounds.size.width - dot_size) / 2.0,
             bounds.origin.y + (bounds.size.height - dot_size) / 2.0,

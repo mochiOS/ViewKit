@@ -1,6 +1,7 @@
 mod application;
 mod color;
 mod divider;
+mod layout;
 mod motion;
 mod radius;
 mod scrollbar;
@@ -11,6 +12,7 @@ mod theme;
 pub use application::{BrowserTokens, ShellTokens};
 pub use color::{Color, ColorTokens};
 pub use divider::{DividerThickness, DividerTokens};
+pub use layout::LayoutTokens;
 pub use motion::{Motion, MotionTokens};
 pub use radius::{CornerRadius, RadiusTokens};
 pub use scrollbar::ScrollBarTokens;

@@ -47,8 +47,11 @@ impl ProgressBar {
 }
 
 impl View for ProgressBar {
-    fn measure(&self, constraints: Constraints, _context: &mut MeasureContext<'_>) -> Size {
-        constraints.constrain(Size::new(160.0, 24.0))
+    fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
+        constraints.constrain(Size::new(
+            context.theme.layout.range_control_width,
+            context.theme.layout.range_control_height,
+        ))
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
@@ -56,11 +59,12 @@ impl View for ProgressBar {
             return;
         }
 
+        let track_height = context.theme.layout.range_track_height;
         let track = Rect::new(
             bounds.origin.x,
-            bounds.origin.y + (bounds.size.height - 4.0) / 2.0,
+            bounds.origin.y + (bounds.size.height - track_height) / 2.0,
             bounds.size.width,
-            4.0,
+            track_height,
         );
 
         let track_color = if self.enabled {

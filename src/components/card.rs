@@ -15,6 +15,7 @@ pub struct Card<Content = EmptyView> {
     radius: CornerRadius,
     shadow: ShadowStyle,
     border: BorderStyle,
+    compact: bool,
 }
 
 impl Card<EmptyView> {
@@ -25,6 +26,7 @@ impl Card<EmptyView> {
             radius: CornerRadius::Card,
             shadow: ShadowStyle::Card,
             border: BorderStyle::Standard { width: 1.0 },
+            compact: false,
         }
     }
 }
@@ -46,6 +48,7 @@ impl<Content> Card<Content> {
             radius: self.radius,
             shadow: self.shadow,
             border: self.border,
+            compact: self.compact,
         }
     }
 
@@ -68,6 +71,19 @@ impl<Content> Card<Content> {
         self.border = border;
         self
     }
+
+    pub fn compact(mut self) -> Self {
+        self.compact = true;
+        self
+    }
+
+    fn inset(&self, theme: &crate::theme::Theme) -> f32 {
+        if self.compact {
+            theme.spacing.small
+        } else {
+            theme.spacing.medium
+        }
+    }
 }
 
 impl<Content> View for Card<Content>
@@ -75,7 +91,18 @@ where
     Content: View,
 {
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
-        self.content.measure(constraints, context)
+        let inset = self.inset(context.theme);
+        let child = self.content.measure(
+            Constraints::loose(Size::new(
+                (constraints.maximum.width - inset * 2.0).max(0.0),
+                (constraints.maximum.height - inset * 2.0).max(0.0),
+            )),
+            context,
+        );
+        constraints.constrain(Size::new(
+            child.width + inset * 2.0,
+            child.height + inset * 2.0,
+        ))
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
@@ -95,7 +122,9 @@ where
             .push(DrawCommand::PushClip { rect: bounds });
 
         context.push_corner_radius(resolved_radius);
-        self.content.paint(bounds, context);
+        let inset = self.inset(context.theme);
+        let content_bounds = inset_rect(bounds, inset);
+        self.content.paint(content_bounds, context);
         context.pop_corner_radius();
 
         context.display_list.push(DrawCommand::PopClip);
@@ -106,6 +135,19 @@ where
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
-        self.content.handle_event(bounds, event, context)
+        self.content.handle_event(
+            inset_rect(bounds, self.inset(context.theme)),
+            event,
+            context,
+        )
     }
+}
+
+fn inset_rect(bounds: Rect, inset: f32) -> Rect {
+    Rect::new(
+        bounds.origin.x + inset,
+        bounds.origin.y + inset,
+        (bounds.size.width - inset * 2.0).max(0.0),
+        (bounds.size.height - inset * 2.0).max(0.0),
+    )
 }

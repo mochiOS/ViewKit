@@ -113,6 +113,8 @@ impl StackDistribution {
 pub enum StackGap {
     None,
 
+    Micro,
+
     ExtraSmall,
 
     Small,
@@ -126,6 +128,12 @@ pub enum StackGap {
 
     DoubleExtraLarge,
 
+    TripleExtraLarge,
+
+    Huge,
+
+    Giant,
+
     Custom(f32),
 }
 
@@ -133,6 +141,8 @@ impl StackGap {
     pub fn resolve(self, tokens: &SpacingTokens) -> f32 {
         match self {
             Self::None => 0.0,
+
+            Self::Micro => tokens.micro,
 
             Self::ExtraSmall => tokens.extra_small,
 
@@ -145,6 +155,12 @@ impl StackGap {
             Self::ExtraLarge => tokens.extra_large,
 
             Self::DoubleExtraLarge => tokens.double_extra_large,
+
+            Self::TripleExtraLarge => tokens.triple_extra_large,
+
+            Self::Huge => tokens.huge,
+
+            Self::Giant => tokens.giant,
 
             Self::Custom(value) => value.max(0.0),
         }
@@ -175,6 +191,7 @@ impl StackChild {
     where
         V: View + 'static,
     {
+        let flex_shrink = view.stack_flex_shrink().max(0.0);
         Self {
             view: Box::new(view),
 
@@ -182,7 +199,7 @@ impl StackChild {
             height: LayoutLength::Auto,
 
             flex_grow: 0.0,
-            flex_shrink: 1.0,
+            flex_shrink,
 
             kind: StackChildKind::Normal,
         }

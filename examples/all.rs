@@ -2,13 +2,15 @@ use viewkit::prelude::*;
 
 struct ComponentLab {
     selected_conversation: State<usize>,
-    tab: State<usize>,
     notifications: State<bool>,
     pinned: State<bool>,
     radio: State<usize>,
+    tabs: State<usize>,
+    segment: State<usize>,
     density: State<f32>,
     count: State<i32>,
     composer: State<String>,
+    field: State<String>,
 }
 
 impl ComponentLab {
@@ -31,27 +33,22 @@ impl ComponentLab {
             .status_marker(unread)
             .selected(selected)
             .on_select(move || selected_conversation.set(index))
-            .height(64.0)
+            .layout()
     }
 
     fn sidebar(&self) -> Box<dyn View + 'static> {
         let header = HStack::new()
             .alignment(StackAlignment::Center)
             .gap(StackGap::Small)
-            .child(
-                Text::new("Messages")
-                    .font_size(15.0)
-                    .line_height(22.0)
-                    .weight(500),
-            )
+            .child(Text::body_emphasized("Messages"))
             .child(Spacer::new())
-            .child(IconButton::new(IconName::Search).frame(24.0, 24.0));
+            .child(IconButton::new(IconName::Search));
 
         Box::new(
             VStack::new()
-                .alignment(StackAlignment::Stretch)
+                .alignment(StackAlignment::Start)
                 .gap(StackGap::Large)
-                .child(header.height(24.0))
+                .child(header)
                 .child(
                     VStack::new()
                         .alignment(StackAlignment::Stretch)
@@ -60,7 +57,7 @@ impl ComponentLab {
                             0,
                             "A",
                             "Aya Sato",
-                            "Sounds good - see you at 3.",
+                            "Sounds good — see you at 3.",
                             "10:42",
                             false,
                         ))
@@ -74,7 +71,7 @@ impl ComponentLab {
                         ))
                         .child(self.sidebar_row(
                             2,
-                            "T",
+                            "N",
                             "Taro Suzuki",
                             "Thanks! I'll take a look.",
                             "",
@@ -82,7 +79,7 @@ impl ComponentLab {
                         ))
                         .child(self.sidebar_row(
                             3,
-                            "S",
+                            "E",
                             "Suzu Okada",
                             "Coffee next week?",
                             "Tue",
@@ -99,86 +96,58 @@ impl ComponentLab {
             HStack::new()
                 .alignment(StackAlignment::Center)
                 .gap(StackGap::Medium)
-                .child(Avatar::new("A").frame(32.0, 32.0))
-                .child(
-                    Text::new("Aya Sato")
-                        .font_size(15.0)
-                        .line_height(22.0)
-                        .weight(500),
-                )
-                .child(Spacer::new())
-                .child(
-                    Tabs::new(self.tab.binding())
-                        .item(0, "Chat")
-                        .item(1, "Components"),
-                )
-                .child(Badge::new("Online").tone(BadgeTone::Accent))
-                .child(Picker::new("Studio").frame(120.0, 24.0))
-                .child(IconButton::new(IconName::Settings).frame(24.0, 24.0)),
+                .child(Avatar::new("A"))
+                .child(Text::body_emphasized("Aya Sato"))
+                .child(Spacer::new()),
         )
     }
 
-    fn received(text: &'static str, width: f32, height: f32) -> StackChild {
+    fn received(text: &'static str) -> StackChild {
         HStack::new()
             .alignment(StackAlignment::Center)
             .gap(StackGap::None)
-            .child(MessageBubble::new(text).frame(width, height))
+            .child(MessageBubble::new(text))
             .child(Spacer::new())
-            .height(height)
+            .layout()
     }
 
-    fn sent(text: &'static str, width: f32, height: f32) -> StackChild {
+    fn sent(text: &'static str) -> StackChild {
         HStack::new()
             .alignment(StackAlignment::Center)
             .gap(StackGap::None)
             .child(Spacer::new())
-            .child(
-                MessageBubble::new(text)
-                    .direction(MessageDirection::Sent)
-                    .frame(width, height),
-            )
-            .height(height)
+            .child(MessageBubble::new(text).direction(MessageDirection::Sent))
+            .layout()
     }
 
     fn messages(&self) -> Box<dyn View + 'static> {
-        Box::new(VStack::new()
-            .alignment(StackAlignment::Stretch)
-            .gap(StackGap::Medium)
-            .child(
-                Text::new("Today - 10:42")
-                    .font_size(12.0)
-                    .line_height(16.0)
-                    .alignment(TextAlignment::Center)
-                    .height(16.0),
-            )
-            .child(
-                VStack::new()
-                    .alignment(StackAlignment::Stretch)
-                    .gap(StackGap::ExtraSmall)
-                    .child(Self::received(
-                        "Hey! Are we still on for this afternoon?",
-                        295.0,
-                        38.0,
-                    ))
-                    .child(Self::received(
-                        "We've encountered a problem with the project\nand would like to discuss it with someone.",
-                        351.0,
-                        60.0,
-                    )),
-            )
-            .child(Self::sent("Yes - 3:00 works for me.", 206.0, 38.0))
-            .child(Self::sent(
-                "Let's meet in the studio.\nI'll have the notes ready.",
-                196.0,
-                60.0,
-            ))
-            .child(Self::received("Perfect. See you then!", 182.0, 38.0))
-            .child(
-                Text::new("Read 10:43")
-                    .font_size(12.0)
-                    .line_height(16.0)
-                    .height(16.0),
-            )
+        Box::new(
+            VStack::new()
+                .alignment(StackAlignment::Stretch)
+                .gap(StackGap::Medium)
+                .child(
+                    Text::metadata("Today · 10:42").alignment(TextAlignment::Center),
+                )
+                .child(
+                    VStack::new()
+                        .alignment(StackAlignment::Stretch)
+                        .gap(StackGap::ExtraSmall)
+                        .child(Self::received("Hey! Are we still on for this afternoon?"))
+                        .child(Self::received(
+                            "We've encountered a problem with the project\nand would like to discuss it with someone.",
+                        )),
+                )
+                .child(
+                    VStack::new()
+                        .alignment(StackAlignment::Stretch)
+                        .gap(StackGap::ExtraSmall)
+                        .child(Self::sent("Yes — 3:00 works for me."))
+                        .child(Self::sent(
+                            "Let’s meet in the studio.\nI’ll have the notes ready.",
+                        )),
+                )
+                .child(Self::received("Perfect. See you then!"))
+                .child(Text::metadata("Read 10:43")),
         )
     }
 
@@ -187,63 +156,200 @@ impl ComponentLab {
             HStack::new()
                 .alignment(StackAlignment::Center)
                 .gap(StackGap::Small)
-                .child(IconButton::new(IconName::Plus).frame(24.0, 24.0))
+                .child(IconButton::new(IconName::Plus))
                 .child(
                     TextField::new(self.composer.binding())
                         .placeholder("Message")
-                        .size(TextFieldSize::Medium)
+                        .capsule()
                         .layout()
                         .flex_grow(1.0),
                 )
-                .child(
-                    IconButton::new(IconName::ChevronRight)
-                        .tone(IconButtonTone::Accent)
-                        .frame(32.0, 32.0),
-                ),
+                .child(IconButton::new(IconName::ArrowUp).tone(IconButtonTone::Accent)),
         )
     }
 
     fn component_gallery(&self) -> Box<dyn View + 'static> {
-        Box::new(
-            Padding::all(24.0).content(
-                VStack::new()
-                    .alignment(StackAlignment::Stretch)
-                    .gap(StackGap::Large)
-                    .child(
-                        HStack::new()
-                            .alignment(StackAlignment::Center)
-                            .gap(StackGap::Small)
-                            .child(Badge::new("Synced").tone(BadgeTone::Success))
-                            .child(Badge::new("Draft").tone(BadgeTone::Warning))
-                            .child(Badge::new("Error").tone(BadgeTone::Error))
-                            .height(24.0),
-                    )
-                    .child(
-                        HStack::new()
-                            .alignment(StackAlignment::Center)
-                            .gap(StackGap::Large)
-                            .child(Checkbox::new(self.pinned.binding()).label("Pinned"))
-                            .child(Switch::new(self.notifications.binding()).label("Alerts"))
-                            .child(RadioButton::new(self.radio.binding(), 0).label("Compact"))
-                            .child(RadioButton::new(self.radio.binding(), 1).label("Roomy"))
-                            .height(32.0),
-                    )
-                    .child(
-                        HStack::new()
-                            .alignment(StackAlignment::Center)
-                            .gap(StackGap::Large)
-                            .child(Stepper::new(self.count.binding()).range(0, 9))
-                            .child(
-                                Slider::new(self.density.binding())
-                                    .range(0.0..=100.0)
-                                    .step(5.0)
-                                    .width(160.0),
-                            )
-                            .child(ProgressBar::new(self.density.get() / 100.0).width(160.0))
-                            .height(32.0),
-                    ),
-            ),
-        )
+        Box::new(ContentArea::new(Scroll::vertical(
+            VStack::new()
+                .alignment(StackAlignment::Stretch)
+                .gap(StackGap::Large)
+                .child(Text::styled("ViewKit Components", TextRole::TitleLarge))
+                .child(
+                    VStack::new()
+                        .alignment(StackAlignment::Start)
+                        .gap(StackGap::Small)
+                        .child(Text::styled("Typography", TextRole::TitleSmall))
+                        .child(Text::styled("Display Large", TextRole::DisplayLarge))
+                        .child(Text::styled("Display Medium", TextRole::DisplayMedium))
+                        .child(Text::styled("Title Large", TextRole::TitleLarge))
+                        .child(Text::styled("Title Medium", TextRole::TitleMedium))
+                        .child(Text::styled("Title Small", TextRole::TitleSmall))
+                        .child(Text::body("Body"))
+                        .child(Text::label("Label"))
+                        .child(Text::caption("Caption")),
+                )
+                .child(Divider::new())
+                .child(
+                    VStack::new()
+                        .alignment(StackAlignment::Start)
+                        .gap(StackGap::Small)
+                        .child(Text::styled("Buttons", TextRole::TitleSmall))
+                        .child(
+                            HStack::new()
+                                .alignment(StackAlignment::Center)
+                                .gap(StackGap::Small)
+                                .child(Button::new("Standard"))
+                                .child(Button::new("Primary").style(ButtonStyle::Primary))
+                                .child(Button::new("Accent").style(ButtonStyle::Accent))
+                                .child(Button::new("Ghost").style(ButtonStyle::Ghost))
+                                .child(Button::new("Danger").style(ButtonStyle::Danger))
+                                .child(Button::new("Disabled").enabled(false))
+                                .child(IconButton::new(IconName::Settings))
+                                .child(
+                                    IconButton::new(IconName::ArrowUp).tone(IconButtonTone::Accent),
+                                ),
+                        ),
+                )
+                .child(Divider::new())
+                .child(
+                    VStack::new()
+                        .alignment(StackAlignment::Start)
+                        .gap(StackGap::Small)
+                        .child(Text::styled("Fields and Navigation", TextRole::TitleSmall))
+                        .child(
+                            HStack::new()
+                                .alignment(StackAlignment::Center)
+                                .gap(StackGap::Large)
+                                .child(
+                                    TextField::new(self.field.binding())
+                                        .placeholder("Search or enter text"),
+                                )
+                                .child(Picker::new("Studio"))
+                                .child(
+                                    Tabs::new(self.tabs.binding())
+                                        .item(0, "General")
+                                        .item(1, "Details")
+                                        .disabled_item(2, "History"),
+                                ),
+                        )
+                        .child(
+                            SegmentedControl::new(self.segment.binding())
+                                .item(0, "List")
+                                .item(1, "Grid")
+                                .disabled_item(2, "Columns"),
+                        ),
+                )
+                .child(Divider::new())
+                .child(
+                    HStack::new()
+                        .alignment(StackAlignment::Center)
+                        .gap(StackGap::Small)
+                        .child(Badge::new("Neutral"))
+                        .child(Badge::new("Active").tone(BadgeTone::Accent))
+                        .child(Badge::new("Synced").tone(BadgeTone::Success))
+                        .child(Badge::new("Draft").tone(BadgeTone::Warning))
+                        .child(Badge::new("Error").tone(BadgeTone::Error)),
+                )
+                .child(
+                    HStack::new()
+                        .alignment(StackAlignment::Center)
+                        .gap(StackGap::Large)
+                        .child(Checkbox::new(self.pinned.binding()).label("Pinned"))
+                        .child(Switch::new(self.notifications.binding()).label("Alerts"))
+                        .child(RadioButton::new(self.radio.binding(), 0).label("Compact"))
+                        .child(RadioButton::new(self.radio.binding(), 1).label("Roomy")),
+                )
+                .child(
+                    HStack::new()
+                        .alignment(StackAlignment::Center)
+                        .gap(StackGap::Large)
+                        .child(Stepper::new(self.count.binding()).range(0, 9))
+                        .child(
+                            Slider::new(self.density.binding())
+                                .range(0.0..=100.0)
+                                .step(5.0),
+                        )
+                        .child(ProgressBar::new(self.density.get() / 100.0)),
+                )
+                .child(Divider::new())
+                .child(
+                    VStack::new()
+                        .alignment(StackAlignment::Start)
+                        .gap(StackGap::Small)
+                        .child(Text::styled("Lists and Messages", TextRole::TitleSmall))
+                        .child(ListRow::new("Default sidebar item").subtitle("Secondary text"))
+                        .child(
+                            ListRow::new("Selected sidebar item")
+                                .subtitle("With status")
+                                .selected(true)
+                                .status_marker(true),
+                        )
+                        .child(MessageBubble::new("Received message bubble"))
+                        .child(
+                            MessageBubble::new("Sent message bubble")
+                                .direction(MessageDirection::Sent),
+                        ),
+                )
+                .child(Divider::new())
+                .child(
+                    HStack::new()
+                        .alignment(StackAlignment::Start)
+                        .gap(StackGap::Large)
+                        .child(
+                            VStack::new()
+                                .alignment(StackAlignment::Start)
+                                .gap(StackGap::Small)
+                                .child(Text::styled("Menu", TextRole::TitleSmall))
+                                .child(
+                                    Menu::new()
+                                        .item(MenuItem::new("New Document").shortcut("Ctrl+N"))
+                                        .item(MenuItem::new("Open").shortcut("Ctrl+O"))
+                                        .separator()
+                                        .item(MenuItem::new("Delete").danger(true))
+                                        .item(MenuItem::new("Unavailable").enabled(false)),
+                                )
+                                .child(Tooltip::new("Tooltip")),
+                        )
+                        .child(
+                            Card::new().content(
+                                VStack::new()
+                                    .alignment(StackAlignment::Start)
+                                    .gap(StackGap::Small)
+                                    .child(Text::styled("Card", TextRole::TitleSmall))
+                                    .child(Text::body("Content receives default insets.")),
+                            ),
+                        )
+                        .child(
+                            Popover::new().content(
+                                VStack::new()
+                                    .alignment(StackAlignment::Start)
+                                    .gap(StackGap::Small)
+                                    .child(Text::styled("Popover", TextRole::TitleSmall))
+                                    .child(Text::body("Compact floating content.")),
+                            ),
+                        )
+                        .child(
+                            Dialog::new().content(
+                                VStack::new()
+                                    .alignment(StackAlignment::Stretch)
+                                    .gap(StackGap::Medium)
+                                    .child(Text::styled("Dialog", TextRole::TitleMedium))
+                                    .child(Text::body("A modal surface with standard spacing."))
+                                    .child(Spacer::new())
+                                    .child(
+                                        HStack::new()
+                                            .alignment(StackAlignment::Center)
+                                            .gap(StackGap::Small)
+                                            .child(Spacer::new())
+                                            .child(Button::new("Cancel"))
+                                            .child(
+                                                Button::new("Continue").style(ButtonStyle::Accent),
+                                            ),
+                                    ),
+                            ),
+                        ),
+                ),
+        )))
     }
 
     fn chat_pane(&self) -> Box<dyn View + 'static> {
@@ -251,24 +357,13 @@ impl ComponentLab {
             VStack::new()
                 .alignment(StackAlignment::Stretch)
                 .gap(StackGap::None)
+                .child(Toolbar::new(self.header()))
                 .child(
-                    Padding::symmetric(24.0, 16.0)
-                        .content(self.header())
-                        .height(64.0),
-                )
-                .child(Divider::new())
-                .child(if self.tab.get() == 0 {
-                    Scroll::vertical(Padding::all(24.0).content(self.messages()).height(560.0))
+                    ContentArea::new(Scroll::vertical(self.messages()))
                         .layout()
-                        .flex_grow(1.0)
-                } else {
-                    self.component_gallery().layout().flex_grow(1.0)
-                })
-                .child(
-                    Padding::symmetric(24.0, 12.0)
-                        .content(self.composer())
-                        .height(56.0),
-                ),
+                        .flex_grow(1.0),
+                )
+                .child(Toolbar::bottom(self.composer())),
         )
     }
 }
@@ -279,13 +374,15 @@ impl App for ComponentLab {
     fn new() -> Self {
         Self {
             selected_conversation: State::new(0),
-            tab: State::new(0),
             notifications: State::new(true),
             pinned: State::new(true),
             radio: State::new(0),
+            tabs: State::new(0),
+            segment: State::new(0),
             density: State::new(60.0),
             count: State::new(3),
             composer: State::new(String::new()),
+            field: State::new(String::new()),
         }
     }
 
@@ -296,42 +393,13 @@ impl App for ComponentLab {
     }
 
     fn body(&self, context: &ViewContext) -> Box<dyn View + 'static> {
-        let compact = context.size().width < 900.0;
+        let component_lab = context.size().width >= 1440.0;
 
-        let app_shell = if compact {
-            VStack::new()
-                .alignment(StackAlignment::Stretch)
-                .gap(StackGap::None)
-                .child(
-                    Padding::only(16.0, 12.0, 16.0, 12.0)
-                        .content(self.sidebar())
-                        .height(280.0),
-                )
-                .child(Divider::new())
-                .child(self.chat_pane())
-                .layout()
+        if component_lab {
+            self.component_gallery()
         } else {
-            HStack::new()
-                .alignment(StackAlignment::Stretch)
-                .gap(StackGap::None)
-                .child(
-                    Surface::sidebar()
-                        .content(Padding::only(16.0, 12.0, 16.0, 12.0).content(self.sidebar()))
-                        .width(320.0),
-                )
-                .child(Divider::new())
-                .child(self.chat_pane())
-                .layout()
-        };
-
-        Box::new(
-            Surface::app().content(
-                VStack::new()
-                    .alignment(StackAlignment::Stretch)
-                    .gap(StackGap::None)
-                    .child(app_shell.flex_grow(1.0)),
-            ),
-        )
+            Box::new(NavigationSplitView::new(self.sidebar(), self.chat_pane()))
+        }
     }
 }
 
