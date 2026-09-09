@@ -46,7 +46,7 @@ impl ComponentLab {
 
         Box::new(
             VStack::new()
-                .alignment(StackAlignment::Start)
+                .alignment(StackAlignment::Stretch)
                 .gap(StackGap::Large)
                 .child(header)
                 .child(
