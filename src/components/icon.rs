@@ -9,19 +9,14 @@ use std::sync::OnceLock;
 
 const DEFAULT_ICON_SIZE: f32 = 24.0;
 
-macro_rules! lucide_svg {
+macro_rules! viewkit_svg {
     ($name:literal) => {{
         static DATA: OnceLock<SvgData> = OnceLock::new();
 
         DATA.get_or_init(|| {
-            SvgData::decode(include_bytes!(concat!(
-                "../../resources/icons/",
-                $name,
-                ".svg",
-            )))
-            .unwrap_or_else(|error| {
-                panic!("アイコン `{}` を解析できませんでした: {}", $name, error,)
-            })
+            SvgData::decode(include_bytes!(concat!("../icons/", $name, ".svg"))).unwrap_or_else(
+                |error| panic!("Failed to parse the `{}` icon SVG: {}", $name, error),
+            )
         })
         .clone()
     }};
@@ -41,6 +36,7 @@ pub enum IconName {
 
     ChevronLeft,
     ChevronRight,
+    ChevronDown,
 
     House,
     AppWindow,
@@ -70,103 +66,107 @@ impl IconName {
     fn svg(self) -> SvgData {
         match self {
             Self::Search => {
-                lucide_svg!("search")
+                viewkit_svg!("search")
             }
 
             Self::Plus => {
-                lucide_svg!("plus")
+                viewkit_svg!("plus")
             }
 
             Self::Minus => {
-                lucide_svg!("minus")
+                viewkit_svg!("minus")
             }
 
             Self::Check => {
-                lucide_svg!("check")
+                viewkit_svg!("check")
             }
 
             Self::X => {
-                lucide_svg!("x")
+                viewkit_svg!("x")
             }
 
             Self::Settings => {
-                lucide_svg!("settings")
+                viewkit_svg!("settings")
             }
 
             Self::ChevronLeft => {
-                lucide_svg!("chevron-left")
+                viewkit_svg!("chevron-left")
             }
 
             Self::ChevronRight => {
-                lucide_svg!("chevron-right")
+                viewkit_svg!("chevron-right")
+            }
+
+            Self::ChevronDown => {
+                viewkit_svg!("chevron-down")
             }
 
             Self::House => {
-                lucide_svg!("house")
+                viewkit_svg!("house")
             }
 
             Self::AppWindow => {
-                lucide_svg!("app-window")
+                viewkit_svg!("app-window")
             }
 
             Self::Download => {
-                lucide_svg!("download")
+                viewkit_svg!("download")
             }
 
             Self::HardDrive => {
-                lucide_svg!("hard-drive")
+                viewkit_svg!("hard-drive")
             }
 
             Self::Folder => {
-                lucide_svg!("folder")
+                viewkit_svg!("folder")
             }
 
             Self::FolderOpen => {
-                lucide_svg!("folder-open")
+                viewkit_svg!("folder-open")
             }
 
             Self::FolderPlus => {
-                lucide_svg!("folder-plus")
+                viewkit_svg!("folder-plus")
             }
 
             Self::File => {
-                lucide_svg!("file")
+                viewkit_svg!("file")
             }
 
             Self::FileText => {
-                lucide_svg!("file-text")
+                viewkit_svg!("file-text")
             }
 
             Self::FileImage => {
-                lucide_svg!("file-image")
+                viewkit_svg!("file-image")
             }
 
             Self::FileArchive => {
-                lucide_svg!("file-archive")
+                viewkit_svg!("file-archive")
             }
 
             Self::ExternalLink => {
-                lucide_svg!("external-link")
+                viewkit_svg!("external-link")
             }
 
             Self::LayoutList => {
-                lucide_svg!("layout-list")
+                viewkit_svg!("layout-list")
             }
 
             Self::LayoutGrid => {
-                lucide_svg!("layout-grid")
+                viewkit_svg!("layout-grid")
             }
 
             Self::Columns3 => {
-                lucide_svg!("columns-3")
+                viewkit_svg!("columns-3")
             }
 
             Self::Eye => {
-                lucide_svg!("eye")
+                viewkit_svg!("eye")
             }
 
             Self::Volume2 => {
-                lucide_svg!("volume-2")
+                viewkit_svg!("volume-2")
             }
         }
     }
@@ -188,7 +188,7 @@ impl Icon {
 
             size: DEFAULT_ICON_SIZE,
 
-            color: Color::BLACK,
+            color: Color::from_rgb_hex(0x17181a),
 
             opacity: 1.0,
         }

@@ -2,11 +2,11 @@ use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
 use crate::layout::{StackAlignment, StackGap, ViewExt};
 use crate::theme::{CornerRadius, ShadowStyle, Theme};
-use crate::typography::TextAlignment;
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 use super::{
-    Button, ButtonInteractionState, ButtonStyle, HStack, Padding, Spacer, Text, ZStackAlignment,
+    Button, ButtonInteractionState, ButtonStyle, HStack, Icon, IconName, Padding, Spacer, Text,
+    ZStackAlignment,
 };
 
 pub struct Picker {
@@ -64,12 +64,10 @@ impl Picker {
                         )
                         .child(Spacer::new())
                         .child(
-                            Text::new("v")
-                                .font_size(11.0)
-                                .line_height(18.0)
-                                .alignment(TextAlignment::Center)
+                            Icon::new(IconName::ChevronDown)
+                                .size(12.0)
                                 .color(theme.colors.text_secondary)
-                                .frame(12.0, 18.0),
+                                .frame(12.0, 12.0),
                         ),
                 ),
             )
