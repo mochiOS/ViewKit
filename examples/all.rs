@@ -107,6 +107,11 @@ impl ComponentLab {
                         .weight(500),
                 )
                 .child(Spacer::new())
+                .child(
+                    Tabs::new(self.tab.binding())
+                        .item(0, "Chat")
+                        .item(1, "Components"),
+                )
                 .child(Badge::new("Online").tone(BadgeTone::Accent))
                 .child(Picker::new("Studio").frame(120.0, 24.0))
                 .child(IconButton::new(IconName::Settings).frame(24.0, 24.0)),
@@ -198,46 +203,45 @@ impl ComponentLab {
         )
     }
 
-    fn component_dock(&self) -> Box<dyn View + 'static> {
+    fn component_gallery(&self) -> Box<dyn View + 'static> {
         Box::new(
-            Card::new().content(
-                Padding::all(12.0).content(
-                    VStack::new()
-                        .alignment(StackAlignment::Stretch)
-                        .gap(StackGap::Small)
-                        .child(
-                            HStack::new()
-                                .alignment(StackAlignment::Center)
-                                .gap(StackGap::Small)
-                                .child(
-                                    Tabs::new(self.tab.binding())
-                                        .item(0, "Chat")
-                                        .item(1, "Files")
-                                        .disabled_item(2, "Muted"),
-                                )
-                                .child(Spacer::new())
-                                .child(Badge::new("Synced").tone(BadgeTone::Success))
-                                .child(Badge::new("Draft").tone(BadgeTone::Warning))
-                                .child(Badge::new("Error").tone(BadgeTone::Error)),
-                        )
-                        .child(
-                            HStack::new()
-                                .alignment(StackAlignment::Center)
-                                .gap(StackGap::Large)
-                                .child(Checkbox::new(self.pinned.binding()).label("Pinned"))
-                                .child(Switch::new(self.notifications.binding()).label("Alerts"))
-                                .child(RadioButton::new(self.radio.binding(), 0).label("Compact"))
-                                .child(RadioButton::new(self.radio.binding(), 1).label("Roomy"))
-                                .child(Stepper::new(self.count.binding()).range(0, 9))
-                                .child(
-                                    Slider::new(self.density.binding())
-                                        .range(0.0..=100.0)
-                                        .step(5.0)
-                                        .width(160.0),
-                                )
-                                .child(ProgressBar::new(self.density.get() / 100.0).width(160.0)),
-                        ),
-                ),
+            Padding::all(24.0).content(
+                VStack::new()
+                    .alignment(StackAlignment::Stretch)
+                    .gap(StackGap::Large)
+                    .child(
+                        HStack::new()
+                            .alignment(StackAlignment::Center)
+                            .gap(StackGap::Small)
+                            .child(Badge::new("Synced").tone(BadgeTone::Success))
+                            .child(Badge::new("Draft").tone(BadgeTone::Warning))
+                            .child(Badge::new("Error").tone(BadgeTone::Error))
+                            .height(24.0),
+                    )
+                    .child(
+                        HStack::new()
+                            .alignment(StackAlignment::Center)
+                            .gap(StackGap::Large)
+                            .child(Checkbox::new(self.pinned.binding()).label("Pinned"))
+                            .child(Switch::new(self.notifications.binding()).label("Alerts"))
+                            .child(RadioButton::new(self.radio.binding(), 0).label("Compact"))
+                            .child(RadioButton::new(self.radio.binding(), 1).label("Roomy"))
+                            .height(32.0),
+                    )
+                    .child(
+                        HStack::new()
+                            .alignment(StackAlignment::Center)
+                            .gap(StackGap::Large)
+                            .child(Stepper::new(self.count.binding()).range(0, 9))
+                            .child(
+                                Slider::new(self.density.binding())
+                                    .range(0.0..=100.0)
+                                    .step(5.0)
+                                    .width(160.0),
+                            )
+                            .child(ProgressBar::new(self.density.get() / 100.0).width(160.0))
+                            .height(32.0),
+                    ),
             ),
         )
     }
@@ -253,11 +257,13 @@ impl ComponentLab {
                         .height(64.0),
                 )
                 .child(Divider::new())
-                .child(
+                .child(if self.tab.get() == 0 {
                     Scroll::vertical(Padding::all(24.0).content(self.messages()).height(560.0))
                         .layout()
-                        .flex_grow(1.0),
-                )
+                        .flex_grow(1.0)
+                } else {
+                    self.component_gallery().layout().flex_grow(1.0)
+                })
                 .child(
                     Padding::symmetric(24.0, 12.0)
                         .content(self.composer())
@@ -323,12 +329,7 @@ impl App for ComponentLab {
                 VStack::new()
                     .alignment(StackAlignment::Stretch)
                     .gap(StackGap::None)
-                    .child(app_shell.flex_grow(1.0))
-                    .child(
-                        Padding::only(0.0, 12.0, 12.0, 12.0)
-                            .content(self.component_dock())
-                            .height(128.0),
-                    ),
+                    .child(app_shell.flex_grow(1.0)),
             ),
         )
     }
