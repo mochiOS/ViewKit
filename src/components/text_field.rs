@@ -455,32 +455,32 @@ pub enum TextFieldSize {
 impl TextFieldSize {
     pub const fn height(self) -> f32 {
         match self {
-            Self::Small => 28.0,
-            Self::Medium => 36.0,
-            Self::Large => 44.0,
+            Self::Small => 24.0,
+            Self::Medium => 32.0,
+            Self::Large => 40.0,
         }
     }
 
     const fn horizontal_padding(self) -> f32 {
         match self {
-            Self::Small => 9.0,
-            Self::Medium => 11.0,
-            Self::Large => 13.0,
+            Self::Small => 12.0,
+            Self::Medium => 12.0,
+            Self::Large => 14.0,
         }
     }
 
     const fn font_size(self) -> f32 {
         match self {
-            Self::Small => 12.0,
-            Self::Medium => 13.0,
-            Self::Large => 14.0,
+            Self::Small => 13.0,
+            Self::Medium => 15.0,
+            Self::Large => 15.0,
         }
     }
 
     const fn line_height(self) -> f32 {
         match self {
             Self::Small => 18.0,
-            Self::Medium => 20.0,
+            Self::Medium => 22.0,
             Self::Large => 22.0,
         }
     }
@@ -521,7 +521,7 @@ impl TextField {
 
             placeholder: String::new(),
             size: TextFieldSize::Medium,
-            radius: CornerRadius::Medium,
+            radius: CornerRadius::Small,
 
             enabled: true,
             invalid: false,
@@ -538,7 +538,7 @@ impl TextField {
 
             placeholder: String::new(),
             size: TextFieldSize::Medium,
-            radius: CornerRadius::Medium,
+            radius: CornerRadius::Small,
 
             enabled: true,
             invalid: false,
@@ -708,7 +708,7 @@ impl View for TextField {
 
         let measured_text = text.measure_unbounded(context.text_measurer);
 
-        let width = (measured_text.width + self.size.horizontal_padding() * 2.0).max(160.0);
+        let width = (measured_text.width + self.size.horizontal_padding() * 2.0).max(100.0);
 
         constraints.constrain(Size::new(width, self.size.height()))
     }

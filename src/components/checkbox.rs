@@ -53,14 +53,14 @@ impl Checkbox {
                     checked,
                     enabled: self.enabled,
                 }
-                .frame(18.0, 18.0),
+                .frame(12.0, 12.0),
             );
 
         if let Some(label) = self.label.as_ref() {
             content = content.child(
                 Text::new(label.clone())
-                    .font_size(12.0)
-                    .line_height(20.0)
+                    .font_size(13.0)
+                    .line_height(18.0)
                     .weight(500)
                     .color(if self.enabled {
                         theme.colors.text_primary
@@ -84,7 +84,7 @@ impl Checkbox {
             .shadow(ShadowStyle::None)
             .alignment(ZStackAlignment::Leading)
             .enabled(self.enabled)
-            .content(Padding::symmetric(6.0, 5.0).content(content))
+            .content(Padding::symmetric(4.0, 4.0).content(content))
             .on_click(move || {
                 checked.set(!checked.get());
             })
@@ -118,7 +118,7 @@ struct CheckboxMark {
 
 impl View for CheckboxMark {
     fn measure(&self, constraints: Constraints, _context: &mut MeasureContext<'_>) -> Size {
-        constraints.constrain(Size::new(18.0, 18.0))
+        constraints.constrain(Size::new(12.0, 12.0))
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
@@ -136,8 +136,8 @@ impl View for CheckboxMark {
 
             // TODO: SVGとかにする
             Text::new("✓")
-                .font_size(12.0)
-                .line_height(18.0)
+                .font_size(9.0)
+                .line_height(12.0)
                 .weight(700)
                 .alignment(TextAlignment::Center)
                 .color(Color::WHITE)
@@ -150,7 +150,7 @@ impl View for CheckboxMark {
             };
 
             Rectangle::new()
-                .color(RectangleColor::Surface)
+                .color(RectangleColor::Custom(context.theme.colors.surface_muted))
                 .radius(CornerRadius::Custom(4.0))
                 .border(BorderStyle::custom(border, 1.0))
                 .paint(bounds, context);

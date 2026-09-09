@@ -468,9 +468,9 @@ impl View for Button {
             return;
         }
 
-        const HORIZONTAL_PADDING: f32 = 12.0;
-        const FONT_SIZE: f32 = 14.0;
-        const LINE_HEIGHT: f32 = 22.0;
+        const HORIZONTAL_PADDING: f32 = 8.0;
+        const FONT_SIZE: f32 = 13.0;
+        const LINE_HEIGHT: f32 = 18.0;
         const FONT_WEIGHT: u16 = 500;
 
         self.interaction.set_enabled(self.enabled);
@@ -690,10 +690,10 @@ impl View for Button {
     }
 
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
-        const HORIZONTAL_PADDING: f32 = 12.0;
-        const INTRINSIC_HEIGHT: f32 = 32.0;
-        const FONT_SIZE: f32 = 14.0;
-        const LINE_HEIGHT: f32 = 22.0;
+        const HORIZONTAL_PADDING: f32 = 8.0;
+        const INTRINSIC_HEIGHT: f32 = 24.0;
+        const FONT_SIZE: f32 = 13.0;
+        const LINE_HEIGHT: f32 = 18.0;
         const FONT_WEIGHT: u16 = 500;
 
         let width_is_fixed = constraints.minimum.width.is_finite()

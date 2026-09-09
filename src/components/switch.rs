@@ -15,10 +15,10 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-const TRACK_WIDTH: f32 = 44.0;
-const TRACK_HEIGHT: f32 = 26.0;
+const TRACK_WIDTH: f32 = 40.0;
+const TRACK_HEIGHT: f32 = 22.0;
 const KNOB_SIZE: f32 = 18.0;
-const PRESSED_KNOB_WIDTH: f32 = 24.0;
+const PRESSED_KNOB_WIDTH: f32 = 22.0;
 const KNOB_INSET: f32 = 2.0;
 const DRAG_THRESHOLD: f32 = 3.0;
 const DRAG_HIT_PADDING: f32 = 6.0;
@@ -118,15 +118,15 @@ impl Switch {
         if let Some(label) = self.label.as_ref() {
             content = content.child(
                 Text::new(label.clone())
-                    .font_size(12.0)
-                    .line_height(20.0)
+                    .font_size(13.0)
+                    .line_height(18.0)
                     .weight(500)
                     .color(if self.enabled {
                         theme.colors.text_primary
                     } else {
                         theme.colors.text_disabled
                     })
-                    .height(20.0)
+                    .height(18.0)
                     .flex_shrink(0.0),
             );
         }
@@ -156,7 +156,7 @@ impl Switch {
             .shadow(ShadowStyle::None)
             .alignment(ZStackAlignment::Leading)
             .enabled(self.enabled)
-            .content(Padding::symmetric(6.0, 4.0).content(content))
+            .content(Padding::symmetric(4.0, 4.0).content(content))
     }
 
     fn handle_switch_event(
@@ -296,7 +296,7 @@ impl Switch {
                     }
                 };
 
-                let Some((was_dragging, drag_checked)) = release else {
+                let Some((was_dragging, _drag_checked)) = release else {
                     return EventResult::Ignored;
                 };
 
@@ -459,11 +459,11 @@ impl View for SwitchMark {
 impl SwitchMark {
     fn track_color(&self, theme: &Theme, hovered: bool, pressed: bool, position: f32) -> Color {
         let off_color = if pressed {
-            Color::from_rgb_hex(0xc7c7cc)
+            theme.colors.border_strong
         } else if hovered {
-            Color::from_rgb_hex(0xd1d1d6)
+            theme.colors.border
         } else {
-            Color::from_rgb_hex(0xe5e5ea)
+            theme.colors.surface_muted
         };
 
         let on_color = if pressed {

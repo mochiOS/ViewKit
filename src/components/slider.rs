@@ -11,14 +11,14 @@ use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 use super::{Ellipse, EllipseColor, Rectangle, RectangleColor, Text};
 
-const DEFAULT_WIDTH: f32 = 200.0;
-const SLIDER_HEIGHT: f32 = 32.0;
-const LABEL_HEIGHT: f32 = 20.0;
-const LABEL_SPACING: f32 = 6.0;
+const DEFAULT_WIDTH: f32 = 160.0;
+const SLIDER_HEIGHT: f32 = 24.0;
+const LABEL_HEIGHT: f32 = 18.0;
+const LABEL_SPACING: f32 = 4.0;
 const TRACK_HEIGHT: f32 = 4.0;
 const DRAGGING_KNOB_SIZE: f32 = 12.0;
 const HIT_PADDING: f32 = 8.0;
-const KNOB_SIZE: f32 = 16.0;
+const KNOB_SIZE: f32 = 12.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct SliderInteractionInner {
@@ -374,26 +374,31 @@ impl View for Slider {
         );
 
         let knob_color = if !self.enabled {
-            Color::rgba(255, 255, 255, 170)
+            context.theme.colors.surface_subtle
         } else if dragging {
-            Color::from_rgb_hex(0xe5e5ea)
+            context.theme.colors.surface
         } else if hovered {
-            Color::from_rgb_hex(0xf2f2f7)
+            context.theme.colors.surface
         } else {
-            Color::WHITE
+            context.theme.colors.elevated_surface
         };
 
         let knob_shadow = if self.enabled {
-            ShadowStyle::Custom(ShadowSet::double(
-                Shadow::new(Color::rgba(0, 0, 0, 28), 0.0, 1.0, 2.0, 0.0),
-                Shadow::new(Color::rgba(0, 0, 0, 14), 0.0, 2.0, 5.0, 0.0),
-            ))
+            ShadowStyle::None
         } else {
             ShadowStyle::None
         };
 
         Ellipse::new()
             .color(EllipseColor::Custom(knob_color))
+            .border(super::BorderStyle::custom(
+                if hovered {
+                    context.theme.colors.accent
+                } else {
+                    context.theme.colors.border
+                },
+                1.0,
+            ))
             .shadow(knob_shadow)
             .paint(knob_bounds, context);
     }

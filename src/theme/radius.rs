@@ -10,11 +10,11 @@ pub struct RadiusTokens {
 
 impl RadiusTokens {
     pub const DEFAULT: Self = Self {
-        small: 6.0,
-        medium: 9.0,
-        large: 12.0,
-        extra_large: 14.0,
-        card: 18.0,
+        small: 8.0,
+        medium: 10.0,
+        large: 14.0,
+        extra_large: 18.0,
+        card: 14.0,
         full: 9999.0,
     };
 }

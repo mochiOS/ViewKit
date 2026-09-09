@@ -83,29 +83,33 @@ impl ListRow {
             .child(
                 Text::new(self.title.clone())
                     .font_size(13.0)
-                    .line_height(20.0)
-                    .weight(600)
-                    .color(theme.colors.text_primary),
+                    .line_height(18.0)
+                    .weight(500)
+                    .color(if self.selected {
+                        theme.colors.accent
+                    } else {
+                        theme.colors.text_primary
+                    }),
             );
 
         if let Some(subtitle) = self.subtitle.as_ref() {
             labels = labels.child(
                 Text::new(subtitle.clone())
                     .font_size(11.0)
-                    .line_height(18.0)
+                    .line_height(16.0)
                     .color(theme.colors.text_secondary),
             );
         }
 
         let mut row = HStack::new()
             .alignment(StackAlignment::Center)
-            .gap(StackGap::Medium);
+            .gap(StackGap::Small);
 
         if let Some(icon) = self.icon {
             row = row.child(
                 Icon::new(icon)
-                    .size(20.0)
-                    .color(Color::BLACK)
+                    .size(14.0)
+                    .color(theme.colors.text_secondary)
                     .frame(24.0, 24.0),
             );
         }
@@ -116,7 +120,7 @@ impl ListRow {
             row = row.child(
                 Text::new(trailing.clone())
                     .font_size(11.0)
-                    .line_height(18.0)
+                    .line_height(16.0)
                     .color(theme.colors.text_secondary),
             );
         }
@@ -126,10 +130,20 @@ impl ListRow {
 
     fn button(&self, theme: &Theme) -> Button {
         let mut button = Button::with_interaction(self.interaction.clone())
-            .style(if self.selected {
-                ButtonStyle::Standard
-            } else {
-                ButtonStyle::Ghost
+            .style(ButtonStyle::Custom {
+                background: if self.selected {
+                    theme.colors.accent_soft
+                } else {
+                    Color::TRANSPARENT
+                },
+                hovered_background: if self.selected {
+                    theme.colors.accent_soft
+                } else {
+                    theme.colors.surface_subtle
+                },
+                border: Color::TRANSPARENT,
+                hovered_border: Color::TRANSPARENT,
+                foreground: theme.colors.text_primary,
             })
             .alignment(ZStackAlignment::Leading)
             .enabled(self.enabled)

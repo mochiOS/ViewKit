@@ -22,25 +22,25 @@ pub struct Theme {
 impl Theme {
     pub const LIGHT: Self = Self {
         colors: ColorTokens {
-            background: Color::from_rgb_hex(0xf7f7f7),
+            background: Color::WHITE,
             surface: Color::WHITE,
-            surface_subtle: Color::from_rgb_hex(0xf2f2f2),
-            surface_muted: Color::from_rgb_hex(0xe9e9e9),
+            surface_subtle: Color::from_rgb_hex(0xf6f7f9),
+            surface_muted: Color::from_rgb_hex(0xe8eaed),
             elevated_surface: Color::WHITE,
 
-            text_primary: Color::from_rgb_hex(0x0a0a0a),
-            text_secondary: Color::from_rgb_hex(0x606060),
-            text_tertiary: Color::from_rgb_hex(0x8c8c8c),
-            text_disabled: Color::from_rgb_hex(0x8c8c8c),
+            text_primary: Color::from_rgb_hex(0x17181a),
+            text_secondary: Color::from_rgb_hex(0x62666c),
+            text_tertiary: Color::from_rgb_hex(0xb5b9bf),
+            text_disabled: Color::from_rgb_hex(0xb5b9bf),
 
-            accent: Color::from_rgb_hex(0x0a84ff),
-            accent_hovered: Color::from_rgb_hex(0x0077e6),
-            accent_pressed: Color::from_rgb_hex(0x006bc7),
-            accent_soft: Color::rgba(200, 200, 200, 25),
+            accent: Color::from_rgb_hex(0x3970dd),
+            accent_hovered: Color::from_rgb_hex(0x3265c9),
+            accent_pressed: Color::from_rgb_hex(0x2b58ad),
+            accent_soft: Color::from_rgb_hex(0xeaf0fc),
 
-            border: Color::rgba(0, 0, 0, 20),
-            border_strong: Color::rgba(0, 0, 0, 38),
-            focus_ring: Color::rgba(10, 132, 255, 71),
+            border: Color::from_rgb_hex(0xd9dce1),
+            border_strong: Color::from_rgb_hex(0xb9bdc4),
+            focus_ring: Color::rgba(57, 112, 221, 72),
 
             success: Color::from_rgb_hex(0x218739),
             success_soft: Color::from_rgb_hex(0xe8f6eb),
@@ -48,9 +48,9 @@ impl Theme {
             warning: Color::from_rgb_hex(0x8a5a00),
             warning_soft: Color::from_rgb_hex(0xfff4d7),
 
-            destructive: Color::from_rgb_hex(0xc42b1c),
-            destructive_hovered: Color::from_rgb_hex(0xe81123),
-            destructive_soft: Color::from_rgb_hex(0xfff0ef),
+            destructive: Color::from_rgb_hex(0xd92d20),
+            destructive_hovered: Color::from_rgb_hex(0xb42318),
+            destructive_soft: Color::from_rgb_hex(0xfef3f2),
         },
 
         radius: RadiusTokens::DEFAULT,

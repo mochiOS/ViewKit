@@ -62,22 +62,22 @@ impl RadioButton {
                     selected,
                     enabled: self.enabled,
                 }
-                .frame(18.0, 18.0)
+                .frame(22.0, 22.0)
                 .flex_shrink(0.0),
             );
 
         if let Some(label) = self.label.as_ref() {
             content = content.child(
                 Text::new(label.clone())
-                    .font_size(12.0)
-                    .line_height(20.0)
+                    .font_size(13.0)
+                    .line_height(18.0)
                     .weight(500)
                     .color(if self.enabled {
                         theme.colors.text_primary
                     } else {
                         theme.colors.text_disabled
                     })
-                    .height(20.0)
+                    .height(18.0)
                     .flex_shrink(0.0),
             );
         }
@@ -97,7 +97,7 @@ impl RadioButton {
             .shadow(ShadowStyle::None)
             .alignment(ZStackAlignment::Leading)
             .enabled(self.enabled)
-            .content(Padding::symmetric(6.0, 5.0).content(content))
+            .content(Padding::symmetric(4.0, 4.0).content(content))
             .on_click(move || {
                 selection.set(value);
             })
@@ -131,7 +131,7 @@ struct RadioMark {
 
 impl View for RadioMark {
     fn measure(&self, constraints: Constraints, _context: &mut MeasureContext<'_>) -> Size {
-        constraints.constrain(Size::new(18.0, 18.0))
+        constraints.constrain(Size::new(22.0, 22.0))
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
@@ -149,17 +149,28 @@ impl View for RadioMark {
             context.theme.colors.border
         };
 
+        let indicator_bounds = Rect::new(
+            bounds.origin.x + 3.0,
+            bounds.origin.y + 3.0,
+            (bounds.size.width - 6.0).max(0.0),
+            (bounds.size.height - 6.0).max(0.0),
+        );
+
         Rectangle::new()
-            .color(RectangleColor::Surface)
+            .color(RectangleColor::Custom(if self.enabled {
+                context.theme.colors.surface
+            } else {
+                context.theme.colors.surface_subtle
+            }))
             .radius(CornerRadius::Full)
-            .border(BorderStyle::custom(border, 1.5))
-            .paint(bounds, context);
+            .border(BorderStyle::custom(border, 1.0))
+            .paint(indicator_bounds, context);
 
         if !self.selected {
             return;
         }
 
-        let dot_size = 8.0;
+        let dot_size = 6.0;
         let dot_bounds = Rect::new(
             bounds.origin.x + (bounds.size.width - dot_size) / 2.0,
             bounds.origin.y + (bounds.size.height - dot_size) / 2.0,
