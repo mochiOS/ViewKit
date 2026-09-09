@@ -9,6 +9,7 @@ use crate::view::{Constraints, MeasureContext, PaintContext, View};
 pub enum RectangleColor {
     Background,
     Surface,
+    SubtleSurface,
     ElevatedSurface,
     Accent,
     Destructive,
@@ -20,6 +21,7 @@ impl RectangleColor {
         match self {
             Self::Background => context.theme.colors.background,
             Self::Surface => context.theme.colors.surface,
+            Self::SubtleSurface => context.theme.colors.surface_subtle,
             Self::ElevatedSurface => context.theme.colors.elevated_surface,
             Self::Accent => context.theme.colors.accent,
             Self::Destructive => context.theme.colors.destructive,

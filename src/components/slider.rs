@@ -6,7 +6,7 @@ use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
 use crate::platform::PointerButton;
 use crate::state::Binding;
-use crate::theme::{Color, CornerRadius, Shadow, ShadowSet, ShadowStyle};
+use crate::theme::{Color, CornerRadius, ShadowStyle};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 use super::{Ellipse, EllipseColor, Rectangle, RectangleColor, Text};

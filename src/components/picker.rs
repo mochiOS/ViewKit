@@ -1,7 +1,7 @@
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
 use crate::layout::{StackAlignment, StackGap, ViewExt};
-use crate::theme::{Color, CornerRadius, ShadowStyle, Theme};
+use crate::theme::{CornerRadius, ShadowStyle, Theme};
 use crate::typography::TextAlignment;
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
