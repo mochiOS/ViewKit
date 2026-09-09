@@ -116,7 +116,7 @@ pub struct VkString {
 }
 
 impl VkString {
-    pub fn from_str(value: &str) -> Self {
+    pub fn from_borrowed(value: &str) -> Self {
         Self {
             pointer: value.as_ptr(),
 
@@ -522,7 +522,7 @@ pub extern "C" fn vk_runtime_create(component_instance_id: u64) -> *mut VkRuntim
     catch_unwind(AssertUnwindSafe(|| {
         Box::into_raw(Box::new(VkRuntime::new(component_instance_id)))
     }))
-    .unwrap_or_else(|_| ptr::null_mut())
+    .unwrap_or(ptr::null_mut())
 }
 
 #[unsafe(no_mangle)]
@@ -532,7 +532,7 @@ pub extern "C" fn vk_abi_version() -> u32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn vk_status_name(status: i32) -> VkString {
-    VkString::from_str(status_name(status))
+    VkString::from_borrowed(status_name(status))
 }
 
 fn status_name(status: i32) -> &'static str {
@@ -582,7 +582,13 @@ fn status_name(status: i32) -> &'static str {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn vk_runtime_destroy(runtime: *mut VkRuntime) -> i32 {
+/// Destroys a runtime created by [`vk_runtime_create`].
+///
+/// # Safety
+///
+/// `runtime` must be null or a live pointer returned by [`vk_runtime_create`] that has not
+/// previously been destroyed.
+pub unsafe extern "C" fn vk_runtime_destroy(runtime: *mut VkRuntime) -> i32 {
     ffi_status(|| {
         if runtime.is_null() {
             return Ok(());
@@ -672,7 +678,13 @@ pub extern "C" fn vk_runtime_collect_actions(runtime: *mut VkRuntime) -> i32 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn vk_poll_action(
+/// Copies the next queued action into caller-owned storage.
+///
+/// # Safety
+///
+/// `runtime` must point to a live runtime. `output` and `has_action` must point to writable,
+/// properly aligned values for the duration of the call.
+pub unsafe extern "C" fn vk_poll_action(
     runtime: *mut VkRuntime,
     output: *mut VkActionEvent,
     has_action: *mut u8,
@@ -704,7 +716,13 @@ pub extern "C" fn vk_poll_action(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn vk_state_get_bool(
+/// Reads a boolean state value into caller-owned storage.
+///
+/// # Safety
+///
+/// `runtime` must point to a live runtime and `output` must point to a writable, properly aligned
+/// `u8` for the duration of the call.
+pub unsafe extern "C" fn vk_state_get_bool(
     runtime: *mut VkRuntime,
     state_id: u64,
     output: *mut u8,
@@ -736,7 +754,13 @@ pub extern "C" fn vk_state_set_bool(runtime: *mut VkRuntime, state_id: u64, valu
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn vk_state_get_f32(
+/// Reads a floating-point state value into caller-owned storage.
+///
+/// # Safety
+///
+/// `runtime` must point to a live runtime and `output` must point to a writable, properly aligned
+/// `f32` for the duration of the call.
+pub unsafe extern "C" fn vk_state_get_f32(
     runtime: *mut VkRuntime,
     state_id: u64,
     output: *mut f32,
@@ -768,7 +792,13 @@ pub extern "C" fn vk_state_set_f32(runtime: *mut VkRuntime, state_id: u64, value
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn vk_state_get_u64(
+/// Reads an integer state value into caller-owned storage.
+///
+/// # Safety
+///
+/// `runtime` must point to a live runtime and `output` must point to a writable, properly aligned
+/// `u64` for the duration of the call.
+pub unsafe extern "C" fn vk_state_get_u64(
     runtime: *mut VkRuntime,
     state_id: u64,
     output: *mut u64,
@@ -804,7 +834,13 @@ pub extern "C" fn vk_state_set_u64(runtime: *mut VkRuntime, state_id: u64, value
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn vk_state_string_length(
+/// Reads the byte length of a string state value into caller-owned storage.
+///
+/// # Safety
+///
+/// `runtime` must point to a live runtime and `output` must point to a writable, properly aligned
+/// `usize` for the duration of the call.
+pub unsafe extern "C" fn vk_state_string_length(
     runtime: *mut VkRuntime,
     state_id: u64,
     output: *mut usize,
@@ -827,7 +863,14 @@ pub extern "C" fn vk_state_string_length(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn vk_state_copy_string(
+/// Copies a string state value into caller-owned storage.
+///
+/// # Safety
+///
+/// `runtime` must point to a live runtime. `output_length` must point to a writable, properly
+/// aligned `usize`. When the string is non-empty, `buffer` must be writable for at least
+/// `buffer_length` bytes and must not overlap ViewKit-owned memory.
+pub unsafe extern "C" fn vk_state_copy_string(
     runtime: *mut VkRuntime,
     state_id: u64,
     buffer: *mut u8,

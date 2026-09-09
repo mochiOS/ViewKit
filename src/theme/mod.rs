@@ -7,6 +7,10 @@ mod radius;
 mod scrollbar;
 mod shadow;
 mod spacing;
+#[expect(
+    clippy::module_inception,
+    reason = "theme is the domain's primary type module"
+)]
 mod theme;
 
 pub use application::{BrowserTokens, ShellTokens};

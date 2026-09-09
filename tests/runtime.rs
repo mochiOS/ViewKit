@@ -80,13 +80,15 @@ fn build_counter_tree(counter: i64) -> ViewNode {
         }),
     ));
 
-    builder.end().expect("VStackを閉じられること");
+    builder.end().expect("VStack should close successfully");
 
-    builder.end().expect("Paddingを閉じられること");
+    builder.end().expect("Padding should close successfully");
 
-    builder.end().expect("Rootを閉じられること");
+    builder.end().expect("Root should close successfully");
 
-    builder.finish().expect("完全なViewツリーを構築できること")
+    builder
+        .finish()
+        .expect("A complete view tree should build successfully")
 }
 
 #[test]
@@ -177,7 +179,9 @@ fn builder_exposes_component_instance() {
 fn builder_reports_missing_root() {
     let builder = ViewTreeBuilder::new(COMPONENT_ID);
 
-    let error = builder.finish().expect_err("ルートがないため失敗すること");
+    let error = builder
+        .finish()
+        .expect_err("Building without a root should fail");
 
     assert_eq!(error, TreeBuilderError::MissingRoot,);
 }
@@ -190,7 +194,7 @@ fn builder_reports_unclosed_nodes() {
 
     let error = builder
         .finish()
-        .expect_err("閉じていないNodeがあるため失敗すること");
+        .expect_err("Building with an unclosed node should fail");
 
     assert_eq!(error, TreeBuilderError::UnclosedNodes,);
 }
@@ -205,7 +209,7 @@ fn builder_reports_multiple_roots() {
 
     let error = builder
         .finish()
-        .expect_err("複数のルートがあるため失敗すること");
+        .expect_err("Building with multiple roots should fail");
 
     assert_eq!(error, TreeBuilderError::MultipleRoots,);
 }
@@ -252,7 +256,7 @@ fn action_queue_preserves_fifo_order() {
 
     assert!(!queue.is_empty(),);
 
-    let first = queue.poll().expect("最初のActionが存在すること");
+    let first = queue.poll().expect("The first action should exist");
 
     assert_eq!(first.component_instance, ComponentInstanceId(1),);
 
@@ -262,7 +266,7 @@ fn action_queue_preserves_fifo_order() {
 
     assert!(matches!(first.event, RuntimeEvent::ButtonClicked),);
 
-    let second = queue.poll().expect("2番目のActionが存在すること");
+    let second = queue.poll().expect("The second action should exist");
 
     assert_eq!(second.component_instance, ComponentInstanceId(2),);
 
@@ -291,7 +295,7 @@ fn runtime_commits_tree() {
 
     runtime.commit(build_counter_tree(0));
 
-    let tree = runtime.tree().expect("commit後にツリーが存在すること");
+    let tree = runtime.tree().expect("The tree should exist after commit");
 
     assert_eq!(tree.id, ROOT_ID,);
 
@@ -306,7 +310,7 @@ fn runtime_replaces_committed_tree() {
 
     runtime.commit(build_counter_tree(1));
 
-    let tree = runtime.tree().expect("更新後にツリーが存在すること");
+    let tree = runtime.tree().expect("The tree should exist after update");
 
     let text = &tree.children[0].children[0].children[0];
 
@@ -361,7 +365,7 @@ fn runtime_builds_view_from_committed_tree() {
 
     let view = runtime.build_view();
 
-    assert!(view.is_some(), "ViewNodeからViewを構築できること",);
+    assert!(view.is_some(), "A View should be created from a ViewNode",);
 }
 
 #[test]
@@ -381,6 +385,6 @@ fn runtime_has_no_action_before_interaction() {
 
     assert!(
         runtime.poll_action().is_none(),
-        "Buttonがクリックされる前はActionを生成しない",
+        "A button should not emit an action before it is clicked",
     );
 }

@@ -431,7 +431,7 @@ impl TextFieldInteractionState {
         let interval_millis = CARET_BLINK_INTERVAL.as_millis();
         let elapsed_millis = elapsed.as_millis();
         let phase = elapsed_millis / interval_millis;
-        let visible = phase % 2 == 0;
+        let visible = phase.is_multiple_of(2);
         let remaining_millis = interval_millis - elapsed_millis % interval_millis;
         let next_redraw = now + Duration::from_millis(remaining_millis as u64);
 
@@ -1271,38 +1271,13 @@ impl View for TextField {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn secure_field_masks_each_character() {
-        let interaction = TextFieldInteractionState::new();
-        interaction.set_value("secretあ");
-        let field = TextField::with_interaction(interaction).secure(true);
-
-        assert_eq!(field.display_text(), "•••••••");
-    }
-
-    #[test]
-    fn clearing_interaction_removes_secret_and_cursor_state() {
-        let interaction = TextFieldInteractionState::new();
-        interaction.set_value("secret");
-        interaction.clear();
-
-        assert_eq!(interaction.value(), "");
-        assert_eq!(interaction.inner.borrow().cursor, 0);
-        assert_eq!(interaction.inner.borrow().selection_anchor, None);
-    }
-}
-
 #[allow(unused)]
 fn caret_is_visible() -> bool {
     static BLINK_EPOCH: OnceLock<Instant> = OnceLock::new();
     let elapsed_millis = BLINK_EPOCH.get_or_init(Instant::now).elapsed().as_millis();
     let interval_millis = CARET_BLINK_INTERVAL.as_millis();
 
-    (elapsed_millis / interval_millis) % 2 == 0
+    (elapsed_millis / interval_millis).is_multiple_of(2)
 }
 
 fn selection_range(inner: &TextFieldInteractionInner) -> Option<Range<usize>> {
@@ -1333,4 +1308,29 @@ fn delete_selection(inner: &mut TextFieldInteractionInner) -> bool {
     inner.selecting = false;
 
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn secure_field_masks_each_character() {
+        let interaction = TextFieldInteractionState::new();
+        interaction.set_value("secretあ");
+        let field = TextField::with_interaction(interaction).secure(true);
+
+        assert_eq!(field.display_text(), "•••••••");
+    }
+
+    #[test]
+    fn clearing_interaction_removes_secret_and_cursor_state() {
+        let interaction = TextFieldInteractionState::new();
+        interaction.set_value("secret");
+        interaction.clear();
+
+        assert_eq!(interaction.value(), "");
+        assert_eq!(interaction.inner.borrow().cursor, 0);
+        assert_eq!(interaction.inner.borrow().selection_anchor, None);
+    }
 }

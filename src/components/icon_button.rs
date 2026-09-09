@@ -6,6 +6,8 @@ use crate::theme::{Color, CornerRadius, ShadowStyle, Theme};
 
 use super::{Button, ButtonInteractionState, ButtonStyle, Icon, IconName, ZStackAlignment};
 
+type Callback = Rc<RefCell<Box<dyn FnMut()>>>;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum IconButtonTone {
     #[default]
@@ -18,7 +20,7 @@ pub struct IconButton {
     tone: IconButtonTone,
     enabled: bool,
     interaction: ButtonInteractionState,
-    on_click: Option<Rc<RefCell<Box<dyn FnMut()>>>>,
+    on_click: Option<Callback>,
 }
 
 impl IconButton {

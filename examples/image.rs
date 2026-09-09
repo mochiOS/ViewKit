@@ -62,8 +62,8 @@ impl App for ImageExample {
     type Body = Box<dyn View + 'static>;
 
     fn new() -> Self {
-        let image = ImageData::decode(TEST_IMAGE)
-            .expect("examples/resources/test.pngを読み込めませんでした");
+        let image =
+            ImageData::decode(TEST_IMAGE).expect("Failed to load examples/resources/test.png");
 
         Self { image }
     }

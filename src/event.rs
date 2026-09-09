@@ -290,14 +290,12 @@ impl EventDispatcher {
             }
         );
 
-        if is_primary_press {
-            if let Some(position) = self.pointer_position {
-                result = result.merge(root.handle_event(
-                    bounds,
-                    &ViewEvent::PointerFocusRequested { position },
-                    context,
-                ));
-            }
+        if is_primary_press && let Some(position) = self.pointer_position {
+            result = result.merge(root.handle_event(
+                bounds,
+                &ViewEvent::PointerFocusRequested { position },
+                context,
+            ));
         }
 
         let Some(view_event) = self.convert_event(event) else {

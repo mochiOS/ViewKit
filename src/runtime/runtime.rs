@@ -84,15 +84,15 @@ fn collect_button_actions(
     if let ViewNodeKind::Button(properties) = &node.kind {
         let state = states.button(node.id);
 
-        if state.take_clicked() {
-            if let Some(action_id) = properties.action {
-                actions.push(RuntimeAction {
-                    component_instance,
-                    node_id: node.id,
-                    action_id,
-                    event: RuntimeEvent::ButtonClicked,
-                });
-            }
+        if state.take_clicked()
+            && let Some(action_id) = properties.action
+        {
+            actions.push(RuntimeAction {
+                component_instance,
+                node_id: node.id,
+                action_id,
+                event: RuntimeEvent::ButtonClicked,
+            });
         }
     }
 

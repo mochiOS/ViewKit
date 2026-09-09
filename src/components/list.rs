@@ -13,6 +13,8 @@ use super::{
     IconName, Padding, Text, VStack, ZStackAlignment,
 };
 
+type Callback = Rc<RefCell<Box<dyn FnMut()>>>;
+
 pub struct ListRow {
     title: String,
     subtitle: Option<String>,
@@ -22,7 +24,7 @@ pub struct ListRow {
     enabled: bool,
 
     interaction: ButtonInteractionState,
-    on_select: Option<Rc<RefCell<Box<dyn FnMut()>>>>,
+    on_select: Option<Callback>,
     icon: Option<IconName>,
     leading_avatar: Option<String>,
     status_marker: bool,

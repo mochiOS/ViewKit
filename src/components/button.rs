@@ -628,10 +628,8 @@ impl View for Button {
                     (was_armed, clicked, changed)
                 };
 
-                if clicked {
-                    if let Some(callback) = self.on_click.as_ref() {
-                        (callback.borrow_mut())();
-                    }
+                if clicked && let Some(callback) = self.on_click.as_ref() {
+                    (callback.borrow_mut())();
                 }
 
                 if changed {

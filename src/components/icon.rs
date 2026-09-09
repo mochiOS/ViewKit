@@ -250,6 +250,22 @@ impl View for Icon {
     }
 }
 
+fn sanitize_size(size: f32) -> f32 {
+    if size.is_finite() && size > 0.0 {
+        size
+    } else {
+        DEFAULT_ICON_SIZE
+    }
+}
+
+fn sanitize_opacity(opacity: f32) -> f32 {
+    if opacity.is_finite() {
+        opacity.clamp(0.0, 1.0)
+    } else {
+        1.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -289,21 +305,5 @@ mod tests {
         for icon in icons {
             let _ = icon.svg();
         }
-    }
-}
-
-fn sanitize_size(size: f32) -> f32 {
-    if size.is_finite() && size > 0.0 {
-        size
-    } else {
-        DEFAULT_ICON_SIZE
-    }
-}
-
-fn sanitize_opacity(opacity: f32) -> f32 {
-    if opacity.is_finite() {
-        opacity.clamp(0.0, 1.0)
-    } else {
-        1.0
     }
 }

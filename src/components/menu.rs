@@ -12,6 +12,8 @@ use super::{
     Spacer, Text, VStack, ZStackAlignment,
 };
 
+type Callback = Rc<RefCell<Box<dyn FnMut()>>>;
+
 struct ViewRef<'a, V>
 where
     V: View + ?Sized,
@@ -58,7 +60,7 @@ pub struct MenuItem {
     danger: bool,
 
     interaction: ButtonInteractionState,
-    on_select: Option<Rc<RefCell<Box<dyn FnMut()>>>>,
+    on_select: Option<Callback>,
 }
 
 impl MenuItem {

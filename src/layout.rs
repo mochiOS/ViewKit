@@ -684,6 +684,10 @@ pub(crate) fn dispatch_children_in_order<'a>(
     result
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "stack layout inputs are an explicit internal rendering contract"
+)]
 pub(crate) fn layout_stack(
     direction: StackDirection,
     children: &[StackChild],
@@ -932,6 +936,10 @@ pub(crate) fn layout_stack(
     result
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "event layout must use the same explicit stack contract as painting"
+)]
 pub(crate) fn handle_stack_event(
     direction: StackDirection,
     children: &[StackChild],

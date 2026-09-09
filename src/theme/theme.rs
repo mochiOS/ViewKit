@@ -1,3 +1,5 @@
+#![allow(clippy::missing_const_for_thread_local)]
+
 //! ViewKit全体の外観テーマを定義
 
 use super::{

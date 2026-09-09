@@ -32,8 +32,7 @@ impl App for SvgExample {
     type Body = Box<dyn View + 'static>;
 
     fn new() -> Self {
-        let svg =
-            SvgData::decode(TEST_SVG).expect("examples/resources/test.svgを読み込めませんでした");
+        let svg = SvgData::decode(TEST_SVG).expect("Failed to load examples/resources/test.svg");
 
         Self { svg }
     }

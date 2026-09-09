@@ -10,6 +10,7 @@ version = "1.0.1"
 edition = "2024"
 autoexamples = false
 build = "build.rs"
+exclude = ["resources/icons/*.svg"]
 
 [dependencies]
 cosmic-text = { version = "0.19.0", default-features = false, features = ["std", "swash"] }
@@ -61,8 +62,8 @@ wgpu = {
 }
 
 [target.'cfg(target_os = "mochios")'.dependencies]
-mochi-user-syscall = { git = "https://github.com/mochiOS/syscalls", package = "mochi-user-syscall" }
-mochios-viewkit-gpu-protocol = { git = "https://github.com/mochiOS/syscalls", package = "mochios-viewkit-gpu-protocol" }
+mochi-user-syscall = { version = "0.1.0", git = "https://github.com/mochiOS/syscalls", package = "mochi-user-syscall" }
+mochios-viewkit-gpu-protocol = { version = "0.1.0", git = "https://github.com/mochiOS/syscalls", package = "mochios-viewkit-gpu-protocol" }
 
 [lib]
 name = "viewkit"

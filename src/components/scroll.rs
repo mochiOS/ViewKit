@@ -584,10 +584,10 @@ impl View for Scroll {
             content_size.height,
         );
 
-        if let ViewEvent::PointerMoved { position } = event {
-            if !bounds.contains(*position) {
-                return content.handle_event(content_bounds, &ViewEvent::PointerLeft, context);
-            }
+        if let ViewEvent::PointerMoved { position } = event
+            && !bounds.contains(*position)
+        {
+            return content.handle_event(content_bounds, &ViewEvent::PointerLeft, context);
         }
 
         if !event.requires_broadcast() && !event.is_inside(bounds) {

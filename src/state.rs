@@ -1,3 +1,5 @@
+#![allow(clippy::missing_const_for_thread_local)]
+
 //! アプリケーションの変更可能な状態を扱います。
 
 use crate::animation::Transition;

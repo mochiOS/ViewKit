@@ -18,6 +18,15 @@ struct SliderInteractionInner {
     enabled: bool,
     drag_offset_x: f32,
 }
+
+#[derive(Clone, Copy)]
+struct SliderMetrics {
+    label_height: f32,
+    label_spacing: f32,
+    knob_size: f32,
+    track_height: f32,
+    hit_padding: f32,
+}
 #[derive(Clone)]
 pub struct SliderInteractionState {
     inner: Rc<RefCell<SliderInteractionInner>>,
@@ -259,19 +268,11 @@ impl Slider {
         )
     }
 
-    fn value_from_pointer(
-        &self,
-        bounds: Rect,
-        pointer_x: f32,
-        label_height: f32,
-        label_spacing: f32,
-        knob_size: f32,
-        track_height: f32,
-    ) -> f32 {
+    fn value_from_pointer(&self, bounds: Rect, pointer_x: f32, metrics: SliderMetrics) -> f32 {
         let track = self.track_bounds(
-            self.slider_bounds(bounds, label_height, label_spacing),
-            knob_size,
-            track_height,
+            self.slider_bounds(bounds, metrics.label_height, metrics.label_spacing),
+            metrics.knob_size,
+            metrics.track_height,
         );
 
         if track.size.width <= 0.0 {
@@ -288,19 +289,9 @@ impl Slider {
         bounds: Rect,
         pointer_x: f32,
         drag_offset_x: f32,
-        label_height: f32,
-        label_spacing: f32,
-        knob_size: f32,
-        track_height: f32,
+        metrics: SliderMetrics,
     ) -> bool {
-        let value = self.value_from_pointer(
-            bounds,
-            pointer_x - drag_offset_x,
-            label_height,
-            label_spacing,
-            knob_size,
-            track_height,
-        );
+        let value = self.value_from_pointer(bounds, pointer_x - drag_offset_x, metrics);
 
         let current = self.current_value();
 
@@ -424,19 +415,13 @@ impl View for Slider {
 
         let knob_color = if !self.enabled {
             context.theme.colors.surface_subtle
-        } else if dragging {
-            context.theme.colors.surface
-        } else if hovered {
+        } else if dragging || hovered {
             context.theme.colors.surface
         } else {
             context.theme.colors.elevated_surface
         };
 
-        let knob_shadow = if self.enabled {
-            ShadowStyle::None
-        } else {
-            ShadowStyle::None
-        };
+        let knob_shadow = ShadowStyle::None;
 
         Ellipse::new()
             .color(EllipseColor::Custom(knob_color))
@@ -468,15 +453,18 @@ impl View for Slider {
             return EventResult::Ignored;
         }
 
-        let label_height = context.typography().label.line_height;
-        let label_spacing = context.theme().spacing.extra_small;
-        let knob_size = context.theme().layout.range_knob_size;
-        let track_height = context.theme().layout.range_track_height;
+        let metrics = SliderMetrics {
+            label_height: context.typography().label.line_height,
+            label_spacing: context.theme().spacing.extra_small,
+            knob_size: context.theme().layout.range_knob_size,
+            track_height: context.theme().layout.range_track_height,
+            hit_padding: context.theme().layout.range_hit_padding,
+        };
         let hit_bounds = self.hit_bounds(
             bounds,
-            label_height,
-            label_spacing,
-            context.theme().layout.range_hit_padding,
+            metrics.label_height,
+            metrics.label_spacing,
+            metrics.hit_padding,
         );
 
         match event {
@@ -494,15 +482,7 @@ impl View for Slider {
                 };
 
                 let value_changed = if dragging {
-                    self.update_from_pointer(
-                        bounds,
-                        position.x,
-                        drag_offset_x,
-                        label_height,
-                        label_spacing,
-                        knob_size,
-                        track_height,
-                    )
+                    self.update_from_pointer(bounds, position.x, drag_offset_x, metrics)
                 } else {
                     false
                 };
@@ -526,8 +506,13 @@ impl View for Slider {
                     return EventResult::Ignored;
                 }
 
-                let knob_bounds =
-                    self.knob_bounds(bounds, label_height, label_spacing, knob_size, track_height);
+                let knob_bounds = self.knob_bounds(
+                    bounds,
+                    metrics.label_height,
+                    metrics.label_spacing,
+                    metrics.knob_size,
+                    metrics.track_height,
+                );
 
                 let pressed_inside_knob = knob_bounds.contains(*position);
 
@@ -535,10 +520,10 @@ impl View for Slider {
                     position.x
                         - self.knob_center_x(
                             bounds,
-                            label_height,
-                            label_spacing,
-                            knob_size,
-                            track_height,
+                            metrics.label_height,
+                            metrics.label_spacing,
+                            metrics.knob_size,
+                            metrics.track_height,
                         )
                 } else {
                     0.0
@@ -553,15 +538,7 @@ impl View for Slider {
                 }
 
                 if !pressed_inside_knob {
-                    self.update_from_pointer(
-                        bounds,
-                        position.x,
-                        0.0,
-                        label_height,
-                        label_spacing,
-                        knob_size,
-                        track_height,
-                    );
+                    self.update_from_pointer(bounds, position.x, 0.0, metrics);
                 }
 
                 context.request_redraw_in(bounds.expanded(16.0));
@@ -591,15 +568,7 @@ impl View for Slider {
                     return EventResult::Ignored;
                 }
 
-                self.update_from_pointer(
-                    bounds,
-                    position.x,
-                    drag_offset_x,
-                    label_height,
-                    label_spacing,
-                    knob_size,
-                    track_height,
-                );
+                self.update_from_pointer(bounds, position.x, drag_offset_x, metrics);
 
                 self.value.commit();
 

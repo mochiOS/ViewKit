@@ -75,18 +75,10 @@ struct KnobWidthAnimation {
     started_at: Instant,
 }
 
+#[derive(Default)]
 struct KnobWidthAnimationState {
     pressed: bool,
     animation: Option<KnobWidthAnimation>,
-}
-
-impl Default for KnobWidthAnimationState {
-    fn default() -> Self {
-        Self {
-            pressed: false,
-            animation: None,
-        }
-    }
 }
 
 pub struct Switch {
@@ -258,15 +250,15 @@ impl Switch {
                         }
                     }
 
-                    if drag.dragging {
-                        if let Some(mark_bounds) = drag.mark_bounds {
-                            drag.drag_position = Some(drag_progress_from_pointer(
-                                mark_bounds,
-                                position.x,
-                                drag.drag_offset_x,
-                                metrics,
-                            ));
-                        }
+                    if drag.dragging
+                        && let Some(mark_bounds) = drag.mark_bounds
+                    {
+                        drag.drag_position = Some(drag_progress_from_pointer(
+                            mark_bounds,
+                            position.x,
+                            drag.drag_offset_x,
+                            metrics,
+                        ));
                     }
                 }
 

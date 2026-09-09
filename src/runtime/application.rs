@@ -1,3 +1,5 @@
+#![allow(clippy::missing_const_for_thread_local)]
+
 //! ViewKitアプリケーションとプラットフォームバックエンドをガッッッッタイ！します
 
 use std::cell::Cell;

@@ -10,6 +10,20 @@ use viewkit::ffi::{
     vk_tree_begin, vk_tree_commit,
 };
 
+fn destroy_runtime(runtime: *mut viewkit::ffi::VkRuntime) -> i32 {
+    // Test runtimes are created once above and destroyed once through this helper.
+    unsafe { vk_runtime_destroy(runtime) }
+}
+
+fn poll_action(
+    runtime: *mut viewkit::ffi::VkRuntime,
+    output: &mut VkActionEvent,
+    has_action: &mut u8,
+) -> i32 {
+    // The references remain valid and writable for the complete FFI call.
+    unsafe { vk_poll_action(runtime, output, has_action) }
+}
+
 #[test]
 fn ffi_builds_counter_tree() {
     let runtime = vk_runtime_create(1);
@@ -40,7 +54,7 @@ fn ffi_builds_counter_tree() {
         vk_push_text(
             runtime,
             103,
-            VkString::from_str(&counter_text,),
+            VkString::from_borrowed(&counter_text,),
             18.0,
             28.0,
             600,
@@ -56,7 +70,7 @@ fn ffi_builds_counter_tree() {
         vk_push_button(
             runtime,
             104,
-            VkString::from_str(&button_title,),
+            VkString::from_borrowed(&button_title,),
             VK_BUTTON_COLOR_ACCENT,
             0.5,
             200,
@@ -77,13 +91,13 @@ fn ffi_builds_counter_tree() {
     let mut has_action = 0_u8;
 
     assert_eq!(
-        vk_poll_action(runtime, &mut event, &mut has_action,),
+        poll_action(runtime, &mut event, &mut has_action,),
         VkStatus::Ok as i32,
     );
 
     assert_eq!(has_action, 0,);
 
-    assert_eq!(vk_runtime_destroy(runtime,), VkStatus::Ok as i32,);
+    assert_eq!(destroy_runtime(runtime,), VkStatus::Ok as i32,);
 }
 
 #[test]
@@ -105,7 +119,7 @@ fn ffi_rejects_invalid_enum_value() {
         VkStatus::InvalidEnumValue as i32,
     );
 
-    assert_eq!(vk_runtime_destroy(runtime,), VkStatus::Ok as i32,);
+    assert_eq!(destroy_runtime(runtime,), VkStatus::Ok as i32,);
 }
 
 #[test]
@@ -120,7 +134,7 @@ fn ffi_rejects_node_without_tree() {
         vk_push_text(
             runtime,
             1,
-            VkString::from_str(&text,),
+            VkString::from_borrowed(&text,),
             16.0,
             24.0,
             400,
@@ -130,7 +144,7 @@ fn ffi_rejects_node_without_tree() {
         VkStatus::NoActiveBuilder as i32,
     );
 
-    assert_eq!(vk_runtime_destroy(runtime,), VkStatus::Ok as i32,);
+    assert_eq!(destroy_runtime(runtime,), VkStatus::Ok as i32,);
 }
 
 #[test]
@@ -158,7 +172,7 @@ fn ffi_builds_stack_with_spacer_and_divider() {
         vk_push_text(
             runtime,
             102,
-            VkString::from_str(&left),
+            VkString::from_borrowed(&left),
             14.0,
             22.0,
             400,
@@ -178,7 +192,7 @@ fn ffi_builds_stack_with_spacer_and_divider() {
         vk_push_text(
             runtime,
             105,
-            VkString::from_str(&right),
+            VkString::from_borrowed(&right),
             14.0,
             22.0,
             400,
@@ -192,7 +206,7 @@ fn ffi_builds_stack_with_spacer_and_divider() {
 
     assert_eq!(vk_tree_commit(runtime), VkStatus::Ok as i32,);
 
-    assert_eq!(vk_runtime_destroy(runtime), VkStatus::Ok as i32,);
+    assert_eq!(destroy_runtime(runtime), VkStatus::Ok as i32,);
 }
 
 #[test]
@@ -214,7 +228,7 @@ fn ffi_builds_fixed_width_frame() {
         vk_push_text(
             runtime,
             102,
-            VkString::from_str(&content,),
+            VkString::from_borrowed(&content,),
             14.0,
             22.0,
             400,
@@ -228,7 +242,7 @@ fn ffi_builds_fixed_width_frame() {
 
     assert_eq!(vk_tree_commit(runtime), VkStatus::Ok as i32,);
 
-    assert_eq!(vk_runtime_destroy(runtime), VkStatus::Ok as i32,);
+    assert_eq!(destroy_runtime(runtime), VkStatus::Ok as i32,);
 }
 
 #[test]
@@ -252,7 +266,7 @@ fn ffi_rejects_invalid_frame_length() {
         VkStatus::InvalidEnumValue as i32,
     );
 
-    assert_eq!(vk_runtime_destroy(runtime), VkStatus::Ok as i32,);
+    assert_eq!(destroy_runtime(runtime), VkStatus::Ok as i32,);
 }
 
 #[test]
@@ -288,7 +302,7 @@ fn ffi_builds_rectangle_and_background() {
         vk_push_text(
             runtime,
             103,
-            VkString::from_str(&content),
+            VkString::from_borrowed(&content),
             14.0,
             22.0,
             400,
@@ -313,7 +327,7 @@ fn ffi_builds_rectangle_and_background() {
 
     assert_eq!(vk_tree_commit(runtime), VkStatus::Ok as i32,);
 
-    assert_eq!(vk_runtime_destroy(runtime), VkStatus::Ok as i32,);
+    assert_eq!(destroy_runtime(runtime), VkStatus::Ok as i32,);
 }
 
 #[test]
@@ -337,7 +351,7 @@ fn ffi_reports_status_names() {
 
     let bytes = unsafe { std::slice::from_raw_parts(status.pointer, status.length) };
 
-    let name = std::str::from_utf8(bytes).expect("ステータス名はUTF-8であること");
+    let name = std::str::from_utf8(bytes).expect("The status name should be valid UTF-8");
 
     assert_eq!(name, "invalid_enum_value",);
 }
@@ -350,7 +364,7 @@ fn ffi_reports_unknown_status_name() {
 
     let bytes = unsafe { std::slice::from_raw_parts(status.pointer, status.length) };
 
-    let name = std::str::from_utf8(bytes).expect("ステータス名はUTF-8であること");
+    let name = std::str::from_utf8(bytes).expect("The status name should be valid UTF-8");
 
     assert_eq!(name, "unknown_status",);
 }

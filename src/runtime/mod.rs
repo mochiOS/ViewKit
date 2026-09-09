@@ -4,6 +4,10 @@ mod application;
 mod builder;
 mod id;
 mod node;
+#[expect(
+    clippy::module_inception,
+    reason = "runtime is the domain's primary type module"
+)]
 mod runtime;
 mod state;
 mod view;

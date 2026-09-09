@@ -838,7 +838,7 @@ fn create_path_clip_mask(
 
 fn copy_pixmap_to_surface(
     pixmap: &Pixmap,
-    present_pixels: &mut Vec<u32>,
+    present_pixels: &mut [u32],
     surface: &mut Surface<OwnedDisplayHandle, Rc<Window>>,
     dirty_bounds: Rect,
     scale: f32,
@@ -1096,12 +1096,6 @@ fn draw_text_command(
         layout_cache.insert(key.clone(), buffer);
     }
 
-    let buffer = layout_cache
-        .get_mut(&key)
-        .expect("Text layout cache does not exist");
-
-    let mut buffer = buffer.borrow_with(font_system);
-
     let text_color = CosmicColor::rgba(
         command.color.red,
         command.color.green,
@@ -1113,17 +1107,23 @@ fn draw_text_command(
         return;
     };
 
-    let mut physical_glyphs = Vec::new();
+    let physical_glyphs = {
+        let buffer = layout_cache
+            .get_mut(&key)
+            .expect("Text layout cache does not exist");
+        let mut buffer = buffer.borrow_with(font_system);
+        let mut physical_glyphs = Vec::new();
 
-    for run in buffer.layout_runs() {
-        let baseline_y = (origin_y + run.line_y).round();
+        for run in buffer.layout_runs() {
+            let baseline_y = (origin_y + run.line_y).round();
 
-        for glyph in run.glyphs {
-            physical_glyphs.push(glyph.physical((origin_x, baseline_y), 1.0));
+            for glyph in run.glyphs {
+                physical_glyphs.push(glyph.physical((origin_x, baseline_y), 1.0));
+            }
         }
-    }
 
-    drop(buffer);
+        physical_glyphs
+    };
 
     for physical_glyph in physical_glyphs {
         swash_cache.with_pixels(

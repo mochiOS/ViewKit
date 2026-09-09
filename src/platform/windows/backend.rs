@@ -488,10 +488,10 @@ where
 
 enum WindowsRenderer {
     Gpu {
-        gpu: GpuRenderer,
-        fallback: SoftwareRenderer,
+        gpu: Box<GpuRenderer>,
+        fallback: Box<SoftwareRenderer>,
     },
-    Software(SoftwareRenderer),
+    Software(Box<SoftwareRenderer>),
 }
 
 impl WindowsRenderer {
@@ -503,12 +503,15 @@ impl WindowsRenderer {
         let fallback = SoftwareRenderer::new(context, window.clone(), viewport)?;
 
         if std::env::var_os("VIEWKIT_WINDOWS_DISABLE_GPU").is_some() {
-            return Ok(Self::Software(fallback));
+            return Ok(Self::Software(Box::new(fallback)));
         }
 
         match GpuRenderer::new(window, viewport) {
-            Ok(gpu) => Ok(Self::Gpu { gpu, fallback }),
-            Err(_) => Ok(Self::Software(fallback)),
+            Ok(gpu) => Ok(Self::Gpu {
+                gpu: Box::new(gpu),
+                fallback: Box::new(fallback),
+            }),
+            Err(_) => Ok(Self::Software(Box::new(fallback))),
         }
     }
 

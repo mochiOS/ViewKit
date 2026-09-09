@@ -13,17 +13,11 @@ pub struct RuntimeStateStore {
 
 impl RuntimeStateStore {
     pub fn button(&mut self, id: NodeId) -> ButtonInteractionState {
-        self.button_states
-            .entry(id)
-            .or_insert_with(ButtonInteractionState::new)
-            .clone()
+        self.button_states.entry(id).or_default().clone()
     }
 
     pub fn scroll(&mut self, id: NodeId) -> ScrollState {
-        self.scroll_states
-            .entry(id)
-            .or_insert_with(ScrollState::new)
-            .clone()
+        self.scroll_states.entry(id).or_default().clone()
     }
 
     pub fn retain_nodes(&mut self, active_nodes: &std::collections::HashSet<NodeId>) {
