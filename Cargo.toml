@@ -51,6 +51,14 @@ winit = {
     features = ["rwh_06"],
 }
 softbuffer = { version = "0.4.8", default-features = false }
+bytemuck = { version = "1.22.0", features = ["derive"] }
+pollster = "1.0.1"
+raw-window-handle = "0.6.2"
+wgpu = {
+    version = "30.0.1",
+    default-features = false,
+    features = ["dx12", "wgsl"],
+}
 
 [target.'cfg(target_os = "mochios")'.dependencies]
 mochi-user-syscall = { git = "https://github.com/mochiOS/syscalls", package = "mochi-user-syscall" }

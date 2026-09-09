@@ -26,25 +26,25 @@ use cosmic_text::{
 
 #[derive(Debug, thiserror::Error)]
 pub enum SoftwareRendererError {
-    #[error("softbufferの処理に失敗しました: {0}")]
+    #[error("softbuffer failed: {0}")]
     SoftBuffer(#[from] SoftBufferError),
 
-    #[error("描画バッファを確保できませんでした: {width}x{height}")]
+    #[error("Failed to allocate the drawing buffer: {width}x{height}")]
     PixmapAllocation { width: u32, height: u32 },
 
-    #[error("クリップマスクを確保できませんでした: {width}x{height}")]
+    #[error("Failed to allocate the clip mask: {width}x{height}")]
     ClipMaskAllocation { width: u32, height: u32 },
 
-    #[error("対応するPushClipがない状態でPopClipが呼び出されました")]
+    #[error("PopClip was called without a matching PushClip")]
     ClipStackUnderflow,
 
-    #[error("閉じられていないクリップが残っています: depth={depth}")]
+    #[error("The clip stack still contains unclosed clips: depth={depth}")]
     UnclosedClipStack { depth: usize },
 
-    #[error("SVG描画バッファを確保できませんでした: {width}x{height}")]
+    #[error("Failed to allocate the SVG raster buffer: {width}x{height}")]
     SvgPixmapAllocation { width: u32, height: u32 },
 
-    #[error("画像描画バッファを確保できませんでした: {width}x{height}")]
+    #[error("Failed to allocate the image raster buffer: {width}x{height}")]
     ImagePixmapAllocation { width: u32, height: u32 },
 }
 

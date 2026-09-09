@@ -10,10 +10,10 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum SvgError {
-    #[error("SVGファイルを読み込めませんでした: {0}")]
+    #[error("Failed to read the SVG file: {0}")]
     Io(#[from] std::io::Error),
 
-    #[error("SVGを解析できませんでした: {0}")]
+    #[error("Failed to parse the SVG: {0}")]
     Parse(#[from] usvg::Error),
 }
 

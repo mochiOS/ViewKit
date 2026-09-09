@@ -1,11 +1,11 @@
-//! winitを使用したLinux/Waylandバックエンド
+//! winitを使用したWindowsバックエンド
 
 use super::super::{
     ButtonState, Key, KeyModifiers, PlatformApplication, PlatformEvent, PlatformWindow,
     PointerButton, WindowConfig,
 };
 
-use super::SoftwareRenderer;
+use super::{GpuRenderer, SoftwareRenderer};
 use crate::draw_command::DisplayList;
 use crate::geometry::Size;
 use crate::renderer::{Renderer, Viewport};
@@ -30,15 +30,18 @@ const BACK_MOUSE_BUTTON_ID: u16 = 4;
 const FORWARD_MOUSE_BUTTON_ID: u16 = 5;
 
 #[derive(Debug, thiserror::Error)]
-pub enum LinuxBackendError {
+pub enum WindowsBackendError {
     #[error("Failed to create or run the event loop: {0}")]
     EventLoop(#[from] EventLoopError),
 
     #[error("Failed to create the window: {0}")]
     Window(#[from] OsError),
 
-    #[error("The renderer failed: {0}")]
+    #[error("The software renderer failed: {0}")]
     Renderer(#[from] super::SoftwareRendererError),
+
+    #[error("The GPU renderer failed: {0}")]
+    GpuRenderer(#[from] super::GpuRendererError),
 
     #[error("Failed to initialize softbuffer: {0}")]
     SoftBuffer(#[from] softbuffer::SoftBufferError),
@@ -82,21 +85,21 @@ impl PlatformWindow for WinitWindow<'_> {
     }
 }
 
-pub struct LinuxBackend<A> {
+pub struct WindowsBackend<A> {
     application: A,
     config: WindowConfig,
 
     context: Option<Context<OwnedDisplayHandle>>,
     window: Option<Rc<Window>>,
-    renderer: Option<SoftwareRenderer>,
+    renderer: Option<WindowsRenderer>,
 
     modifiers: KeyModifiers,
 
-    runtime_error: Option<LinuxBackendError>,
+    runtime_error: Option<WindowsBackendError>,
     pending_pointer_move: Option<(f32, f32)>,
 }
 
-impl<A> LinuxBackend<A>
+impl<A> WindowsBackend<A>
 where
     A: PlatformApplication,
 {
@@ -116,7 +119,7 @@ where
         }
     }
 
-    pub fn run(mut self) -> Result<(), LinuxBackendError> {
+    pub fn run(mut self) -> Result<(), WindowsBackendError> {
         let event_loop = EventLoop::new()?;
 
         event_loop.set_control_flow(ControlFlow::Wait);
@@ -158,7 +161,7 @@ where
         };
 
         if let Err(error) = renderer.resize(viewport) {
-            self.runtime_error = Some(LinuxBackendError::Renderer(error));
+            self.runtime_error = Some(error);
 
             event_loop.exit();
 
@@ -186,7 +189,7 @@ where
         };
 
         if let Err(error) = renderer.render(&display_list, dirty_bounds) {
-            self.runtime_error = Some(LinuxBackendError::Renderer(error));
+            self.runtime_error = Some(error);
 
             event_loop.exit();
         }
@@ -201,7 +204,7 @@ where
     }
 }
 
-impl<A> ApplicationHandler for LinuxBackend<A>
+impl<A> ApplicationHandler for WindowsBackend<A>
 where
     A: PlatformApplication,
 {
@@ -227,7 +230,7 @@ where
             Ok(window) => Rc::new(window),
 
             Err(error) => {
-                self.runtime_error = Some(LinuxBackendError::Window(error));
+                self.runtime_error = Some(WindowsBackendError::Window(error));
 
                 event_loop.exit();
 
@@ -243,11 +246,11 @@ where
             return;
         };
 
-        let renderer = match SoftwareRenderer::new(context, window.clone(), viewport) {
+        let renderer = match WindowsRenderer::new(context, window.clone(), viewport) {
             Ok(renderer) => renderer,
 
             Err(error) => {
-                self.runtime_error = Some(LinuxBackendError::Renderer(error));
+                self.runtime_error = Some(error);
 
                 event_loop.exit();
 
@@ -479,6 +482,66 @@ where
             event_loop.set_control_flow(ControlFlow::Wait);
         } else {
             event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
+        }
+    }
+}
+
+enum WindowsRenderer {
+    Gpu {
+        gpu: GpuRenderer,
+        fallback: SoftwareRenderer,
+    },
+    Software(SoftwareRenderer),
+}
+
+impl WindowsRenderer {
+    fn new(
+        context: &Context<OwnedDisplayHandle>,
+        window: Rc<Window>,
+        viewport: Viewport,
+    ) -> Result<Self, WindowsBackendError> {
+        let fallback = SoftwareRenderer::new(context, window.clone(), viewport)?;
+
+        if std::env::var_os("VIEWKIT_WINDOWS_DISABLE_GPU").is_some() {
+            return Ok(Self::Software(fallback));
+        }
+
+        match GpuRenderer::new(window, viewport) {
+            Ok(gpu) => Ok(Self::Gpu { gpu, fallback }),
+            Err(_) => Ok(Self::Software(fallback)),
+        }
+    }
+
+    fn resize(&mut self, viewport: Viewport) -> Result<(), WindowsBackendError> {
+        match self {
+            Self::Gpu { gpu, fallback } => {
+                gpu.resize(viewport)?;
+                fallback.resize(viewport)?;
+            }
+            Self::Software(renderer) => renderer.resize(viewport)?,
+        }
+
+        Ok(())
+    }
+
+    fn render(
+        &mut self,
+        display_list: &DisplayList,
+        dirty_bounds: crate::geometry::Rect,
+    ) -> Result<(), WindowsBackendError> {
+        match self {
+            Self::Gpu { gpu, fallback } => match gpu.render(display_list, dirty_bounds) {
+                Ok(()) => Ok(()),
+                Err(super::GpuRendererError::UnsupportedCommand) => {
+                    fallback.render(display_list, dirty_bounds)?;
+                    Ok(())
+                }
+                Err(error) => Err(error.into()),
+            },
+            Self::Software(renderer) => {
+                renderer.render(display_list, dirty_bounds)?;
+                Ok(())
+            }
         }
     }
 }

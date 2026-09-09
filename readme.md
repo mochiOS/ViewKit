@@ -1,9 +1,11 @@
 # ViewKit
 
 ViewKit provides the same Rust and C UI runtime on mochiOS, Linux, and Windows.
-The repository is self-contained for desktop builds: Linux and Windows use the
-shared `winit`/`softbuffer` backend and fonts installed on the host system.
-Linux supports both Wayland and X11.
+The repository is self-contained for desktop builds. Linux uses the shared
+`winit`/`softbuffer` backend, while Windows uses a `winit` backend with a GPU
+renderer powered by `wgpu`/DirectX 12 and falls back to `softbuffer` when a
+display list command is not implemented by the GPU path yet. Linux and Windows
+use fonts installed on the host system. Linux supports both Wayland and X11.
 
 ## Use from Rust
 

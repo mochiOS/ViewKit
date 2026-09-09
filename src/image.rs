@@ -8,16 +8,16 @@ use crate::svg::SvgData;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ImageError {
-    #[error("画像サイズは0より大きくなければなりません: {width}x{height}")]
+    #[error("Image dimensions must be greater than zero: {width}x{height}")]
     InvalidDimensions { width: u32, height: u32 },
 
-    #[error("画像サイズが大きすぎます: {width}x{height}")]
+    #[error("Image dimensions are too large: {width}x{height}")]
     SizeOverflow { width: u32, height: u32 },
 
-    #[error("RGBA画像データの長さが不正です: expected={expected}, actual={actual}")]
+    #[error("Invalid RGBA image data length: expected={expected}, actual={actual}")]
     InvalidPixelLength { expected: usize, actual: usize },
 
-    #[error("画像のデコードに失敗しました: {0}")]
+    #[error("Failed to decode the image: {0}")]
     Decode(#[from] image::ImageError),
 }
 

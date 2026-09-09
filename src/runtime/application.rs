@@ -357,7 +357,7 @@ pub enum ViewKitError {
     #[error(transparent)]
     Windows(#[from] crate::platform::windows::WindowsBackendError),
 
-    #[error("現在のプラットフォームはViewKitに対応していません")]
+    #[error("ViewKit does not support the current platform")]
     UnsupportedPlatform,
 }
 
