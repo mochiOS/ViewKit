@@ -1,6 +1,7 @@
 //! 文字スタイルを定義
 
 use crate::font::create_font_system;
+use crate::theme::{FigmaTokens, TypographyToken};
 use cosmic_text::{Align, FontSystem};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -124,62 +125,14 @@ pub struct Typography {
 
 impl Typography {
     pub const DEFAULT: Self = Self {
-        display_large: TextStyle {
-            family: FontFamily::Sans,
-            size: 56.0,
-            weight: FontWeight::SEMIBOLD,
-            line_height: 64.0,
-            letter_spacing: 0.0,
-        },
-        display_medium: TextStyle {
-            family: FontFamily::Sans,
-            size: 40.0,
-            weight: FontWeight::SEMIBOLD,
-            line_height: 48.0,
-            letter_spacing: 0.0,
-        },
-        title_large: TextStyle {
-            family: FontFamily::Sans,
-            size: 28.0,
-            weight: FontWeight::SEMIBOLD,
-            line_height: 36.0,
-            letter_spacing: 0.0,
-        },
-        title_medium: TextStyle {
-            family: FontFamily::Sans,
-            size: 20.0,
-            weight: FontWeight::SEMIBOLD,
-            line_height: 28.0,
-            letter_spacing: 0.0,
-        },
-        title_small: TextStyle {
-            family: FontFamily::Sans,
-            size: 17.0,
-            weight: FontWeight::SEMIBOLD,
-            line_height: 24.0,
-            letter_spacing: 0.0,
-        },
-        body: TextStyle {
-            family: FontFamily::Sans,
-            size: 15.0,
-            weight: FontWeight::REGULAR,
-            line_height: 22.0,
-            letter_spacing: 0.0,
-        },
-        label: TextStyle {
-            family: FontFamily::Sans,
-            size: 13.0,
-            weight: FontWeight::MEDIUM,
-            line_height: 18.0,
-            letter_spacing: 0.0,
-        },
-        caption: TextStyle {
-            family: FontFamily::Sans,
-            size: 12.0,
-            weight: FontWeight::REGULAR,
-            line_height: 16.0,
-            letter_spacing: 0.0,
-        },
+        display_large: text_style(FigmaTokens::TYPOGRAPHY.display_large, FontFamily::Sans),
+        display_medium: text_style(FigmaTokens::TYPOGRAPHY.display_medium, FontFamily::Sans),
+        title_large: text_style(FigmaTokens::TYPOGRAPHY.title_large, FontFamily::Sans),
+        title_medium: text_style(FigmaTokens::TYPOGRAPHY.title_medium, FontFamily::Sans),
+        title_small: text_style(FigmaTokens::TYPOGRAPHY.title_small, FontFamily::Sans),
+        body: text_style(FigmaTokens::TYPOGRAPHY.body, FontFamily::Sans),
+        label: text_style(FigmaTokens::TYPOGRAPHY.label, FontFamily::Sans),
+        caption: text_style(FigmaTokens::TYPOGRAPHY.caption, FontFamily::Sans),
         code: TextStyle {
             family: FontFamily::Monospace,
             size: 14.0,
@@ -201,5 +154,15 @@ impl Typography {
             TextRole::Caption => self.caption,
             TextRole::Code => self.code,
         }
+    }
+}
+
+const fn text_style(token: TypographyToken, family: FontFamily) -> TextStyle {
+    TextStyle {
+        family,
+        size: token.font_size,
+        weight: FontWeight(token.font_weight),
+        line_height: token.line_height,
+        letter_spacing: 0.0,
     }
 }

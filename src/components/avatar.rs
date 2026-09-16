@@ -1,3 +1,4 @@
+use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 use crate::geometry::{Rect, Size};
 use crate::theme::Color;
 use crate::typography::{TextAlignment, TextRole};
@@ -34,6 +35,7 @@ pub struct Avatar {
     size: AvatarSize,
     background: Option<Color>,
     foreground: Option<Color>,
+    accessibility_label: Option<String>,
 }
 
 impl Avatar {
@@ -43,6 +45,7 @@ impl Avatar {
             size: AvatarSize::Medium,
             background: None,
             foreground: None,
+            accessibility_label: None,
         }
     }
 
@@ -60,6 +63,11 @@ impl Avatar {
         self.foreground = Some(color);
         self
     }
+
+    pub fn accessibility_label(mut self, label: impl Into<String>) -> Self {
+        self.accessibility_label = Some(label.into());
+        self
+    }
 }
 
 impl View for Avatar {
@@ -73,10 +81,17 @@ impl View for Avatar {
             return;
         }
 
+        let mut node = AccessibilityNode::new(AccessibilityRole::Image, bounds);
+        node.label = self
+            .accessibility_label
+            .clone()
+            .or_else(|| Some(self.initials.clone()));
+        context.record_accessibility(node);
+
         Ellipse::new()
             .color(EllipseColor::Custom(
                 self.background
-                    .unwrap_or(context.theme.colors.surface_subtle),
+                    .unwrap_or(context.theme.avatar.background),
             ))
             .paint(bounds, context);
 
@@ -93,10 +108,11 @@ impl View for Avatar {
         );
 
         Text::styled(self.initials.clone(), self.size.text_role())
+            .accessibility_hidden(true)
             .alignment(TextAlignment::Center)
             .color(
                 self.foreground
-                    .unwrap_or(context.theme.colors.text_secondary),
+                    .unwrap_or(context.theme.avatar.foreground),
             )
             .paint(text_bounds, context);
     }

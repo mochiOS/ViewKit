@@ -13,29 +13,34 @@ impl<Content> ContentArea<Content> {
         Self { content }
     }
 
-    fn content_bounds(bounds: Rect, inset: f32) -> Rect {
+    fn content_bounds(bounds: Rect, margin: f32, maximum_width: f32) -> Rect {
+        let available_width = (bounds.size.width - margin * 2.0).max(0.0);
+        let content_width = available_width.min(maximum_width);
+        let horizontal_offset = (bounds.size.width - content_width).max(0.0) / 2.0;
         Rect::new(
-            bounds.origin.x + inset,
-            bounds.origin.y + inset,
-            (bounds.size.width - inset * 2.0).max(0.0),
-            (bounds.size.height - inset * 2.0).max(0.0),
+            bounds.origin.x + horizontal_offset,
+            bounds.origin.y + margin,
+            content_width,
+            (bounds.size.height - margin * 2.0).max(0.0),
         )
     }
 }
 
 impl<Content: View> View for ContentArea<Content> {
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
-        let inset = context.theme.spacing.extra_large;
+        let margin = context.theme.layout.page_margin;
         let child = self.content.measure(
             Constraints::loose(Size::new(
-                (constraints.maximum.width - inset * 2.0).max(0.0),
-                (constraints.maximum.height - inset * 2.0).max(0.0),
+                (constraints.maximum.width - margin * 2.0)
+                    .max(0.0)
+                    .min(context.theme.layout.content_max_width),
+                (constraints.maximum.height - margin * 2.0).max(0.0),
             )),
             context,
         );
         constraints.constrain(Size::new(
-            child.width + inset * 2.0,
-            child.height + inset * 2.0,
+            child.width + margin * 2.0,
+            child.height + margin * 2.0,
         ))
     }
 
@@ -44,7 +49,11 @@ impl<Content: View> View for ContentArea<Content> {
             .color(RectangleColor::Surface)
             .paint(bounds, context);
         self.content.paint(
-            Self::content_bounds(bounds, context.theme.spacing.extra_large),
+            Self::content_bounds(
+                bounds,
+                context.theme.layout.page_margin,
+                context.theme.layout.content_max_width,
+            ),
             context,
         );
     }
@@ -56,7 +65,11 @@ impl<Content: View> View for ContentArea<Content> {
         context: &mut EventContext<'_>,
     ) -> EventResult {
         self.content.handle_event(
-            Self::content_bounds(bounds, context.theme.spacing.extra_large),
+            Self::content_bounds(
+                bounds,
+                context.theme.layout.page_margin,
+                context.theme.layout.content_max_width,
+            ),
             event,
             context,
         )
@@ -95,6 +108,6 @@ mod tests {
 
         view.paint(Rect::new(0.0, 0.0, 859.0, 640.0), &mut context);
 
-        assert_eq!(recorded.get(), Some(Rect::new(24.0, 24.0, 811.0, 592.0)));
+        assert_eq!(recorded.get(), Some(Rect::new(69.5, 40.0, 720.0, 560.0)));
     }
 }

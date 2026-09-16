@@ -1,3 +1,4 @@
+use crate::accessibility::AccessibilityRole;
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
 use crate::layout::{StackAlignment, StackGap, ViewExt};
@@ -69,10 +70,11 @@ impl RadioButton {
         if let Some(label) = self.label.as_ref() {
             content = content.child(
                 Text::label(label.clone())
+                    .accessibility_hidden(true)
                     .color(if self.enabled {
-                        theme.colors.text_primary
+                        theme.selection_control.foreground
                     } else {
-                        theme.colors.text_disabled
+                        theme.selection_control.disabled_foreground
                     })
                     .layout()
                     .flex_shrink(0.0),
@@ -82,22 +84,30 @@ impl RadioButton {
         let selection = self.selection.clone();
         let value = self.value;
 
-        Button::with_interaction(self.interaction.clone())
+        let mut button = Button::with_interaction(self.interaction.clone())
             .style(ButtonStyle::Custom {
-                background: Color::TRANSPARENT,
-                hovered_background: Color::rgba(0, 0, 0, 14),
+                background: theme.selection_control.interaction_background,
+                hovered_background: theme.selection_control.interaction_hovered_background,
                 border: Color::TRANSPARENT,
                 hovered_border: Color::TRANSPARENT,
-                foreground: theme.colors.text_primary,
+                foreground: theme.selection_control.foreground,
             })
-            .radius(CornerRadius::Small)
+            .radius(theme.selection_control.interaction_radius)
             .shadow(ShadowStyle::None)
             .alignment(ZStackAlignment::Leading)
             .enabled(self.enabled)
-            .content(Padding::all(theme.spacing.extra_small).content(content))
+            .content(Padding::all(theme.selection_control.content_padding).content(content))
+            .accessibility_role(AccessibilityRole::RadioButton)
+            .accessibility_checked(selected)
             .on_click(move || {
                 selection.set(value);
-            })
+            });
+
+        if let Some(label) = self.label.as_ref() {
+            button = button.accessibility_label(label.clone());
+        }
+
+        button
     }
 }
 
@@ -134,17 +144,17 @@ impl View for RadioMark {
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
         let accent = if self.enabled {
-            context.theme.colors.accent
+            context.theme.selection_control.selected
         } else {
-            context.theme.colors.accent.alpha(0.42)
+            context.theme.selection_control.disabled_selected
         };
 
         let border = if self.selected {
             accent
         } else if self.enabled {
-            context.theme.colors.border_strong
+            context.theme.selection_control.border
         } else {
-            context.theme.colors.border
+            context.theme.selection_control.disabled_border
         };
 
         let inset = context.theme.layout.radio_inset;
@@ -157,12 +167,15 @@ impl View for RadioMark {
 
         Rectangle::new()
             .color(RectangleColor::Custom(if self.enabled {
-                context.theme.colors.surface
+                context.theme.selection_control.indicator_background
             } else {
-                context.theme.colors.surface_subtle
+                context.theme.selection_control.disabled_indicator_background
             }))
             .radius(CornerRadius::Full)
-            .border(BorderStyle::custom(border, 1.0))
+            .border(BorderStyle::custom(
+                border,
+                context.theme.selection_control.stroke_width,
+            ))
             .paint(indicator_bounds, context);
 
         if !self.selected {

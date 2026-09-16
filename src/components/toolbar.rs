@@ -1,3 +1,4 @@
+use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
@@ -56,7 +57,7 @@ impl<Content: View> View for Toolbar<Content> {
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
         let horizontal = context.theme.spacing.extra_large;
         let vertical = match self.placement {
-            ToolbarPlacement::Top => context.theme.spacing.large,
+            ToolbarPlacement::Top => context.theme.spacing.small,
             ToolbarPlacement::Bottom => context.theme.spacing.medium,
         };
         let child_constraints = Constraints::loose(Size::new(
@@ -73,12 +74,16 @@ impl<Content: View> View for Toolbar<Content> {
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
+        context.record_accessibility(AccessibilityNode::new(
+            AccessibilityRole::Toolbar,
+            bounds,
+        ));
         Rectangle::new()
             .color(RectangleColor::Surface)
             .paint(bounds, context);
         let horizontal = context.theme.spacing.extra_large;
         let vertical = match self.placement {
-            ToolbarPlacement::Top => context.theme.spacing.large,
+            ToolbarPlacement::Top => context.theme.spacing.small,
             ToolbarPlacement::Bottom => context.theme.spacing.medium,
         };
         self.content
@@ -93,7 +98,7 @@ impl<Content: View> View for Toolbar<Content> {
     ) -> EventResult {
         let horizontal = context.theme.spacing.extra_large;
         let vertical = match self.placement {
-            ToolbarPlacement::Top => context.theme.spacing.large,
+            ToolbarPlacement::Top => context.theme.spacing.small,
             ToolbarPlacement::Bottom => context.theme.spacing.medium,
         };
         self.content.handle_event(
@@ -134,11 +139,11 @@ mod tests {
             &mut text_measurer,
         );
 
-        Toolbar::new(Recorder(top.clone())).paint(Rect::new(0.0, 0.0, 859.0, 64.0), &mut context);
+        Toolbar::new(Recorder(top.clone())).paint(Rect::new(0.0, 0.0, 859.0, 48.0), &mut context);
         Toolbar::bottom(Recorder(bottom.clone()))
             .paint(Rect::new(0.0, 0.0, 859.0, 56.0), &mut context);
 
-        assert_eq!(top.get(), Some(Rect::new(24.0, 16.0, 811.0, 32.0)));
+        assert_eq!(top.get(), Some(Rect::new(24.0, 8.0, 811.0, 32.0)));
         assert_eq!(bottom.get(), Some(Rect::new(24.0, 12.0, 811.0, 32.0)));
     }
 }

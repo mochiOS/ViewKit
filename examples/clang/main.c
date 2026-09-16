@@ -665,6 +665,25 @@ static void push_text(
     );
 }
 
+static void push_semantic_text(
+    VkRuntime *runtime,
+    const char *content,
+    uint32_t role,
+    uint32_t tone
+)
+{
+    VK_CHECK(
+        vk_push_text_role(
+            runtime,
+            allocate_node_id(),
+            vk_string(content),
+            role,
+            tone,
+            VK_TEXT_ALIGNMENT_START
+        )
+    );
+}
+
 static void begin_page(
     VkRuntime *runtime,
     bool scrollable
@@ -878,30 +897,27 @@ static char *choose_config_path(
         false
     );
 
-    push_text(
+    push_semantic_text(
         runtime,
         "mochiOS Builder",
-        28.0f,
-        36.0f,
-        700
+        VK_TEXT_ROLE_TITLE_LARGE,
+        VK_TEXT_TONE_PRIMARY
     );
 
-    push_text(
+    push_semantic_text(
         runtime,
         "Enter the path to a mochiOS .config file.",
-        15.0f,
-        23.0f,
-        400
+        VK_TEXT_ROLE_BODY,
+        VK_TEXT_TONE_SECONDARY
     );
 
     begin_card(runtime);
 
-    push_text(
+    push_semantic_text(
         runtime,
         "ConfigFile",
-        20.0f,
-        28.0f,
-        650
+        VK_TEXT_ROLE_TITLE_MEDIUM,
+        VK_TEXT_TONE_PRIMARY
     );
 
     push_path_field(
@@ -909,12 +925,11 @@ static char *choose_config_path(
         initial_path
     );
 
-    push_text(
+    push_semantic_text(
         runtime,
         "Close this window to open the selected configuration. Leave the field empty to cancel.",
-        13.0f,
-        20.0f,
-        400
+        VK_TEXT_ROLE_LABEL,
+        VK_TEXT_TONE_SECONDARY
     );
 
     end_card(runtime);

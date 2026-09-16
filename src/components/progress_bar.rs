@@ -1,5 +1,5 @@
+use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 use crate::geometry::{Rect, Size};
-use crate::theme::CornerRadius;
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 use super::{Rectangle, RectangleColor};
@@ -9,6 +9,7 @@ pub struct ProgressBar {
     minimum: f32,
     maximum: f32,
     enabled: bool,
+    accessibility_label: Option<String>,
 }
 
 impl ProgressBar {
@@ -18,6 +19,7 @@ impl ProgressBar {
             minimum: 0.0,
             maximum: 1.0,
             enabled: true,
+            accessibility_label: None,
         }
     }
 
@@ -31,6 +33,11 @@ impl ProgressBar {
 
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
+        self
+    }
+
+    pub fn accessibility_label(mut self, label: impl Into<String>) -> Self {
+        self.accessibility_label = Some(label.into());
         self
     }
 
@@ -67,28 +74,39 @@ impl View for ProgressBar {
             track_height,
         );
 
+        let tokens = context.theme.progress_bar;
         let track_color = if self.enabled {
-            context.theme.colors.surface_subtle
+            tokens.track
         } else {
-            context.theme.colors.border
+            tokens.disabled_track
         };
 
         let fill_color = if self.enabled {
-            context.theme.colors.accent
+            tokens.fill
         } else {
-            context.theme.colors.text_tertiary
+            tokens.disabled_fill
         };
+
+        let mut node = AccessibilityNode::new(AccessibilityRole::ProgressIndicator, bounds);
+        node.label = self.accessibility_label.clone();
+        node.numeric_value = Some(
+            self.minimum + self.progress() * (self.maximum - self.minimum),
+        );
+        node.numeric_minimum = Some(self.minimum);
+        node.numeric_maximum = Some(self.maximum);
+        node.enabled = self.enabled;
+        context.record_accessibility(node);
 
         Rectangle::new()
             .color(RectangleColor::Custom(track_color))
-            .radius(CornerRadius::Full)
+            .radius(tokens.radius)
             .paint(track, context);
 
         let fill_width = track.size.width * self.progress();
         if fill_width > 0.0 {
             Rectangle::new()
                 .color(RectangleColor::Custom(fill_color))
-                .radius(CornerRadius::Full)
+                .radius(tokens.radius)
                 .paint(
                     Rect::new(
                         track.origin.x,

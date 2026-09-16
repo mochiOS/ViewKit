@@ -3,13 +3,16 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 use crate::components::{BorderStyle, Text};
 use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
 use crate::layout::{IntoStackChild, StackChild};
-use crate::platform::PointerButton;
-use crate::theme::{Color, CornerRadius, ShadowStyle, Theme};
+use crate::platform::{Key, PointerButton};
+use crate::theme::{
+    Color, ControlAppearance, ControlVisualState, CornerRadius, ShadowStyle, Theme,
+};
 use crate::typography::TextAlignment;
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
@@ -46,14 +49,7 @@ pub enum ButtonColor {
     Custom(Color),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct ButtonAppearance {
-    background: Color,
-    border: Color,
-    foreground: Color,
-}
-
-impl ButtonAppearance {
+impl ControlAppearance {
     fn with_opacity(self, opacity: f32) -> Self {
         Self {
             background: color_with_opacity(self.background, opacity),
@@ -66,97 +62,13 @@ impl ButtonAppearance {
 }
 
 impl ButtonStyle {
-    fn resolve(self, theme: &Theme, state: ButtonVisualState) -> ButtonAppearance {
-        let hovered = state == ButtonVisualState::Hovered;
-
-        let pressed = state == ButtonVisualState::Pressed;
-
+    fn resolve(self, theme: &Theme, state: ControlVisualState) -> ControlAppearance {
         match self {
-            Self::Standard => ButtonAppearance {
-                background: if pressed {
-                    theme.colors.surface_muted
-                } else if hovered {
-                    theme.colors.surface_subtle
-                } else {
-                    theme.colors.surface
-                },
-
-                border: if pressed {
-                    Color::rgba(0, 0, 0, 64)
-                } else if hovered {
-                    Color::rgba(0, 0, 0, 56)
-                } else {
-                    theme.colors.border_strong
-                },
-
-                foreground: theme.colors.text_primary,
-            },
-
-            Self::Primary => {
-                let color = if pressed {
-                    Color::BLACK
-                } else if hovered {
-                    Color::from_rgb_hex(0x303030)
-                } else {
-                    theme.colors.text_primary
-                };
-
-                ButtonAppearance {
-                    background: color,
-                    border: color,
-                    foreground: Color::WHITE,
-                }
-            }
-
-            Self::Accent => {
-                let color = if pressed {
-                    theme.colors.accent_pressed
-                } else if hovered {
-                    theme.colors.accent_hovered
-                } else {
-                    theme.colors.accent
-                };
-
-                ButtonAppearance {
-                    background: color,
-                    border: color,
-                    foreground: Color::WHITE,
-                }
-            }
-
-            Self::Ghost => ButtonAppearance {
-                background: if pressed {
-                    Color::rgba(0, 0, 0, 28)
-                } else if hovered {
-                    Color::rgba(0, 0, 0, 14)
-                } else {
-                    Color::TRANSPARENT
-                },
-
-                border: Color::TRANSPARENT,
-
-                foreground: theme.colors.text_primary,
-            },
-
-            Self::Danger => ButtonAppearance {
-                background: if pressed {
-                    Color::from_rgb_hex(0xffd8d4)
-                } else if hovered {
-                    Color::from_rgb_hex(0xffe5e2)
-                } else {
-                    theme.colors.destructive_soft
-                },
-
-                border: if pressed {
-                    Color::rgba(196, 43, 28, 112)
-                } else if hovered {
-                    Color::rgba(196, 43, 28, 87)
-                } else {
-                    Color::rgba(196, 43, 28, 56)
-                },
-
-                foreground: theme.colors.destructive,
-            },
+            Self::Standard => theme.button.standard.resolve(state),
+            Self::Primary => theme.button.primary.resolve(state),
+            Self::Accent => theme.button.accent.resolve(state),
+            Self::Ghost => theme.button.ghost.resolve(state),
+            Self::Danger => theme.button.danger.resolve(state),
 
             Self::Custom {
                 background,
@@ -164,14 +76,14 @@ impl ButtonStyle {
                 border,
                 hovered_border,
                 foreground,
-            } => ButtonAppearance {
-                background: if hovered || pressed {
+            } => ControlAppearance {
+                background: if matches!(state, ControlVisualState::Hovered | ControlVisualState::Pressed) {
                     hovered_background
                 } else {
                     background
                 },
 
-                border: if hovered || pressed {
+                border: if matches!(state, ControlVisualState::Hovered | ControlVisualState::Pressed) {
                     hovered_border
                 } else {
                     border
@@ -183,7 +95,7 @@ impl ButtonStyle {
     }
 
     pub fn foreground_color(self, theme: &Theme) -> Color {
-        self.resolve(theme, ButtonVisualState::Normal).foreground
+        self.resolve(theme, ControlVisualState::Rest).foreground
     }
 }
 
@@ -217,6 +129,7 @@ fn color_with_opacity(color: Color, opacity: f32) -> Color {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct ButtonInteractionInner {
     hovered: bool,
+    focused: bool,
 
     /*
      * このButton上でPrimaryボタンが
@@ -268,6 +181,10 @@ impl ButtonInteractionState {
         self.inner.borrow().enabled
     }
 
+    pub fn is_focused(&self) -> bool {
+        self.inner.borrow().focused
+    }
+
     pub fn take_clicked(&self) -> bool {
         let mut inner = self.inner.borrow_mut();
 
@@ -282,6 +199,7 @@ impl ButtonInteractionState {
         let mut inner = self.inner.borrow_mut();
 
         inner.hovered = false;
+        inner.focused = false;
         inner.armed = false;
         inner.pressed = false;
         inner.clicked = false;
@@ -296,6 +214,7 @@ impl ButtonInteractionState {
 
         if !enabled {
             inner.hovered = false;
+            inner.focused = false;
             inner.armed = false;
             inner.pressed = false;
         }
@@ -303,27 +222,21 @@ impl ButtonInteractionState {
         changed
     }
 
-    fn visual_state(&self) -> ButtonVisualState {
+    fn visual_state(&self) -> ControlVisualState {
         let inner = self.inner.borrow();
 
         if !inner.enabled {
-            ButtonVisualState::Disabled
+            ControlVisualState::Disabled
         } else if inner.pressed {
-            ButtonVisualState::Pressed
+            ControlVisualState::Pressed
         } else if inner.hovered {
-            ButtonVisualState::Hovered
+            ControlVisualState::Hovered
+        } else if inner.focused {
+            ControlVisualState::Focused
         } else {
-            ButtonVisualState::Normal
+            ControlVisualState::Rest
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ButtonVisualState {
-    Normal,
-    Hovered,
-    Pressed,
-    Disabled,
 }
 
 #[allow(unused)]
@@ -337,6 +250,11 @@ pub struct Button {
     shadow: ShadowStyle,
     alignment: ZStackAlignment,
     enabled: bool,
+    accessibility_label: Option<String>,
+    accessibility_value: Option<String>,
+    accessibility_role: AccessibilityRole,
+    accessibility_checked: Option<bool>,
+    accessibility_selected: bool,
     on_click: Option<RefCell<Box<dyn FnMut()>>>,
 }
 
@@ -351,6 +269,11 @@ impl Button {
             shadow: ShadowStyle::None,
             alignment: ZStackAlignment::Center,
             enabled: true,
+            accessibility_label: None,
+            accessibility_value: None,
+            accessibility_role: AccessibilityRole::Button,
+            accessibility_checked: None,
+            accessibility_selected: false,
             on_click: None,
             intrinsic_label_size: RefCell::new(None),
         }
@@ -397,6 +320,41 @@ impl Button {
         self
     }
 
+    pub fn accessibility_label(mut self, label: impl Into<String>) -> Self {
+        self.accessibility_label = Some(label.into());
+        self
+    }
+
+    pub fn accessibility_label_option(mut self, label: Option<String>) -> Self {
+        self.accessibility_label = label;
+        self
+    }
+
+    pub fn accessibility_value(mut self, value: impl Into<String>) -> Self {
+        self.accessibility_value = Some(value.into());
+        self
+    }
+
+    pub fn accessibility_value_option(mut self, value: Option<String>) -> Self {
+        self.accessibility_value = value;
+        self
+    }
+
+    pub fn accessibility_role(mut self, role: AccessibilityRole) -> Self {
+        self.accessibility_role = role;
+        self
+    }
+
+    pub fn accessibility_checked(mut self, checked: bool) -> Self {
+        self.accessibility_checked = Some(checked);
+        self
+    }
+
+    pub fn accessibility_selected(mut self, selected: bool) -> Self {
+        self.accessibility_selected = selected;
+        self
+    }
+
     pub fn interaction(&self) -> &ButtonInteractionState {
         &self.interaction
     }
@@ -407,10 +365,15 @@ impl Button {
             label: None,
             content: None,
             style: ButtonStyle::Standard,
-            radius: Option::from(CornerRadius::Medium),
+            radius: None,
             shadow: ShadowStyle::None,
             alignment: ZStackAlignment::Center,
             enabled: true,
+            accessibility_label: None,
+            accessibility_value: None,
+            accessibility_role: AccessibilityRole::Button,
+            accessibility_checked: None,
+            accessibility_selected: false,
             on_click: None,
             intrinsic_label_size: RefCell::new(None),
         }
@@ -468,20 +431,33 @@ impl View for Button {
             return;
         }
 
-        let horizontal_padding = context.theme.spacing.small;
+        let horizontal_padding = context.theme.button.horizontal_padding;
         let label_style = context.typography.label;
 
         self.interaction.set_enabled(self.enabled);
+
+        let mut accessibility = AccessibilityNode::new(self.accessibility_role, bounds);
+        accessibility.label = self
+            .accessibility_label
+            .clone()
+            .or_else(|| self.label.clone());
+        accessibility.value = self.accessibility_value.clone();
+        accessibility.enabled = self.enabled;
+        accessibility.focusable = true;
+        accessibility.focused = self.interaction.inner.borrow().focused;
+        accessibility.checked = self.accessibility_checked;
+        accessibility.selected = self.accessibility_selected;
+        context.record_accessibility(accessibility);
 
         let visual_state = self.interaction.visual_state();
 
         let mut appearance = self.style.resolve(context.theme, visual_state);
 
-        if visual_state == ButtonVisualState::Disabled {
-            appearance = appearance.with_opacity(0.42);
+        if visual_state == ControlVisualState::Disabled {
+            appearance = appearance.with_opacity(context.theme.button.disabled_opacity);
         }
 
-        let shadow = if visual_state == ButtonVisualState::Pressed {
+        let shadow = if visual_state == ControlVisualState::Pressed {
             ShadowStyle::None
         } else {
             self.shadow
@@ -491,14 +467,35 @@ impl View for Button {
             context
                 .inherited_corner_radius()
                 .map(CornerRadius::Custom)
-                .unwrap_or(CornerRadius::Medium)
+                .unwrap_or(context.theme.button.radius)
         });
+
+        if self.interaction.inner.borrow().focused {
+            let ring_width = context.theme.button.focus_ring_width;
+            Rectangle::new()
+                .color(RectangleColor::Custom(context.theme.button.focus_ring))
+                .radius(radius)
+                .shadow(ShadowStyle::None)
+                .border(BorderStyle::None)
+                .paint(
+                    Rect::new(
+                        bounds.origin.x - ring_width,
+                        bounds.origin.y - ring_width,
+                        bounds.size.width + ring_width * 2.0,
+                        bounds.size.height + ring_width * 2.0,
+                    ),
+                    context,
+                );
+        }
 
         Rectangle::new()
             .color(RectangleColor::Custom(appearance.background))
             .radius(radius)
             .shadow(shadow)
-            .border(BorderStyle::custom(appearance.border, 1.0))
+            .border(BorderStyle::custom(
+                appearance.border,
+                context.theme.button.stroke_width,
+            ))
             .paint(bounds, context);
 
         if let Some(label) = self.label.as_ref() {
@@ -515,6 +512,7 @@ impl View for Button {
             );
 
             Text::label(label.as_str())
+                .accessibility_hidden(true)
                 .alignment(self.label_text_alignment())
                 .color(appearance.foreground)
                 .paint(text_bounds, context);
@@ -556,6 +554,34 @@ impl View for Button {
         }
 
         match event {
+            ViewEvent::KeyboardFocusRequested { bounds: target } => {
+                let focused = target.is_some_and(|target| target == bounds);
+                let mut inner = self.interaction.inner.borrow_mut();
+                let changed = inner.focused != focused;
+                inner.focused = focused;
+                if !focused {
+                    inner.armed = false;
+                    inner.pressed = false;
+                }
+                drop(inner);
+                if changed {
+                    context.request_redraw_in(bounds.expanded(16.0));
+                }
+                EventResult::Ignored
+            }
+
+            ViewEvent::KeyPressed {
+                key: Key::Enter | Key::Space,
+                ..
+            } if self.interaction.inner.borrow().focused => {
+                self.interaction.inner.borrow_mut().clicked = true;
+                if let Some(callback) = self.on_click.as_ref() {
+                    (callback.borrow_mut())();
+                }
+                context.request_redraw_in(bounds.expanded(16.0));
+                EventResult::Consumed
+            }
+
             ViewEvent::PointerMoved { position } => {
                 let mut inner = self.interaction.inner.borrow_mut();
 
@@ -664,10 +690,11 @@ impl View for Button {
             ViewEvent::FocusChanged { focused: false } => {
                 let mut inner = self.interaction.inner.borrow_mut();
 
-                let changed = inner.armed || inner.pressed;
+                let changed = inner.armed || inner.pressed || inner.focused;
 
                 inner.armed = false;
                 inner.pressed = false;
+                inner.focused = false;
 
                 drop(inner);
 
@@ -683,8 +710,8 @@ impl View for Button {
     }
 
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
-        let horizontal_padding = context.theme.spacing.small;
-        let intrinsic_height = context.theme.layout.compact_control_height;
+        let horizontal_padding = context.theme.button.horizontal_padding;
+        let intrinsic_height = context.theme.button.height;
 
         let width_is_fixed = constraints.minimum.width.is_finite()
             && constraints.maximum.width.is_finite()

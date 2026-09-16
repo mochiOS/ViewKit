@@ -14,10 +14,11 @@
 
 use std::cell::Cell;
 
+use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Point, Rect, Size};
 use crate::layout::{IntoStackChild, StackChild};
-use crate::platform::PointerButton;
+use crate::platform::{Key, PointerButton};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 pub struct ContextMenu {
@@ -140,6 +141,9 @@ impl View for ContextMenu {
 
         let menu_bounds = self.menu_bounds_for_paint(bounds, position, context);
 
+        let mut focus_scope = AccessibilityNode::new(AccessibilityRole::Group, menu_bounds);
+        focus_scope.focus_scope = true;
+        context.record_accessibility(focus_scope);
         self.menu.paint(menu_bounds, context);
     }
 
@@ -229,6 +233,16 @@ impl View for ContextMenu {
             }
 
             ViewEvent::PointerFocusRequested { .. } => EventResult::Consumed,
+
+            ViewEvent::KeyPressed {
+                key: Key::Escape, ..
+            } => {
+                self.menu
+                    .handle_event(menu_bounds, &ViewEvent::PointerLeft, context);
+                self.close();
+                context.request_redraw();
+                EventResult::Consumed
+            }
 
             _ => self.menu.handle_event(menu_bounds, event, context),
         }

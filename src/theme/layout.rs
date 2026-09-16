@@ -1,7 +1,13 @@
+use super::FigmaTokens;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LayoutTokens {
     pub navigation_sidebar_width: f32,
     pub top_bar_height: f32,
+    pub page_margin: f32,
+    pub content_max_width: f32,
+    pub form_width: f32,
+    pub section_gap: f32,
     pub bottom_bar_height: f32,
     pub list_row_height: f32,
     pub list_leading_size: f32,
@@ -23,6 +29,7 @@ pub struct LayoutTokens {
     pub control_min_width: f32,
     pub tab_width: f32,
     pub compact_icon_size: f32,
+    pub control_icon_size: f32,
     pub stepper_icon_size: f32,
     pub radio_size: f32,
     pub radio_inset: f32,
@@ -48,8 +55,12 @@ pub struct LayoutTokens {
 
 impl LayoutTokens {
     pub const DEFAULT: Self = Self {
-        navigation_sidebar_width: 320.0,
-        top_bar_height: 64.0,
+        navigation_sidebar_width: FigmaTokens::LAYOUT.sidebar_width,
+        top_bar_height: FigmaTokens::LAYOUT.toolbar_height,
+        page_margin: FigmaTokens::LAYOUT.page_margin,
+        content_max_width: FigmaTokens::LAYOUT.content_max_width,
+        form_width: FigmaTokens::LAYOUT.form_width,
+        section_gap: FigmaTokens::LAYOUT.section_gap,
         bottom_bar_height: 56.0,
         list_row_height: 64.0,
         list_leading_size: 24.0,
@@ -71,6 +82,7 @@ impl LayoutTokens {
         control_min_width: 120.0,
         tab_width: 72.0,
         compact_icon_size: 12.0,
+        control_icon_size: 14.0,
         stepper_icon_size: 18.0,
         radio_size: 22.0,
         radio_inset: 3.0,

@@ -60,6 +60,7 @@ const OP_DESTROY_SURFACE: u32 = 6;
 const OP_SET_CURSOR_POSITION: u32 = 7;
 const OP_SET_CURSOR_IMAGE: u32 = 8;
 const OP_GET_RENDERER_CAPS: u32 = 9;
+const OP_SET_TITLE: u32 = 10;
 const OP_CONTEXT_MENU_SHOW: u32 = 121;
 const OP_APPEARANCE_CHANGED: u32 = 123;
 const ROLE_TOPLEVEL: u32 = 1;
@@ -72,6 +73,7 @@ const PIXEL_FORMAT_GPU_SCENE: u32 = 3;
 const RENDERER_CAP_GPU_SCENE: u32 = 1;
 const PAGE_SIZE: usize = 4096;
 const MAX_SURFACE_EXTENT: u32 = 16_384;
+const MAX_WINDOW_TITLE_BYTES: usize = 64;
 const ERRNO_EAGAIN: u64 = 11;
 const EVENT_POINTER_ENTER: u32 = 2;
 const EVENT_POINTER_LEAVE: u32 = 3;
@@ -362,6 +364,11 @@ where
             .map_err(|error| error.at("surface creation"))?;
         let token = surface.token();
         let window = MochiOsWindow::new(viewport, compositor, token);
+        if role == ROLE_TOPLEVEL {
+            window
+                .set_compositor_title(&self.config.title)
+                .map_err(|error| error.at("window title configuration"))?;
+        }
         let mut gpu_enabled = renderer_caps(compositor) & RENDERER_CAP_GPU_SCENE != 0;
         let mut shared_buffer = if gpu_enabled {
             SharedBuffer::new_gpu_scene(size.0 as usize, size.1 as usize)

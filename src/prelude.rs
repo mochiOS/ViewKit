@@ -4,6 +4,7 @@
 //! use viewkit::prelude::*;
 //! ```
 
+pub use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 pub use crate::animation::{
     Animation, AnimationSample, Easing, Interpolate, Transition, interpolate,
 };
@@ -19,6 +20,6 @@ pub use crate::platform::{CursorIcon, Key, KeyModifiers};
 pub use crate::runtime::{ViewKitError, request_exit, run};
 pub use crate::state::{Binding, State};
 pub use crate::svg::{SvgData, SvgError};
-pub use crate::theme::{Color, CornerRadius, ShadowStyle, Theme};
+pub use crate::theme::{Color, CornerRadius, FigmaTokens, ShadowStyle, Theme};
 pub use crate::typography::{TextAlignment, TextRole};
 pub use crate::view::View;

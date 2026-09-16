@@ -100,8 +100,12 @@ pub extern "C" fn vk_push_text(
 ) -> i32 {
     ffi_status(|| {
         let content = copy_string(content)?;
-        let font_size = finite_or_default(font_size, 16.0);
-        let line_height = finite_or_default(line_height, 24.0);
+        let font_size =
+            finite_or_default(font_size, crate::theme::Theme::DEFAULT.typography.body.size);
+        let line_height = finite_or_default(
+            line_height,
+            crate::theme::Theme::DEFAULT.typography.body.line_height,
+        );
         let alignment = decode_text_alignment(alignment)?;
         let color = decode_text_color(color)?;
         let factory: FfiViewFactory = Box::new(move |_node_id, children, _context| {
@@ -114,6 +118,36 @@ pub extern "C" fn vk_push_text(
                     .weight(weight)
                     .alignment(alignment)
                     .color(color),
+            )))
+        });
+        let runtime = runtime_mut(runtime)?;
+        let builder = active_builder(runtime)?;
+        let node = FfiNode::component(node_id, factory);
+        builder.leaf(node);
+        Ok(())
+    })
+}
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn vk_push_text_role(
+    runtime: *mut VkRuntime,
+    node_id: u64,
+    content: VkString,
+    role: u32,
+    tone: u32,
+    alignment: u32,
+) -> i32 {
+    ffi_status(|| {
+        let content = copy_string(content)?;
+        let role = decode_text_role(role)?;
+        let tone = decode_text_tone(tone)?;
+        let alignment = decode_text_alignment(alignment)?;
+        let factory: FfiViewFactory = Box::new(move |_node_id, children, _context| {
+            expect_no_children(children)?;
+            Ok(FfiBuiltView::View(Box::new(
+                crate::components::Text::styled(content, role)
+                    .tone(tone)
+                    .alignment(alignment),
             )))
         });
         let runtime = runtime_mut(runtime)?;

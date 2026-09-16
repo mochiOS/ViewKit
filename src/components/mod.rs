@@ -9,6 +9,7 @@ mod context_menu;
 mod dialog;
 mod divider;
 mod ellipse;
+mod form;
 mod group;
 mod hstack;
 mod icon;
@@ -27,6 +28,7 @@ mod radio;
 mod rectangle;
 mod scroll;
 mod segment_control;
+mod sidebar;
 mod slider;
 mod spacer;
 mod stepper;
@@ -44,11 +46,13 @@ mod zstack;
 pub use background::Background;
 pub use dialog::Dialog;
 pub use divider::Divider;
+pub use form::{Form, FormSections};
 pub use group::Group;
 pub use hstack::HStack;
 pub use overlay::Overlay;
 pub use padding::Padding;
 pub use scroll::{Scroll, ScrollAxis, ScrollBarVisibility, ScrollState};
+pub use sidebar::Sidebar;
 pub use spacer::Spacer;
 pub use surface::{Surface, SurfaceKind};
 pub use vstack::VStack;
@@ -65,7 +69,7 @@ pub use ellipse::{Ellipse, EllipseColor};
 pub use icon::{Icon, IconName};
 pub use icon_button::{IconButton, IconButtonTone};
 pub use image::{Image, ImageContentMode};
-pub use list::ListRow;
+pub use list::{List, ListRow};
 pub use menu::{Menu, MenuItem};
 pub use message_bubble::{MessageBubble, MessageDirection};
 pub use navigation_split_view::NavigationSplitView;
@@ -202,14 +206,20 @@ ffi_components! {
             => font_size =
                 finite_or_default(
                     font_size,
-                    16.0,
+                    crate::theme::Theme::DEFAULT
+                        .typography
+                        .body
+                        .size,
                 ),
 
         line_height: f32
             => line_height =
                 finite_or_default(
                     line_height,
-                    24.0,
+                    crate::theme::Theme::DEFAULT
+                        .typography
+                        .body
+                        .line_height,
                 ),
 
         weight: u16,
@@ -247,6 +257,45 @@ ffi_components! {
                 .weight(weight)
                 .alignment(alignment)
                 .color(color),
+            ),
+        ))
+    };
+
+    leaf vk_push_text_role(
+        content: VkString
+            => content =
+                copy_string(content)?,
+
+        role: u32
+            => role =
+                decode_text_role(role)?,
+
+        tone: u32
+            => tone =
+                decode_text_tone(tone)?,
+
+        alignment: u32
+            => alignment =
+                decode_text_alignment(
+                    alignment,
+                )?,
+    ) build move |
+        _node_id,
+        children,
+        _context
+    | {
+        expect_no_children(
+            children,
+        )?;
+
+        Ok(FfiBuiltView::View(
+            Box::new(
+                crate::components::Text::styled(
+                    content,
+                    role,
+                )
+                .tone(tone)
+                .alignment(alignment),
             ),
         ))
     };

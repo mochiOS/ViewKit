@@ -14,15 +14,16 @@ pub struct SpacingTokens {
 
 impl SpacingTokens {
     pub const DEFAULT: Self = Self {
-        micro: 2.0,
-        extra_small: 4.0,
-        small: 8.0,
-        medium: 12.0,
-        large: 16.0,
-        extra_large: 24.0,
-        double_extra_large: 32.0,
-        triple_extra_large: 40.0,
-        huge: 48.0,
-        giant: 64.0,
+        micro: FigmaTokens::SPACING.space_2,
+        extra_small: FigmaTokens::SPACING.space_4,
+        small: FigmaTokens::SPACING.space_8,
+        medium: FigmaTokens::SPACING.space_12,
+        large: FigmaTokens::SPACING.space_16,
+        extra_large: FigmaTokens::SPACING.space_24,
+        double_extra_large: FigmaTokens::SPACING.space_32,
+        triple_extra_large: FigmaTokens::SPACING.space_40,
+        huge: FigmaTokens::SPACING.space_48,
+        giant: FigmaTokens::SPACING.space_64,
     };
 }
+use super::FigmaTokens;

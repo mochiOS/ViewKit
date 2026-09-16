@@ -2,6 +2,7 @@
 
 use cosmic_text::{Attrs, Buffer, Metrics, Shaping, Weight};
 
+use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 use crate::draw_command::{DrawCommand, TextCommand};
 use crate::font::{DEFAULT_MONOSPACE_FONT_FAMILY, DEFAULT_UI_FONT_FAMILY, resolve_font_family};
 use crate::geometry::{Rect, Size};
@@ -26,6 +27,7 @@ pub struct Text {
     color: Option<Color>,
     tone: TextTone,
     cache_layout: bool,
+    accessibility_hidden: bool,
 }
 
 impl Text {
@@ -44,6 +46,7 @@ impl Text {
             color: None,
             tone: TextTone::Primary,
             cache_layout: true,
+            accessibility_hidden: false,
         }
     }
 
@@ -126,6 +129,13 @@ impl Text {
 
     pub fn cache_layout(mut self, cache_layout: bool) -> Self {
         self.cache_layout = cache_layout;
+        self
+    }
+
+    /// Excludes this text from the accessibility tree when a containing
+    /// control already exposes the same text as its accessible label.
+    pub fn accessibility_hidden(mut self, hidden: bool) -> Self {
+        self.accessibility_hidden = hidden;
         self
     }
 
@@ -321,6 +331,12 @@ impl View for Text {
         let font_size = resolved_font_size(style.size) * font_scale;
 
         let line_height = resolved_line_height(font_size, style.line_height * font_scale);
+
+        if !self.accessibility_hidden {
+            let mut node = AccessibilityNode::new(AccessibilityRole::StaticText, bounds);
+            node.label = Some(self.value.clone());
+            context.record_accessibility(node);
+        }
 
         context.display_list.push(DrawCommand::DrawText {
             command: TextCommand {

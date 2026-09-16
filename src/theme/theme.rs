@@ -3,14 +3,40 @@
 //! ViewKit全体の外観テーマを定義
 
 use super::{
-    BrowserTokens, Color, ColorTokens, DividerTokens, LayoutTokens, MotionTokens, RadiusTokens,
-    ScrollBarTokens, ShadowTokens, ShellTokens, SpacingTokens,
+    AvatarTokens, BadgeTokens, BrowserTokens, ButtonTokens, CardTokens, Color, ColorTokens,
+    DialogTokens, DividerTokens, FigmaColorTokens, FigmaTokens, LayoutTokens, ListTokens, MenuTokens,
+    MessageBubbleTokens, MotionTokens, PickerTokens, PopoverTokens, ProgressBarTokens, RadiusTokens,
+    ScrollBarTokens, SegmentedControlTokens, SurfaceTokens,
+    SelectionControlTokens, ShadowTokens, ShellTokens, SliderTokens, SpacingTokens,
+    StepperTokens, SwitchTokens, TabsTokens, TextFieldTokens, TooltipTokens,
 };
+use crate::typography::Typography;
 use std::cell::Cell;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Theme {
     pub colors: ColorTokens,
+    pub typography: Typography,
+    pub button: ButtonTokens,
+    pub text_field: TextFieldTokens,
+    pub list: ListTokens,
+    pub dialog: DialogTokens,
+    pub selection_control: SelectionControlTokens,
+    pub switch: SwitchTokens,
+    pub slider: SliderTokens,
+    pub segmented_control: SegmentedControlTokens,
+    pub popover: PopoverTokens,
+    pub picker: PickerTokens,
+    pub menu: MenuTokens,
+    pub tabs: TabsTokens,
+    pub stepper: StepperTokens,
+    pub progress_bar: ProgressBarTokens,
+    pub tooltip: TooltipTokens,
+    pub message_bubble: MessageBubbleTokens,
+    pub badge: BadgeTokens,
+    pub avatar: AvatarTokens,
+    pub card: CardTokens,
+    pub surface: SurfaceTokens,
     pub radius: RadiusTokens,
     pub spacing: SpacingTokens,
     pub shadows: ShadowTokens,
@@ -24,37 +50,34 @@ pub struct Theme {
 
 impl Theme {
     pub const LIGHT: Self = Self {
-        colors: ColorTokens {
-            background: Color::WHITE,
-            surface: Color::WHITE,
-            surface_subtle: Color::from_rgb_hex(0xf6f7f9),
-            surface_muted: Color::from_rgb_hex(0xe8eaed),
-            elevated_surface: Color::WHITE,
-
-            text_primary: Color::from_rgb_hex(0x17181a),
-            text_secondary: Color::from_rgb_hex(0x62666c),
-            text_tertiary: Color::from_rgb_hex(0xb5b9bf),
-            text_disabled: Color::from_rgb_hex(0xb5b9bf),
-
-            accent: Color::from_rgb_hex(0x3970dd),
-            accent_hovered: Color::from_rgb_hex(0x3265c9),
-            accent_pressed: Color::from_rgb_hex(0x2b58ad),
-            accent_soft: Color::from_rgb_hex(0xeaf0fc),
-
-            border: Color::from_rgb_hex(0xd9dce1),
-            border_strong: Color::from_rgb_hex(0xb9bdc4),
-            focus_ring: Color::rgba(57, 112, 221, 72),
-
-            success: Color::from_rgb_hex(0x218739),
-            success_soft: Color::from_rgb_hex(0xe8f6eb),
-
-            warning: Color::from_rgb_hex(0x8a5a00),
-            warning_soft: Color::from_rgb_hex(0xfff4d7),
-
-            destructive: Color::from_rgb_hex(0xd92d20),
-            destructive_hovered: Color::from_rgb_hex(0xb42318),
-            destructive_soft: Color::from_rgb_hex(0xfef3f2),
-        },
+        colors: colors_from_figma(FigmaTokens::LIGHT, false),
+        typography: Typography::DEFAULT,
+        button: ButtonTokens::from_colors(colors_from_figma(FigmaTokens::LIGHT, false), false),
+        text_field: TextFieldTokens::from_colors(colors_from_figma(FigmaTokens::LIGHT, false)),
+        list: ListTokens::from_colors(colors_from_figma(FigmaTokens::LIGHT, false)),
+        dialog: DialogTokens::from_colors(colors_from_figma(FigmaTokens::LIGHT, false)),
+        selection_control: SelectionControlTokens::from_colors(colors_from_figma(
+            FigmaTokens::LIGHT,
+            false,
+        )),
+        switch: SwitchTokens::from_colors(colors_from_figma(FigmaTokens::LIGHT, false)),
+        slider: SliderTokens::from_colors(colors_from_figma(FigmaTokens::LIGHT, false)),
+        segmented_control: SegmentedControlTokens::from_colors(colors_from_figma(
+            FigmaTokens::LIGHT,
+            false,
+        )),
+        popover: PopoverTokens::from_colors(colors_from_figma(FigmaTokens::LIGHT, false)),
+        picker: PickerTokens::from_colors(colors_from_figma(FigmaTokens::LIGHT, false)),
+        menu: MenuTokens::from_colors(colors_from_figma(FigmaTokens::LIGHT, false)),
+        tabs: TabsTokens::from_colors(colors_from_figma(FigmaTokens::LIGHT, false)),
+        stepper: StepperTokens::from_colors(colors_from_figma(FigmaTokens::LIGHT, false)),
+        progress_bar: ProgressBarTokens::from_colors(colors_from_figma(FigmaTokens::LIGHT, false)),
+        tooltip: TooltipTokens::from_colors(colors_from_figma(FigmaTokens::LIGHT, false)),
+        message_bubble: MessageBubbleTokens::from_colors(colors_from_figma(FigmaTokens::LIGHT, false)),
+        badge: BadgeTokens::from_colors(colors_from_figma(FigmaTokens::LIGHT, false)),
+        avatar: AvatarTokens::from_colors(colors_from_figma(FigmaTokens::LIGHT, false)),
+        card: CardTokens::from_colors(colors_from_figma(FigmaTokens::LIGHT, false)),
+        surface: SurfaceTokens::from_colors(colors_from_figma(FigmaTokens::LIGHT, false)),
 
         radius: RadiusTokens::DEFAULT,
         spacing: SpacingTokens::DEFAULT,
@@ -67,37 +90,34 @@ impl Theme {
         browser: BrowserTokens::LIGHT,
     };
     pub const DARK: Self = Self {
-        colors: ColorTokens {
-            background: Color::from_rgb_hex(0x1c1c1e),
-            surface: Color::from_rgb_hex(0x242426),
-            surface_subtle: Color::from_rgb_hex(0x2c2c2e),
-            surface_muted: Color::from_rgb_hex(0x3a3a3c),
-            elevated_surface: Color::from_rgb_hex(0x323234),
-
-            text_primary: Color::from_rgb_hex(0xf5f5f7),
-            text_secondary: Color::from_rgb_hex(0xaeaeb2),
-            text_tertiary: Color::from_rgb_hex(0x8e8e93),
-            text_disabled: Color::from_rgb_hex(0x636366),
-
-            accent: Color::from_rgb_hex(0x0a84ff),
-            accent_hovered: Color::from_rgb_hex(0x409cff),
-            accent_pressed: Color::from_rgb_hex(0x0071db),
-            accent_soft: Color::rgba(10, 132, 255, 38),
-
-            border: Color::rgba(255, 255, 255, 26),
-            border_strong: Color::rgba(255, 255, 255, 46),
-            focus_ring: Color::rgba(10, 132, 255, 102),
-
-            success: Color::from_rgb_hex(0x32d74b),
-            success_soft: Color::from_rgb_hex(0x17351e),
-
-            warning: Color::from_rgb_hex(0xffd60a),
-            warning_soft: Color::from_rgb_hex(0x3d3308),
-
-            destructive: Color::from_rgb_hex(0xff453a),
-            destructive_hovered: Color::from_rgb_hex(0xff6961),
-            destructive_soft: Color::from_rgb_hex(0x3d1715),
-        },
+        colors: colors_from_figma(FigmaTokens::DARK, true),
+        typography: Typography::DEFAULT,
+        button: ButtonTokens::from_colors(colors_from_figma(FigmaTokens::DARK, true), true),
+        text_field: TextFieldTokens::from_colors(colors_from_figma(FigmaTokens::DARK, true)),
+        list: ListTokens::from_colors(colors_from_figma(FigmaTokens::DARK, true)),
+        dialog: DialogTokens::from_colors(colors_from_figma(FigmaTokens::DARK, true)),
+        selection_control: SelectionControlTokens::from_colors(colors_from_figma(
+            FigmaTokens::DARK,
+            true,
+        )),
+        switch: SwitchTokens::from_colors(colors_from_figma(FigmaTokens::DARK, true)),
+        slider: SliderTokens::from_colors(colors_from_figma(FigmaTokens::DARK, true)),
+        segmented_control: SegmentedControlTokens::from_colors(colors_from_figma(
+            FigmaTokens::DARK,
+            true,
+        )),
+        popover: PopoverTokens::from_colors(colors_from_figma(FigmaTokens::DARK, true)),
+        picker: PickerTokens::from_colors(colors_from_figma(FigmaTokens::DARK, true)),
+        menu: MenuTokens::from_colors(colors_from_figma(FigmaTokens::DARK, true)),
+        tabs: TabsTokens::from_colors(colors_from_figma(FigmaTokens::DARK, true)),
+        stepper: StepperTokens::from_colors(colors_from_figma(FigmaTokens::DARK, true)),
+        progress_bar: ProgressBarTokens::from_colors(colors_from_figma(FigmaTokens::DARK, true)),
+        tooltip: TooltipTokens::from_colors(colors_from_figma(FigmaTokens::DARK, true)),
+        message_bubble: MessageBubbleTokens::from_colors(colors_from_figma(FigmaTokens::DARK, true)),
+        badge: BadgeTokens::from_colors(colors_from_figma(FigmaTokens::DARK, true)),
+        avatar: AvatarTokens::from_colors(colors_from_figma(FigmaTokens::DARK, true)),
+        card: CardTokens::from_colors(colors_from_figma(FigmaTokens::DARK, true)),
+        surface: SurfaceTokens::from_colors(colors_from_figma(FigmaTokens::DARK, true)),
 
         radius: RadiusTokens::DEFAULT,
         spacing: SpacingTokens::DEFAULT,
@@ -125,6 +145,26 @@ impl Theme {
         self.shell.selection_soft = accent.with_alpha(if dark { 48 } else { 28 });
         self.shell.selection_border = accent.with_alpha(if dark { 112 } else { 72 });
         self.browser.selection = accent;
+        self.button = ButtonTokens::from_colors(self.colors, dark);
+        self.text_field = TextFieldTokens::from_colors(self.colors);
+        self.list = ListTokens::from_colors(self.colors);
+        self.dialog = DialogTokens::from_colors(self.colors);
+        self.selection_control = SelectionControlTokens::from_colors(self.colors);
+        self.switch = SwitchTokens::from_colors(self.colors);
+        self.slider = SliderTokens::from_colors(self.colors);
+        self.segmented_control = SegmentedControlTokens::from_colors(self.colors);
+        self.popover = PopoverTokens::from_colors(self.colors);
+        self.picker = PickerTokens::from_colors(self.colors);
+        self.menu = MenuTokens::from_colors(self.colors);
+        self.tabs = TabsTokens::from_colors(self.colors);
+        self.stepper = StepperTokens::from_colors(self.colors);
+        self.progress_bar = ProgressBarTokens::from_colors(self.colors);
+        self.tooltip = TooltipTokens::from_colors(self.colors);
+        self.message_bubble = MessageBubbleTokens::from_colors(self.colors);
+        self.badge = BadgeTokens::from_colors(self.colors);
+        self.avatar = AvatarTokens::from_colors(self.colors);
+        self.card = CardTokens::from_colors(self.colors);
+        self.surface = SurfaceTokens::from_colors(self.colors);
         self
     }
 
@@ -136,6 +176,36 @@ impl Theme {
 
     pub(crate) fn set_current(theme: Self) {
         CURRENT_THEME.with(|current| current.set(theme));
+    }
+}
+
+const fn colors_from_figma(tokens: FigmaColorTokens, dark: bool) -> ColorTokens {
+    let soft_alpha = if dark { 48 } else { 24 };
+    let focus_alpha = if dark { 102 } else { 72 };
+    ColorTokens {
+        background: tokens.background.primary,
+        surface: tokens.background.primary,
+        surface_subtle: tokens.background.secondary,
+        surface_muted: tokens.border.subtle,
+        elevated_surface: tokens.background.elevated,
+        text_primary: tokens.text.primary,
+        text_secondary: tokens.text.secondary,
+        text_tertiary: tokens.text.tertiary,
+        text_disabled: tokens.text.disabled,
+        accent: tokens.accent.primary,
+        accent_hovered: tokens.accent.hover,
+        accent_pressed: tokens.accent.pressed,
+        accent_soft: tokens.accent.subtle,
+        border: tokens.border.default,
+        border_strong: tokens.border.strong,
+        focus_ring: tokens.accent.primary.with_alpha(focus_alpha),
+        success: tokens.semantic.success,
+        success_soft: tokens.semantic.success.with_alpha(soft_alpha),
+        warning: tokens.semantic.warning,
+        warning_soft: tokens.semantic.warning.with_alpha(soft_alpha),
+        destructive: tokens.semantic.error.base,
+        destructive_hovered: tokens.semantic.error.hover,
+        destructive_soft: tokens.semantic.error.base.with_alpha(soft_alpha),
     }
 }
 

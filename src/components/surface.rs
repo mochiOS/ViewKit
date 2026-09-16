@@ -2,7 +2,7 @@
 
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
-use crate::theme::{CornerRadius, ShadowStyle};
+use crate::theme::Theme;
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 use super::background::EmptyView;
@@ -58,16 +58,25 @@ impl<Content> Surface<Content> {
         }
     }
 
-    fn chrome(&self) -> Rectangle {
+    fn chrome(&self, theme: &Theme) -> Rectangle {
         match self.kind {
-            SurfaceKind::App => Rectangle::new().color(RectangleColor::Background),
-            SurfaceKind::Pane => Rectangle::new().color(RectangleColor::Surface),
-            SurfaceKind::Sidebar => Rectangle::new().color(RectangleColor::SubtleSurface),
+            SurfaceKind::App => Rectangle::new().color(RectangleColor::Custom(
+                theme.surface.app_background,
+            )),
+            SurfaceKind::Pane => Rectangle::new().color(RectangleColor::Custom(
+                theme.surface.pane_background,
+            )),
+            SurfaceKind::Sidebar => Rectangle::new().color(RectangleColor::Custom(
+                theme.surface.sidebar_background,
+            )),
             SurfaceKind::Floating => Rectangle::new()
-                .color(RectangleColor::ElevatedSurface)
-                .radius(CornerRadius::Card)
-                .shadow(ShadowStyle::Floating)
-                .border(BorderStyle::standard(1.0)),
+                .color(RectangleColor::Custom(theme.surface.floating_background))
+                .radius(theme.surface.floating_radius)
+                .shadow(theme.surface.floating_shadow)
+                .border(BorderStyle::custom(
+                    theme.surface.floating_border,
+                    theme.surface.floating_stroke_width,
+                )),
         }
     }
 }
@@ -87,7 +96,7 @@ where
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
-        self.chrome().paint(bounds, context);
+        self.chrome(context.theme).paint(bounds, context);
         self.content.paint(bounds, context);
     }
 

@@ -1,5 +1,6 @@
 //! Stack内へ区切り線を配置するDividerを定義
 
+use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 use crate::draw_command::DrawCommand;
 use crate::geometry::Rect;
 use crate::layout::{IntoStackChild, StackChild};
@@ -61,6 +62,10 @@ struct DividerView {
 
 impl View for DividerView {
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
+        context.record_accessibility(AccessibilityNode::new(
+            AccessibilityRole::Separator,
+            bounds,
+        ));
         context.display_list.push(DrawCommand::FillRect {
             rect: bounds,
             color: self.color.resolve(context),

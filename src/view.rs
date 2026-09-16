@@ -1,3 +1,4 @@
+use crate::accessibility::AccessibilityNode;
 use crate::draw_command::DisplayList;
 use crate::event::{EventContext, EventResult, RedrawRequest, ViewEvent};
 use crate::geometry::{Rect, Size};
@@ -66,6 +67,7 @@ pub struct PaintContext<'a> {
     pub typography: &'a Typography,
     pub text_measurer: &'a mut TextMeasurer,
     redraw_schedule: Option<&'a mut RedrawSchedule>,
+    accessibility_nodes: Option<&'a mut Vec<AccessibilityNode>>,
     inherited_corner_radii: Vec<f32>,
 }
 
@@ -83,6 +85,7 @@ impl<'a> PaintContext<'a> {
             text_measurer,
 
             redraw_schedule: None,
+            accessibility_nodes: None,
             inherited_corner_radii: Vec::new(),
         }
     }
@@ -90,6 +93,20 @@ impl<'a> PaintContext<'a> {
     pub fn with_redraw_schedule(mut self, redraw_schedule: &'a mut RedrawSchedule) -> Self {
         self.redraw_schedule = Some(redraw_schedule);
         self
+    }
+
+    pub fn with_accessibility_nodes(
+        mut self,
+        accessibility_nodes: &'a mut Vec<AccessibilityNode>,
+    ) -> Self {
+        self.accessibility_nodes = Some(accessibility_nodes);
+        self
+    }
+
+    pub fn record_accessibility(&mut self, node: AccessibilityNode) {
+        if let Some(nodes) = self.accessibility_nodes.as_deref_mut() {
+            nodes.push(node);
+        }
     }
 
     pub fn request_redraw_at(&mut self, deadline: Instant) {

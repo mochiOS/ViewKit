@@ -1,5 +1,6 @@
+use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 use crate::geometry::{Rect, Size};
-use crate::theme::{Color, CornerRadius};
+use crate::theme::Color;
 use crate::typography::TextAlignment;
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
@@ -34,18 +35,13 @@ impl Badge {
     }
 
     fn colors(&self, context: &PaintContext<'_>) -> (Color, Color) {
+        let recipe = context.theme.badge;
         match self.tone {
-            BadgeTone::Neutral => (
-                context.theme.colors.surface_subtle,
-                context.theme.colors.text_secondary,
-            ),
-            BadgeTone::Accent => (
-                context.theme.colors.accent_soft,
-                context.theme.colors.accent,
-            ),
-            BadgeTone::Success => (context.theme.colors.success, Color::WHITE),
-            BadgeTone::Warning => (context.theme.colors.warning, Color::WHITE),
-            BadgeTone::Error => (context.theme.colors.destructive, Color::WHITE),
+            BadgeTone::Neutral => (recipe.neutral_background, recipe.neutral_foreground),
+            BadgeTone::Accent => (recipe.accent_background, recipe.accent_foreground),
+            BadgeTone::Success => (recipe.success_background, recipe.semantic_foreground),
+            BadgeTone::Warning => (recipe.warning_background, recipe.semantic_foreground),
+            BadgeTone::Error => (recipe.error_background, recipe.semantic_foreground),
         }
     }
 }
@@ -55,8 +51,9 @@ impl View for Badge {
         let measured = Text::caption(self.label.as_str())
             .measure_unbounded_with_typography(context.text_measurer, context.typography);
 
-        let horizontal = context.theme.spacing.small * 2.0;
-        let height = context.typography.caption.line_height + context.theme.spacing.micro * 2.0;
+        let horizontal = context.theme.badge.horizontal_padding * 2.0;
+        let height = context.typography.caption.line_height
+            + context.theme.badge.vertical_padding * 2.0;
         constraints.constrain(Size::new((measured.width + horizontal).max(height), height))
     }
 
@@ -66,20 +63,24 @@ impl View for Badge {
         }
 
         let (background, foreground) = self.colors(context);
+        let mut node = AccessibilityNode::new(AccessibilityRole::Status, bounds);
+        node.label = Some(self.label.clone());
+        context.record_accessibility(node);
 
         Rectangle::new()
             .color(RectangleColor::Custom(background))
-            .radius(CornerRadius::Small)
+            .radius(context.theme.badge.radius)
             .paint(bounds, context);
 
         let line_height = context.typography.caption.line_height;
         Text::caption(self.label.clone())
+            .accessibility_hidden(true)
             .alignment(TextAlignment::Center)
             .color(foreground)
             .paint(
                 Rect::new(
                     bounds.origin.x,
-                    bounds.origin.y + context.theme.spacing.micro,
+                    bounds.origin.y + context.theme.badge.vertical_padding,
                     bounds.size.width,
                     line_height,
                 ),

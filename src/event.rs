@@ -1,6 +1,7 @@
 //! Viewツリー内部で使用するイベント配送API
 
 use crate::geometry::{Point, Rect};
+use crate::accessibility::AccessibilityNode;
 use crate::platform::{ButtonState, CursorIcon, Key, KeyModifiers, PlatformEvent, PointerButton};
 use crate::theme::Theme;
 use crate::typography::{TextMeasurer, Typography};
@@ -73,6 +74,10 @@ pub enum ViewEvent {
         position: Point,
     },
 
+    KeyboardFocusRequested {
+        bounds: Option<Rect>,
+    },
+
     FocusChanged {
         focused: bool,
     },
@@ -96,6 +101,7 @@ impl ViewEvent {
             | Self::KeyPressed { .. }
             | Self::TextInput { .. }
             | Self::FocusChanged { .. }
+            | Self::KeyboardFocusRequested { .. }
             | Self::ContextMenuResult { .. }
             | Self::Backspace
             | Self::Delete
@@ -124,6 +130,7 @@ impl ViewEvent {
             Self::PointerMoved { .. }
                 | Self::PointerReleased { .. }
                 | Self::PointerFocusRequested { .. }
+                | Self::KeyboardFocusRequested { .. }
                 | Self::PointerLeft
                 | Self::KeyPressed { .. }
                 | Self::TextInput { .. }
@@ -200,6 +207,7 @@ pub struct EventContext<'a> {
     redraw_request: RedrawRequest,
     cursor_icon: Option<CursorIcon>,
     context_menu_request: Option<ContextMenuRequest>,
+    keyboard_focus_request: Option<Option<Rect>>,
 }
 
 impl<'a> EventContext<'a> {
@@ -215,6 +223,7 @@ impl<'a> EventContext<'a> {
             redraw_request: RedrawRequest::None,
             cursor_icon: None,
             context_menu_request: None,
+            keyboard_focus_request: None,
         }
     }
 
@@ -257,11 +266,36 @@ impl<'a> EventContext<'a> {
     pub fn take_context_menu_request(&mut self) -> Option<ContextMenuRequest> {
         self.context_menu_request.take()
     }
+
+    /// Requests keyboard focus for a focusable accessibility node with these
+    /// exact bounds. The dispatcher validates the target against the current
+    /// focus order before applying it.
+    pub fn request_keyboard_focus(&mut self, bounds: Rect) {
+        self.keyboard_focus_request = Some(Some(bounds));
+    }
+
+    pub fn clear_keyboard_focus(&mut self) {
+        self.keyboard_focus_request = Some(None);
+    }
+
+    fn take_keyboard_focus_request(&mut self) -> Option<Option<Rect>> {
+        self.keyboard_focus_request.take()
+    }
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct EventDispatcher {
     pointer_position: Option<Point>,
+    focus_order: Vec<Rect>,
+    focused_bounds: Option<Rect>,
+    focus_scopes: Vec<FocusScopeState>,
+    pending_focus_request: Option<Option<Rect>>,
+}
+
+#[derive(Clone, Debug)]
+struct FocusScopeState {
+    bounds: Rect,
+    restore_focus: Option<Rect>,
 }
 
 impl EventDispatcher {
@@ -273,6 +307,93 @@ impl EventDispatcher {
         self.pointer_position
     }
 
+    pub fn set_accessibility_nodes(&mut self, nodes: &[AccessibilityNode]) {
+        let scope_entries: Vec<(usize, Rect)> = nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, node)| node.focus_scope)
+            .map(|(index, node)| (index, node.bounds))
+            .collect();
+        let common_scope_count = self
+            .focus_scopes
+            .iter()
+            .zip(scope_entries.iter())
+            .take_while(|(active, (_, bounds))| active.bounds == *bounds)
+            .count();
+
+        while self.focus_scopes.len() > common_scope_count {
+            if let Some(scope) = self.focus_scopes.pop() {
+                self.focused_bounds = scope.restore_focus;
+                self.pending_focus_request = Some(self.focused_bounds);
+            }
+        }
+
+        for (scope_position, (scope_index, bounds)) in scope_entries
+            .iter()
+            .enumerate()
+            .skip(common_scope_count)
+        {
+            let next_scope_index = scope_entries
+                .get(scope_position + 1)
+                .map(|(index, _)| *index)
+                .unwrap_or(nodes.len());
+            let target = nodes[scope_index + 1..next_scope_index]
+                .iter()
+                .find(|node| node.focusable && node.enabled)
+                .map(|node| node.bounds)
+                .or_else(|| {
+                    nodes[scope_index + 1..]
+                        .iter()
+                        .find(|node| node.focusable && node.enabled)
+                        .map(|node| node.bounds)
+                });
+            self.focus_scopes.push(FocusScopeState {
+                bounds: *bounds,
+                restore_focus: self.focused_bounds,
+            });
+            self.focused_bounds = target;
+            self.pending_focus_request = Some(target);
+        }
+
+        self.focus_order.clear();
+        let focus_start = scope_entries
+            .last()
+            .map(|(index, _)| index + 1)
+            .unwrap_or(0);
+        self.focus_order.extend(
+            nodes[focus_start..]
+                .iter()
+                .filter(|node| node.focusable && node.enabled)
+                .map(|node| node.bounds),
+        );
+
+        if self
+            .focused_bounds
+            .is_some_and(|focused| !self.focus_order.contains(&focused))
+        {
+            self.focused_bounds = self.focus_order.first().copied();
+            self.pending_focus_request = Some(self.focused_bounds);
+        }
+    }
+
+    fn next_focus(&self, backwards: bool) -> Option<Rect> {
+        let count = self.focus_order.len();
+        if count == 0 {
+            return None;
+        }
+
+        let current = self
+            .focused_bounds
+            .and_then(|focused| self.focus_order.iter().position(|bounds| *bounds == focused));
+        let index = match (current, backwards) {
+            (Some(0), true) | (None, true) => count - 1,
+            (Some(index), true) => index - 1,
+            (Some(index), false) => (index + 1) % count,
+            (None, false) => 0,
+        };
+        self.focus_order.get(index).copied()
+    }
+
     pub fn dispatch(
         &mut self,
         root: &dyn View,
@@ -281,6 +402,28 @@ impl EventDispatcher {
         context: &mut EventContext<'_>,
     ) -> EventResult {
         let mut result = EventResult::Ignored;
+
+        if let Some(target) = self.pending_focus_request.take() {
+            result = result.merge(root.handle_event(
+                bounds,
+                &ViewEvent::KeyboardFocusRequested { bounds: target },
+                context,
+            ));
+        }
+
+        if let PlatformEvent::KeyPressed {
+            key: Key::Tab,
+            modifiers,
+        } = event
+        {
+            let target = self.next_focus(modifiers.shift());
+            self.focused_bounds = target;
+            return root.handle_event(
+                bounds,
+                &ViewEvent::KeyboardFocusRequested { bounds: target },
+                context,
+            );
+        }
 
         let is_primary_press = matches!(
             event,
@@ -291,6 +434,17 @@ impl EventDispatcher {
         );
 
         if is_primary_press && let Some(position) = self.pointer_position {
+            let target = self
+                .focus_order
+                .iter()
+                .copied()
+                .find(|bounds| bounds.contains(position));
+            self.focused_bounds = target;
+            result = result.merge(root.handle_event(
+                bounds,
+                &ViewEvent::KeyboardFocusRequested { bounds: target },
+                context,
+            ));
             result = result.merge(root.handle_event(
                 bounds,
                 &ViewEvent::PointerFocusRequested { position },
@@ -302,7 +456,19 @@ impl EventDispatcher {
             return result;
         };
 
-        result.merge(root.handle_event(bounds, &view_event, context))
+        result = result.merge(root.handle_event(bounds, &view_event, context));
+
+        if let Some(requested) = context.take_keyboard_focus_request() {
+            let target = requested.filter(|bounds| self.focus_order.contains(bounds));
+            self.focused_bounds = target;
+            result = result.merge(root.handle_event(
+                bounds,
+                &ViewEvent::KeyboardFocusRequested { bounds: target },
+                context,
+            ));
+        }
+
+        result
     }
 
     fn convert_event(&mut self, event: &PlatformEvent) -> Option<ViewEvent> {
@@ -355,6 +521,7 @@ impl EventDispatcher {
             PlatformEvent::Focused(focused) => {
                 if !focused {
                     self.pointer_position = None;
+                    self.focused_bounds = None;
                 }
 
                 Some(ViewEvent::FocusChanged { focused: *focused })

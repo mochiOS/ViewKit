@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::ops::RangeInclusive;
 use std::rc::Rc;
 
+use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
 use crate::platform::PointerButton;
@@ -15,6 +16,7 @@ use super::{Ellipse, EllipseColor, Rectangle, RectangleColor, Text};
 struct SliderInteractionInner {
     hovered: bool,
     dragging: bool,
+    focused: bool,
     enabled: bool,
     drag_offset_x: f32,
 }
@@ -66,6 +68,7 @@ impl SliderInteractionState {
 
         inner.hovered = false;
         inner.dragging = false;
+        inner.focused = false;
         inner.drag_offset_x = 0.0;
     }
 
@@ -79,6 +82,7 @@ impl SliderInteractionState {
         if !enabled {
             inner.hovered = false;
             inner.dragging = false;
+            inner.focused = false;
             inner.drag_offset_x = 0.0;
         }
 
@@ -326,12 +330,23 @@ impl View for Slider {
 
         self.interaction.set_enabled(self.enabled);
 
+        let mut accessibility = AccessibilityNode::new(AccessibilityRole::Slider, bounds);
+        accessibility.label = self.label.clone();
+        accessibility.numeric_value = Some(self.current_value());
+        accessibility.numeric_minimum = Some(self.minimum);
+        accessibility.numeric_maximum = Some(self.maximum);
+        accessibility.enabled = self.enabled;
+        accessibility.focusable = true;
+        accessibility.focused = self.interaction.inner.borrow().focused;
+        context.record_accessibility(accessibility);
+
         if let Some(label) = self.label.as_ref() {
             Text::label(label.as_str())
+                .accessibility_hidden(true)
                 .color(if self.enabled {
-                    context.theme.colors.text_primary
+                    context.theme.slider.label
                 } else {
-                    context.theme.colors.text_disabled
+                    context.theme.slider.disabled_label
                 })
                 .paint(
                     Rect::new(
@@ -359,19 +374,25 @@ impl View for Slider {
         let dragging = self.interaction.is_dragging();
 
         let background_color = if self.enabled {
-            context.theme.colors.surface_muted
+            context.theme.slider.track
         } else {
-            with_opacity(context.theme.colors.surface_muted, 0.45)
+            with_opacity(
+                context.theme.slider.track,
+                context.theme.slider.disabled_opacity,
+            )
         };
 
         let accent_color = if !self.enabled {
-            with_opacity(context.theme.colors.accent, 0.45)
+            with_opacity(
+                context.theme.slider.fill,
+                context.theme.slider.disabled_opacity,
+            )
         } else if dragging {
-            context.theme.colors.accent_pressed
+            context.theme.slider.pressed_fill
         } else if hovered {
-            context.theme.colors.accent_hovered
+            context.theme.slider.hovered_fill
         } else {
-            context.theme.colors.accent
+            context.theme.slider.fill
         };
 
         Rectangle::new()
@@ -414,24 +435,34 @@ impl View for Slider {
         );
 
         let knob_color = if !self.enabled {
-            context.theme.colors.surface_subtle
+            context.theme.slider.disabled_knob
         } else if dragging || hovered {
-            context.theme.colors.surface
+            context.theme.slider.hovered_knob
         } else {
-            context.theme.colors.elevated_surface
+            context.theme.slider.knob
         };
 
         let knob_shadow = ShadowStyle::None;
+
+        if self.interaction.inner.borrow().focused {
+            Ellipse::new()
+                .color(EllipseColor::Custom(context.theme.slider.focus_ring))
+                .shadow(ShadowStyle::None)
+                .paint(
+                    knob_bounds.expanded(context.theme.slider.focus_ring_width),
+                    context,
+                );
+        }
 
         Ellipse::new()
             .color(EllipseColor::Custom(knob_color))
             .border(super::BorderStyle::custom(
                 if hovered {
-                    context.theme.colors.accent
+                    context.theme.slider.hovered_knob_border
                 } else {
-                    context.theme.colors.border
+                    context.theme.slider.knob_border
                 },
-                1.0,
+                context.theme.slider.stroke_width,
             ))
             .shadow(knob_shadow)
             .paint(knob_bounds, context);
@@ -468,6 +499,31 @@ impl View for Slider {
         );
 
         match event {
+            ViewEvent::KeyboardFocusRequested { bounds: target } => {
+                let focused = target.is_some_and(|target| target == bounds);
+                let mut inner = self.interaction.inner.borrow_mut();
+                let changed = inner.focused != focused;
+                inner.focused = focused;
+                drop(inner);
+                if changed {
+                    context.request_redraw_in(bounds.expanded(16.0));
+                }
+                EventResult::Ignored
+            }
+
+            ViewEvent::ArrowLeft => self.adjust_from_keyboard(-1.0, bounds, context),
+            ViewEvent::ArrowRight => self.adjust_from_keyboard(1.0, bounds, context),
+
+            ViewEvent::KeyPressed { key, .. } => match key {
+                crate::platform::Key::ArrowLeft | crate::platform::Key::ArrowDown => {
+                    self.adjust_from_keyboard(-1.0, bounds, context)
+                }
+                crate::platform::Key::ArrowRight | crate::platform::Key::ArrowUp => {
+                    self.adjust_from_keyboard(1.0, bounds, context)
+                }
+                _ => EventResult::Ignored,
+            },
+
             ViewEvent::PointerMoved { position } => {
                 let (state_changed, dragging, drag_offset_x) = {
                     let mut inner = self.interaction.inner.borrow_mut();
@@ -603,6 +659,7 @@ impl View for Slider {
 
                     inner.hovered = false;
                     inner.dragging = false;
+                    inner.focused = false;
 
                     was_dragging
                 };
@@ -618,6 +675,29 @@ impl View for Slider {
 
             _ => EventResult::Ignored,
         }
+    }
+}
+
+impl Slider {
+    fn adjust_from_keyboard(
+        &self,
+        direction: f32,
+        bounds: Rect,
+        context: &mut EventContext<'_>,
+    ) -> EventResult {
+        if !self.interaction.inner.borrow().focused {
+            return EventResult::Ignored;
+        }
+        let increment = self
+            .step
+            .unwrap_or_else(|| ((self.maximum - self.minimum) / 100.0).max(f32::EPSILON));
+        let value = self.sanitize_value(self.current_value() + increment * direction);
+        if !values_equal(value, self.current_value()) {
+            self.value.set_without_notification(value);
+            self.value.commit();
+            context.request_redraw_in(bounds.expanded(16.0));
+        }
+        EventResult::Consumed
     }
 }
 

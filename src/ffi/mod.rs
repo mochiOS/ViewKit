@@ -1,8 +1,9 @@
 //! KomeからViewKit Runtimeを操作するためのC関数
 
+use crate::accessibility::AccessibilityNode;
 use crate::components::{
     BorderStyle, ButtonColor, ImageContentMode, RectangleColor, ScrollAxis, ScrollBarVisibility,
-    SvgContentMode, TextFieldSize, ZStackAlignment,
+    SvgContentMode, TextFieldSize, TextTone, ZStackAlignment,
 };
 use crate::draw_command::{DisplayList, DrawCommand, ImageSampling};
 use crate::event::{EventContext, EventDispatcher};
@@ -15,7 +16,7 @@ use crate::platform::windows::WindowsBackend as DesktopBackend;
 use crate::platform::{PlatformApplication, PlatformEvent, PlatformWindow, WindowConfig};
 use crate::renderer::Viewport;
 use crate::theme::{Color, CornerRadius, Theme};
-use crate::typography::{TextAlignment, TextMeasurer, Typography};
+use crate::typography::{TextAlignment, TextMeasurer, TextRole};
 use crate::view::{PaintContext, RedrawSchedule, View};
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -48,7 +49,7 @@ pub const VK_Z_ALIGNMENT_BOTTOM: u32 = 7;
 pub const VK_Z_ALIGNMENT_BOTTOM_TRAILING: u32 = 8;
 
 pub const VK_ABI_VERSION_MAJOR: u32 = 1;
-pub const VK_ABI_VERSION_MINOR: u32 = 0;
+pub const VK_ABI_VERSION_MINOR: u32 = 1;
 pub const VK_ABI_VERSION_PATCH: u32 = 0;
 
 pub const VK_IMAGE_CONTENT_MODE_FIT: u32 = 0;
@@ -177,6 +178,23 @@ pub const VK_SCROLLBAR_ALWAYS: u32 = 2;
 pub const VK_TEXT_FIELD_SIZE_SMALL: u32 = 0;
 pub const VK_TEXT_FIELD_SIZE_MEDIUM: u32 = 1;
 pub const VK_TEXT_FIELD_SIZE_LARGE: u32 = 2;
+
+pub const VK_TEXT_ROLE_DISPLAY_LARGE: u32 = 0;
+pub const VK_TEXT_ROLE_DISPLAY_MEDIUM: u32 = 1;
+pub const VK_TEXT_ROLE_TITLE_LARGE: u32 = 2;
+pub const VK_TEXT_ROLE_TITLE_MEDIUM: u32 = 3;
+pub const VK_TEXT_ROLE_TITLE_SMALL: u32 = 4;
+pub const VK_TEXT_ROLE_BODY: u32 = 5;
+pub const VK_TEXT_ROLE_LABEL: u32 = 6;
+pub const VK_TEXT_ROLE_CAPTION: u32 = 7;
+pub const VK_TEXT_ROLE_CODE: u32 = 8;
+
+pub const VK_TEXT_TONE_PRIMARY: u32 = 0;
+pub const VK_TEXT_TONE_SECONDARY: u32 = 1;
+pub const VK_TEXT_TONE_TERTIARY: u32 = 2;
+pub const VK_TEXT_TONE_DISABLED: u32 = 3;
+pub const VK_TEXT_TONE_ACCENT: u32 = 4;
+pub const VK_TEXT_TONE_DESTRUCTIVE: u32 = 5;
 
 pub const VK_MENU_ENTRY_ITEM: u32 = 0;
 pub const VK_MENU_ENTRY_SEPARATOR: u32 = 1;
@@ -427,8 +445,8 @@ struct VkWindowApplication<'a> {
     runtime: &'a mut VkRuntime,
 
     theme: Theme,
-    typography: Typography,
     text_measurer: TextMeasurer,
+    accessibility_nodes: Vec<AccessibilityNode>,
 
     event_dispatcher: EventDispatcher,
     redraw_schedule: RedrawSchedule,
@@ -440,8 +458,8 @@ impl<'a> VkWindowApplication<'a> {
             runtime,
 
             theme: Theme::DEFAULT,
-            typography: Typography::DEFAULT,
             text_measurer: TextMeasurer::new(),
+            accessibility_nodes: Vec::new(),
 
             event_dispatcher: EventDispatcher::new(),
 
@@ -474,8 +492,11 @@ impl PlatformApplication for VkWindowApplication<'_> {
         let bounds = window.viewport().logical_bounds();
 
         let redraw_request = {
-            let mut context =
-                EventContext::new(&self.theme, &self.typography, &mut self.text_measurer);
+            let mut context = EventContext::new(
+                &self.theme,
+                &self.theme.typography,
+                &mut self.text_measurer,
+            );
 
             self.event_dispatcher
                 .dispatch(root.as_ref(), bounds, &event, &mut context);
@@ -496,17 +517,22 @@ impl PlatformApplication for VkWindowApplication<'_> {
         });
 
         self.redraw_schedule.clear();
+        self.accessibility_nodes.clear();
 
         if let Some(root) = self.runtime.root.as_ref() {
             let mut context = PaintContext::new(
                 display_list,
                 &self.theme,
-                &self.typography,
+                &self.theme.typography,
                 &mut self.text_measurer,
             )
-            .with_redraw_schedule(&mut self.redraw_schedule);
+            .with_redraw_schedule(&mut self.redraw_schedule)
+            .with_accessibility_nodes(&mut self.accessibility_nodes);
 
             root.paint(bounds, &mut context);
+            drop(context);
+            self.event_dispatcher
+                .set_accessibility_nodes(&self.accessibility_nodes);
         }
 
         bounds
@@ -514,6 +540,10 @@ impl PlatformApplication for VkWindowApplication<'_> {
 
     fn next_redraw_at(&self) -> Option<Instant> {
         self.redraw_schedule.deadline()
+    }
+
+    fn accessibility_nodes(&self) -> &[AccessibilityNode] {
+        &self.accessibility_nodes
     }
 }
 
@@ -1017,6 +1047,33 @@ fn decode_text_alignment(value: u32) -> Result<TextAlignment, VkStatus> {
 
         VK_TEXT_ALIGNMENT_JUSTIFIED => Ok(TextAlignment::Justified),
 
+        _ => Err(VkStatus::InvalidEnumValue),
+    }
+}
+
+fn decode_text_role(value: u32) -> Result<TextRole, VkStatus> {
+    match value {
+        VK_TEXT_ROLE_DISPLAY_LARGE => Ok(TextRole::DisplayLarge),
+        VK_TEXT_ROLE_DISPLAY_MEDIUM => Ok(TextRole::DisplayMedium),
+        VK_TEXT_ROLE_TITLE_LARGE => Ok(TextRole::TitleLarge),
+        VK_TEXT_ROLE_TITLE_MEDIUM => Ok(TextRole::TitleMedium),
+        VK_TEXT_ROLE_TITLE_SMALL => Ok(TextRole::TitleSmall),
+        VK_TEXT_ROLE_BODY => Ok(TextRole::Body),
+        VK_TEXT_ROLE_LABEL => Ok(TextRole::Label),
+        VK_TEXT_ROLE_CAPTION => Ok(TextRole::Caption),
+        VK_TEXT_ROLE_CODE => Ok(TextRole::Code),
+        _ => Err(VkStatus::InvalidEnumValue),
+    }
+}
+
+fn decode_text_tone(value: u32) -> Result<TextTone, VkStatus> {
+    match value {
+        VK_TEXT_TONE_PRIMARY => Ok(TextTone::Primary),
+        VK_TEXT_TONE_SECONDARY => Ok(TextTone::Secondary),
+        VK_TEXT_TONE_TERTIARY => Ok(TextTone::Tertiary),
+        VK_TEXT_TONE_DISABLED => Ok(TextTone::Disabled),
+        VK_TEXT_TONE_ACCENT => Ok(TextTone::Accent),
+        VK_TEXT_TONE_DESTRUCTIVE => Ok(TextTone::Destructive),
         _ => Err(VkStatus::InvalidEnumValue),
     }
 }

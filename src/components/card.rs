@@ -11,10 +11,10 @@ use super::{BorderStyle, Rectangle, RectangleColor};
 
 pub struct Card<Content = EmptyView> {
     content: Content,
-    color: RectangleColor,
-    radius: CornerRadius,
-    shadow: ShadowStyle,
-    border: BorderStyle,
+    color: Option<RectangleColor>,
+    radius: Option<CornerRadius>,
+    shadow: Option<ShadowStyle>,
+    border: Option<BorderStyle>,
     compact: bool,
 }
 
@@ -22,10 +22,10 @@ impl Card<EmptyView> {
     pub const fn new() -> Self {
         Self {
             content: EmptyView,
-            color: RectangleColor::Surface,
-            radius: CornerRadius::Card,
-            shadow: ShadowStyle::Card,
-            border: BorderStyle::Standard { width: 1.0 },
+            color: None,
+            radius: None,
+            shadow: None,
+            border: None,
             compact: false,
         }
     }
@@ -53,22 +53,22 @@ impl<Content> Card<Content> {
     }
 
     pub fn color(mut self, color: RectangleColor) -> Self {
-        self.color = color;
+        self.color = Some(color);
         self
     }
 
     pub fn radius(mut self, radius: CornerRadius) -> Self {
-        self.radius = radius;
+        self.radius = Some(radius);
         self
     }
 
     pub fn shadow(mut self, shadow: ShadowStyle) -> Self {
-        self.shadow = shadow;
+        self.shadow = Some(shadow);
         self
     }
 
     pub fn border(mut self, border: BorderStyle) -> Self {
-        self.border = border;
+        self.border = Some(border);
         self
     }
 
@@ -79,9 +79,9 @@ impl<Content> Card<Content> {
 
     fn inset(&self, theme: &crate::theme::Theme) -> f32 {
         if self.compact {
-            theme.spacing.small
+            theme.card.compact_padding
         } else {
-            theme.spacing.medium
+            theme.card.padding
         }
     }
 }
@@ -106,15 +106,20 @@ where
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
+        let radius = self.radius.unwrap_or(context.theme.card.radius);
         let resolved_radius =
-            self.radius
-                .resolve(&context.theme.radius, bounds.size.width, bounds.size.height);
+            radius.resolve(&context.theme.radius, bounds.size.width, bounds.size.height);
 
         Rectangle::new()
-            .color(self.color)
-            .radius(self.radius)
-            .shadow(self.shadow)
-            .border(self.border)
+            .color(self.color.unwrap_or(RectangleColor::Custom(
+                context.theme.card.background,
+            )))
+            .radius(radius)
+            .shadow(self.shadow.unwrap_or(context.theme.card.shadow))
+            .border(self.border.unwrap_or(BorderStyle::custom(
+                context.theme.card.border,
+                context.theme.card.stroke_width,
+            )))
             .paint(bounds, context);
 
         context

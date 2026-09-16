@@ -167,7 +167,7 @@ mod tests {
 
         view.paint(Rect::new(0.0, 0.0, 1180.0, 760.0), &mut context);
 
-        assert_eq!(sidebar.get(), Some(Rect::new(12.0, 16.0, 296.0, 728.0)));
-        assert_eq!(detail.get(), Some(Rect::new(321.0, 0.0, 859.0, 760.0)));
+        assert_eq!(sidebar.get(), Some(Rect::new(12.0, 16.0, 216.0, 728.0)));
+        assert_eq!(detail.get(), Some(Rect::new(241.0, 0.0, 939.0, 760.0)));
     }
 }

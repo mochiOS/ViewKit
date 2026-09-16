@@ -1,5 +1,6 @@
 //! プラットフォームウィンドウの共通インターフェースを定義
 
+use crate::accessibility::AccessibilityNode;
 use crate::draw_command::DisplayList;
 use crate::event::ContextMenuRequest;
 use crate::geometry::{Rect, Size};
@@ -72,6 +73,10 @@ pub trait PlatformApplication {
 
     fn next_redraw_at(&self) -> Option<Instant> {
         None
+    }
+
+    fn accessibility_nodes(&self) -> &[AccessibilityNode] {
+        &[]
     }
 
     fn reload_appearance(&mut self) -> bool {

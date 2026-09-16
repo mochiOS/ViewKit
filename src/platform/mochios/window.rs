@@ -32,6 +32,31 @@ impl MochiOsWindow {
     pub(super) fn set_viewport(&self, viewport: Viewport) {
         self.viewport.set(viewport);
     }
+
+    pub(super) fn set_compositor_title(
+        &self,
+        title: &str,
+    ) -> Result<(), MochiOsBackendError> {
+        let mut title_len = title.len().min(MAX_WINDOW_TITLE_BYTES);
+        while !title.is_char_boundary(title_len) {
+            title_len -= 1;
+        }
+        let title = &title.as_bytes()[..title_len];
+        let mut request = Vec::with_capacity(16 + title.len());
+        request.extend_from_slice(&OP_SET_TITLE.to_le_bytes());
+        request.extend_from_slice(&self.surface.to_le_bytes());
+        request.extend_from_slice(&(title.len() as u32).to_le_bytes());
+        request.extend_from_slice(title);
+        let mut reply = [0u8; 16];
+        let len = ipc_call_raw(
+            self.compositor,
+            request.as_ptr(),
+            request.len(),
+            reply.as_mut_ptr(),
+            reply.len(),
+        )?;
+        status_from_raw(reply.as_ptr(), len)
+    }
 }
 
 impl PlatformWindow for MochiOsWindow {
@@ -40,7 +65,7 @@ impl PlatformWindow for MochiOsWindow {
     }
 
     fn set_title(&self, title: &str) {
-        let _ = title;
+        let _ = self.set_compositor_title(title);
     }
 
     fn viewport(&self) -> Viewport {

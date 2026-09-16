@@ -1,10 +1,11 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
 use crate::layout::{IntoStackChild, StackAlignment, StackGap, ViewExt};
-use crate::theme::{Color, CornerRadius, ShadowStyle, Theme};
+use crate::theme::{Color, ShadowStyle, Theme};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 use super::{
@@ -103,17 +104,17 @@ impl MenuItem {
 
     fn button(&self, theme: &Theme) -> Button {
         let foreground = if !self.enabled {
-            theme.colors.text_disabled
+            theme.menu.disabled_foreground
         } else if self.danger {
-            theme.colors.destructive
+            theme.menu.danger_foreground
         } else {
-            theme.colors.text_primary
+            theme.menu.foreground
         };
 
         let shortcut_color = if self.enabled {
-            theme.colors.text_tertiary
+            theme.menu.secondary_foreground
         } else {
-            theme.colors.text_disabled
+            theme.menu.disabled_foreground
         };
 
         let mut content = HStack::new()
@@ -121,40 +122,54 @@ impl MenuItem {
             .gap(StackGap::Medium)
             .child(
                 Text::label(self.label.clone())
+                    .accessibility_hidden(true)
                     .color(foreground)
                     .layout()
                     .flex_grow(1.0),
             );
 
         if let Some(shortcut) = self.shortcut.as_ref() {
-            content = content.child(Text::caption(shortcut.clone()).color(shortcut_color));
+            content = content.child(
+                Text::caption(shortcut.clone())
+                    .accessibility_hidden(true)
+                    .color(shortcut_color),
+            );
         }
 
         let style = if self.danger {
             ButtonStyle::Custom {
-                background: Color::TRANSPARENT,
-                hovered_background: theme.colors.destructive_soft,
+                background: theme.menu.item_background,
+                hovered_background: theme.menu.danger_hovered_background,
                 border: Color::TRANSPARENT,
                 hovered_border: Color::TRANSPARENT,
-                foreground: theme.colors.destructive,
+                foreground: theme.menu.danger_foreground,
             }
         } else {
             ButtonStyle::Custom {
-                background: Color::TRANSPARENT,
-                hovered_background: theme.colors.accent_soft,
+                background: theme.menu.item_background,
+                hovered_background: theme.menu.item_hovered_background,
                 border: Color::TRANSPARENT,
                 hovered_border: Color::TRANSPARENT,
-                foreground: theme.colors.text_primary,
+                foreground: theme.menu.foreground,
             }
         };
 
         let mut button = Button::with_interaction(self.interaction.clone())
             .style(style)
-            .radius(CornerRadius::Small)
+            .radius(theme.menu.item_radius)
             .shadow(ShadowStyle::None)
             .alignment(ZStackAlignment::Leading)
             .enabled(self.enabled)
-            .content(Padding::symmetric(theme.spacing.small, theme.spacing.micro).content(content));
+            .accessibility_role(AccessibilityRole::MenuItem)
+            .accessibility_label(self.label.clone())
+            .accessibility_value_option(self.shortcut.clone())
+            .content(
+                Padding::symmetric(
+                    theme.menu.item_horizontal_padding,
+                    theme.menu.item_vertical_padding,
+                )
+                .content(content),
+            );
 
         if let Some(on_select) = self.on_select.as_ref() {
             let on_select = Rc::clone(on_select);
@@ -226,9 +241,11 @@ impl Menu {
     fn card(&self) -> Card<ViewRef<'_, VStack>> {
         Card::new()
             .compact()
-            .radius(CornerRadius::Medium)
+            .radius(Theme::current().menu.surface_radius)
             .shadow(ShadowStyle::Card)
-            .border(BorderStyle::Standard { width: 1.0 })
+            .border(BorderStyle::Standard {
+                width: Theme::current().menu.surface_stroke_width,
+            })
             .content(ViewRef::new(&self.content))
     }
 }
@@ -239,6 +256,7 @@ impl View for Menu {
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
+        context.record_accessibility(AccessibilityNode::new(AccessibilityRole::Menu, bounds));
         self.card().paint(bounds, context);
     }
 

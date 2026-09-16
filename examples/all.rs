@@ -32,7 +32,9 @@ impl ComponentLab {
             .trailing(time)
             .status_marker(unread)
             .selected(selected)
-            .on_select(move || selected_conversation.set(index))
+            .on_select(move || {
+                selected_conversation.set_if_changed(index);
+            })
             .layout()
     }
 
@@ -42,7 +44,7 @@ impl ComponentLab {
             .gap(StackGap::Small)
             .child(Text::body_emphasized("Messages"))
             .child(Spacer::new())
-            .child(IconButton::new(IconName::Search));
+            .child(IconButton::new(IconName::Search).accessibility_label("Search messages"));
 
         Box::new(
             VStack::new()
@@ -96,7 +98,7 @@ impl ComponentLab {
             HStack::new()
                 .alignment(StackAlignment::Center)
                 .gap(StackGap::Medium)
-                .child(Avatar::new("A"))
+                .child(Avatar::new("A").accessibility_label("Aya Sato"))
                 .child(Text::body_emphasized("Aya Sato"))
                 .child(Spacer::new()),
         )
@@ -156,7 +158,7 @@ impl ComponentLab {
             HStack::new()
                 .alignment(StackAlignment::Center)
                 .gap(StackGap::Small)
-                .child(IconButton::new(IconName::Plus))
+                .child(IconButton::new(IconName::Plus).accessibility_label("Add attachment"))
                 .child(
                     TextField::new(self.composer.binding())
                         .placeholder("Message")
@@ -164,7 +166,11 @@ impl ComponentLab {
                         .layout()
                         .flex_grow(1.0),
                 )
-                .child(IconButton::new(IconName::ArrowUp).tone(IconButtonTone::Accent)),
+                .child(
+                    IconButton::new(IconName::ArrowUp)
+                        .tone(IconButtonTone::Accent)
+                        .accessibility_label("Send message"),
+                ),
         )
     }
 
@@ -204,9 +210,14 @@ impl ComponentLab {
                                 .child(Button::new("Ghost").style(ButtonStyle::Ghost))
                                 .child(Button::new("Danger").style(ButtonStyle::Danger))
                                 .child(Button::new("Disabled").enabled(false))
-                                .child(IconButton::new(IconName::Settings))
                                 .child(
-                                    IconButton::new(IconName::ArrowUp).tone(IconButtonTone::Accent),
+                                    IconButton::new(IconName::Settings)
+                                        .accessibility_label("Settings"),
+                                )
+                                .child(
+                                    IconButton::new(IconName::ArrowUp)
+                                        .tone(IconButtonTone::Accent)
+                                        .accessibility_label("Submit"),
                                 ),
                         ),
                 )
@@ -269,7 +280,10 @@ impl ComponentLab {
                                 .range(0.0..=100.0)
                                 .step(5.0),
                         )
-                        .child(ProgressBar::new(self.density.get() / 100.0)),
+                        .child(
+                            ProgressBar::new(self.density.get() / 100.0)
+                                .accessibility_label("Density"),
+                        ),
                 )
                 .child(Divider::new())
                 .child(
@@ -329,7 +343,7 @@ impl ComponentLab {
                             ),
                         )
                         .child(
-                            Dialog::new().content(
+                            Dialog::new().accessibility_label("Confirmation").content(
                                 VStack::new()
                                     .alignment(StackAlignment::Stretch)
                                     .gap(StackGap::Medium)

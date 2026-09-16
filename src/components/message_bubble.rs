@@ -1,5 +1,6 @@
+use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 use crate::geometry::{Rect, Size};
-use crate::theme::{Color, CornerRadius};
+use crate::theme::Color;
 use crate::typography::TextAlignment;
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
@@ -41,20 +42,21 @@ impl MessageBubble {
 
     fn foreground(&self, context: &PaintContext<'_>) -> Color {
         match self.direction {
-            MessageDirection::Received => context.theme.colors.text_primary,
-            MessageDirection::Sent => Color::WHITE,
+            MessageDirection::Received => context.theme.message_bubble.received_foreground,
+            MessageDirection::Sent => context.theme.message_bubble.sent_foreground,
         }
     }
 
     fn background(&self, context: &PaintContext<'_>) -> Color {
         match self.direction {
-            MessageDirection::Received => context.theme.colors.surface_subtle,
-            MessageDirection::Sent => context.theme.colors.accent,
+            MessageDirection::Received => context.theme.message_bubble.received_background,
+            MessageDirection::Sent => context.theme.message_bubble.sent_background,
         }
     }
 
     fn text_view(&self, color: Color) -> Text {
         Text::new(self.text.clone())
+            .accessibility_hidden(true)
             .alignment(TextAlignment::Start)
             .color(color)
     }
@@ -62,8 +64,8 @@ impl MessageBubble {
 
 impl View for MessageBubble {
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
-        let horizontal = context.theme.spacing.medium;
-        let vertical = context.theme.spacing.small;
+        let horizontal = context.theme.message_bubble.horizontal_padding;
+        let vertical = context.theme.message_bubble.vertical_padding;
         let max_text_width = (self.maximum_width - horizontal * 2.0).max(0.0);
         let measured = self
             .text_view(context.theme.colors.text_primary)
@@ -86,10 +88,17 @@ impl View for MessageBubble {
 
         Rectangle::new()
             .color(RectangleColor::Custom(self.background(context)))
-            .radius(CornerRadius::ExtraLarge)
+            .radius(context.theme.message_bubble.radius)
             .paint(bounds, context);
 
-        Padding::symmetric(context.theme.spacing.medium, context.theme.spacing.small)
+        let mut node = AccessibilityNode::new(AccessibilityRole::StaticText, bounds);
+        node.label = Some(self.text.clone());
+        context.record_accessibility(node);
+
+        Padding::symmetric(
+            context.theme.message_bubble.horizontal_padding,
+            context.theme.message_bubble.vertical_padding,
+        )
             .content(self.text_view(self.foreground(context)))
             .paint(bounds, context);
     }

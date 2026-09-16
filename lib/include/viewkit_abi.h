@@ -29,7 +29,7 @@
 
 #define VK_ABI_VERSION_MAJOR 1
 
-#define VK_ABI_VERSION_MINOR 0
+#define VK_ABI_VERSION_MINOR 1
 
 #define VK_ABI_VERSION_PATCH 0
 
@@ -111,6 +111,36 @@
 
 #define VK_TEXT_FIELD_SIZE_LARGE 2
 
+#define VK_TEXT_ROLE_DISPLAY_LARGE 0
+
+#define VK_TEXT_ROLE_DISPLAY_MEDIUM 1
+
+#define VK_TEXT_ROLE_TITLE_LARGE 2
+
+#define VK_TEXT_ROLE_TITLE_MEDIUM 3
+
+#define VK_TEXT_ROLE_TITLE_SMALL 4
+
+#define VK_TEXT_ROLE_BODY 5
+
+#define VK_TEXT_ROLE_LABEL 6
+
+#define VK_TEXT_ROLE_CAPTION 7
+
+#define VK_TEXT_ROLE_CODE 8
+
+#define VK_TEXT_TONE_PRIMARY 0
+
+#define VK_TEXT_TONE_SECONDARY 1
+
+#define VK_TEXT_TONE_TERTIARY 2
+
+#define VK_TEXT_TONE_DISABLED 3
+
+#define VK_TEXT_TONE_ACCENT 4
+
+#define VK_TEXT_TONE_DESTRUCTIVE 5
+
 #define VK_MENU_ENTRY_ITEM 0
 
 #define VK_MENU_ENTRY_SEPARATOR 1
@@ -167,13 +197,38 @@
 
 #define VK_BUTTON_COLOR_DESTRUCTIVE 1
 
+#define KeyModifiers_SHIFT (1 << 0)
+
+#define KeyModifiers_CONTROL (1 << 1)
+
+#define KeyModifiers_ALT (1 << 2)
+
+#define KeyModifiers_SUPER (1 << 3)
+
 typedef struct DividerTokens DividerTokens;
 
 typedef struct EdgeInsets EdgeInsets;
 
+typedef struct FigmaColorTokens FigmaColorTokens;
+
+typedef struct FigmaLayoutTokens FigmaLayoutTokens;
+
+typedef struct FigmaShapeTokens FigmaShapeTokens;
+
+typedef struct FigmaSpacingTokens FigmaSpacingTokens;
+
+/**
+ * Namespace for the validated values generated from Figma exports.
+ */
+typedef struct FigmaTokens FigmaTokens;
+
+typedef struct FigmaTypographyTokens FigmaTypographyTokens;
+
 typedef struct FontFamily FontFamily;
 
 typedef struct FontWeight FontWeight;
+
+typedef struct LayoutTokens LayoutTokens;
 
 typedef struct RadiusTokens RadiusTokens;
 
@@ -255,6 +310,20 @@ typedef struct VkBytes {
 
 
 
+#define FigmaTokens_LIGHT FIGMA_LIGHT_COLORS
+
+#define FigmaTokens_DARK FIGMA_DARK_COLORS
+
+#define FigmaTokens_SPACING FIGMA_SPACING
+
+#define FigmaTokens_SHAPE FIGMA_SHAPE
+
+#define FigmaTokens_TYPOGRAPHY FIGMA_TYPOGRAPHY
+
+#define FigmaTokens_LAYOUT FIGMA_LAYOUT
+
+
+
 
 
 
@@ -287,6 +356,14 @@ uint32_t vk_abi_version(void);
 
 struct VkString vk_status_name(int32_t status);
 
+/**
+ * Destroys a runtime created by [`vk_runtime_create`].
+ *
+ * # Safety
+ *
+ * `runtime` must be null or a live pointer returned by [`vk_runtime_create`] that has not
+ * previously been destroyed.
+ */
 int32_t vk_runtime_destroy(struct VkRuntime *runtime);
 
 int32_t vk_tree_begin(struct VkRuntime *runtime, uint64_t root_node_id);
@@ -299,24 +376,73 @@ int32_t vk_tree_commit(struct VkRuntime *runtime);
 
 int32_t vk_runtime_collect_actions(struct VkRuntime *runtime);
 
+/**
+ * Copies the next queued action into caller-owned storage.
+ *
+ * # Safety
+ *
+ * `runtime` must point to a live runtime. `output` and `has_action` must point to writable,
+ * properly aligned values for the duration of the call.
+ */
 int32_t vk_poll_action(struct VkRuntime *runtime,
                        struct VkActionEvent *output,
                        uint8_t *has_action);
 
+/**
+ * Reads a boolean state value into caller-owned storage.
+ *
+ * # Safety
+ *
+ * `runtime` must point to a live runtime and `output` must point to a writable, properly aligned
+ * `u8` for the duration of the call.
+ */
 int32_t vk_state_get_bool(struct VkRuntime *runtime, uint64_t state_id, uint8_t *output);
 
 int32_t vk_state_set_bool(struct VkRuntime *runtime, uint64_t state_id, uint8_t value);
 
+/**
+ * Reads a floating-point state value into caller-owned storage.
+ *
+ * # Safety
+ *
+ * `runtime` must point to a live runtime and `output` must point to a writable, properly aligned
+ * `f32` for the duration of the call.
+ */
 int32_t vk_state_get_f32(struct VkRuntime *runtime, uint64_t state_id, float *output);
 
 int32_t vk_state_set_f32(struct VkRuntime *runtime, uint64_t state_id, float value);
 
+/**
+ * Reads an integer state value into caller-owned storage.
+ *
+ * # Safety
+ *
+ * `runtime` must point to a live runtime and `output` must point to a writable, properly aligned
+ * `u64` for the duration of the call.
+ */
 int32_t vk_state_get_u64(struct VkRuntime *runtime, uint64_t state_id, uint64_t *output);
 
 int32_t vk_state_set_u64(struct VkRuntime *runtime, uint64_t state_id, uint64_t value);
 
+/**
+ * Reads the byte length of a string state value into caller-owned storage.
+ *
+ * # Safety
+ *
+ * `runtime` must point to a live runtime and `output` must point to a writable, properly aligned
+ * `usize` for the duration of the call.
+ */
 int32_t vk_state_string_length(struct VkRuntime *runtime, uint64_t state_id, size_t *output);
 
+/**
+ * Copies a string state value into caller-owned storage.
+ *
+ * # Safety
+ *
+ * `runtime` must point to a live runtime. `output_length` must point to a writable, properly
+ * aligned `usize`. When the string is non-empty, `buffer` must be writable for at least
+ * `buffer_length` bytes and must not overlap ViewKit-owned memory.
+ */
 int32_t vk_state_copy_string(struct VkRuntime *runtime,
                              uint64_t state_id,
                              uint8_t *buffer,
@@ -353,6 +479,13 @@ int32_t vk_push_text(struct VkRuntime *runtime,
                      uint16_t weight,
                      uint32_t alignment,
                      uint32_t color);
+
+int32_t vk_push_text_role(struct VkRuntime *runtime,
+                          uint64_t node_id,
+                          struct VkString content,
+                          uint32_t role,
+                          uint32_t tone,
+                          uint32_t alignment);
 
 int32_t vk_push_button(struct VkRuntime *runtime,
                        uint64_t node_id,

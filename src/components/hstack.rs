@@ -4,7 +4,7 @@ use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
 use crate::layout::{
     IntoStackChildren, StackAlignment, StackChild, StackDirection, StackDistribution, StackGap,
-    handle_stack_event, measure_stack, paint_stack,
+    handle_stack_event, layout_stack, measure_stack, paint_stack,
 };
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
@@ -64,6 +64,31 @@ impl HStack {
     pub fn distribution(mut self, distribution: StackDistribution) -> Self {
         self.distribution = distribution;
         self
+    }
+
+    pub(crate) fn child_bounds_for_event(
+        &self,
+        bounds: Rect,
+        context: &mut EventContext<'_>,
+    ) -> Vec<Rect> {
+        let theme = context.theme;
+        let typography = context.typography;
+        let text_measurer = &mut *context.text_measurer;
+        let mut measure_context = MeasureContext {
+            theme,
+            typography,
+            text_measurer,
+        };
+        layout_stack(
+            StackDirection::Horizontal,
+            &self.children,
+            bounds,
+            self.gap,
+            self.alignment,
+            self.distribution,
+            theme,
+            &mut measure_context,
+        )
     }
 }
 

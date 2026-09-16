@@ -7,7 +7,7 @@ use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Point, Rect, Size};
 use crate::layout::{IntoStackChild, StackChild};
-use crate::platform::PointerButton;
+use crate::platform::{Key, PointerButton};
 use crate::theme::ScrollBarTokens;
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
@@ -488,6 +488,76 @@ impl Scroll {
         self.state
             .set_vertical_offset(geometry.maximum_offset * thumb_y / thumb_travel);
     }
+
+    fn handle_keyboard_scroll(
+        &self,
+        bounds: Rect,
+        content_size: Size,
+        event: &ViewEvent,
+        context: &mut EventContext<'_>,
+    ) -> EventResult {
+        let line = context.theme.layout.compact_control_height;
+        let page_x = bounds.size.width.max(line);
+        let page_y = bounds.size.height.max(line);
+        let previous = self.state.offset();
+
+        match event {
+            ViewEvent::KeyPressed {
+                key: Key::ArrowUp,
+                ..
+            } if self.axis.allows_vertical() => self.state.scroll_by(0.0, -line),
+            ViewEvent::KeyPressed {
+                key: Key::ArrowDown,
+                ..
+            } if self.axis.allows_vertical() => self.state.scroll_by(0.0, line),
+            ViewEvent::KeyPressed {
+                key: Key::ArrowLeft,
+                ..
+            } if self.axis.allows_horizontal() => self.state.scroll_by(-line, 0.0),
+            ViewEvent::KeyPressed {
+                key: Key::ArrowRight,
+                ..
+            } if self.axis.allows_horizontal() => self.state.scroll_by(line, 0.0),
+            ViewEvent::KeyPressed {
+                key: Key::PageUp,
+                ..
+            } if self.axis.allows_vertical() => self.state.scroll_by(0.0, -page_y),
+            ViewEvent::KeyPressed {
+                key: Key::PageDown,
+                ..
+            } if self.axis.allows_vertical() => self.state.scroll_by(0.0, page_y),
+            ViewEvent::Home
+            | ViewEvent::KeyPressed {
+                key: Key::Home, ..
+            } => self.state.set_offset(0.0, 0.0),
+            ViewEvent::End
+            | ViewEvent::KeyPressed {
+                key: Key::End, ..
+            } => self.state.set_offset(
+                if self.axis.allows_horizontal() {
+                    (content_size.width - page_x).max(0.0)
+                } else {
+                    0.0
+                },
+                if self.axis.allows_vertical() {
+                    (content_size.height - page_y).max(0.0)
+                } else {
+                    0.0
+                },
+            ),
+            _ => return EventResult::Ignored,
+        }
+
+        let current = self
+            .state
+            .clamp_offset(self.axis, bounds.size, content_size);
+        if current == previous {
+            return EventResult::Ignored;
+        }
+
+        context.request_redraw_in(bounds);
+        EventResult::Consumed
+    }
 }
 
 impl View for Scroll {
@@ -598,6 +668,12 @@ impl View for Scroll {
 
         if child_result.is_consumed() {
             return child_result;
+        }
+
+        let keyboard_result =
+            self.handle_keyboard_scroll(bounds, content_size, event, context);
+        if keyboard_result.is_consumed() {
+            return keyboard_result;
         }
 
         let ViewEvent::Scroll {

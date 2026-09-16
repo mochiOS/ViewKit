@@ -1,8 +1,10 @@
+use crate::accessibility::AccessibilityRole;
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
 use crate::layout::{StackAlignment, StackDistribution, StackGap, ViewExt};
+use crate::platform::Key;
 use crate::state::Binding;
-use crate::theme::{Color, CornerRadius, ShadowStyle, Theme};
+use crate::theme::{Color, ShadowStyle, Theme};
 use crate::typography::TextAlignment;
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
@@ -47,25 +49,31 @@ impl Stepper {
 
     fn button(&self, theme: &Theme) -> Button {
         let foreground = if self.enabled {
-            theme.colors.text_primary
+            theme.stepper.foreground
         } else {
-            theme.colors.text_disabled
+            theme.stepper.disabled_foreground
         };
 
         Button::with_interaction(self.interaction.clone())
             .style(ButtonStyle::Custom {
-                background: theme.colors.surface,
-                hovered_background: theme.colors.surface_subtle,
-                border: theme.colors.border,
-                hovered_border: theme.colors.border_strong,
+                background: theme.stepper.background,
+                hovered_background: theme.stepper.hovered_background,
+                border: theme.stepper.border,
+                hovered_border: theme.stepper.hovered_border,
                 foreground,
             })
-            .radius(CornerRadius::Small)
+            .radius(theme.stepper.radius)
             .shadow(ShadowStyle::None)
             .alignment(ZStackAlignment::Center)
             .enabled(self.enabled)
+            .accessibility_role(AccessibilityRole::SpinButton)
+            .accessibility_label("Value")
+            .accessibility_value(self.value.get().to_string())
             .content(
-                Padding::symmetric(theme.spacing.small, theme.spacing.micro).content(
+                Padding::symmetric(
+                    theme.stepper.horizontal_padding,
+                    theme.stepper.vertical_padding,
+                ).content(
                     HStack::new()
                         .alignment(StackAlignment::Center)
                         .distribution(StackDistribution::SpaceBetween)
@@ -73,6 +81,7 @@ impl Stepper {
                         .child(label("−", foreground, theme.layout.stepper_icon_size))
                         .child(
                             Text::label(self.value.get().to_string())
+                                .accessibility_hidden(true)
                                 .alignment(TextAlignment::Center)
                                 .color(foreground)
                                 .layout()
@@ -90,7 +99,7 @@ impl Stepper {
             .saturating_add(delta.saturating_mul(self.step))
             .clamp(self.minimum, self.maximum);
 
-        self.value.set(next);
+        self.value.set_if_changed(next);
     }
 }
 
@@ -125,6 +134,34 @@ impl View for Stepper {
             .button(context.theme)
             .handle_event(bounds, event, context);
 
+        if self.enabled && self.interaction.is_focused() {
+            match event {
+                ViewEvent::KeyPressed {
+                    key: Key::ArrowUp | Key::ArrowRight,
+                    ..
+                } => {
+                    self.apply_delta(1);
+                    return EventResult::Consumed;
+                }
+                ViewEvent::KeyPressed {
+                    key: Key::ArrowDown | Key::ArrowLeft,
+                    ..
+                } => {
+                    self.apply_delta(-1);
+                    return EventResult::Consumed;
+                }
+                ViewEvent::Home => {
+                    self.value.set_if_changed(self.minimum);
+                    return EventResult::Consumed;
+                }
+                ViewEvent::End => {
+                    self.value.set_if_changed(self.maximum);
+                    return EventResult::Consumed;
+                }
+                _ => {}
+            }
+        }
+
         if !self.enabled || !self.interaction.take_clicked() {
             return result;
         }
@@ -144,6 +181,7 @@ impl View for Stepper {
 
 fn label(text: &'static str, color: Color, size: f32) -> crate::layout::StackChild {
     Text::label(text)
+        .accessibility_hidden(true)
         .alignment(TextAlignment::Center)
         .color(color)
         .frame(size, size)

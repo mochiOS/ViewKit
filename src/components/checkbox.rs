@@ -1,3 +1,4 @@
+use crate::accessibility::AccessibilityRole;
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
 use crate::layout::{StackAlignment, StackGap, ViewExt};
@@ -56,31 +57,43 @@ impl Checkbox {
             );
 
         if let Some(label) = self.label.as_ref() {
-            content = content.child(Text::label(label.clone()).color(if self.enabled {
-                theme.colors.text_primary
-            } else {
-                theme.colors.text_disabled
-            }));
+            content = content.child(
+                Text::label(label.clone())
+                    .accessibility_hidden(true)
+                    .color(if self.enabled {
+                        theme.selection_control.foreground
+                    } else {
+                        theme.selection_control.disabled_foreground
+                    }),
+            );
         }
 
-        let checked = self.checked.clone();
+        let checked_binding = self.checked.clone();
 
-        Button::with_interaction(self.interaction.clone())
+        let mut button = Button::with_interaction(self.interaction.clone())
             .style(ButtonStyle::Custom {
-                background: Color::TRANSPARENT,
-                hovered_background: Color::rgba(0, 0, 0, 14),
+                background: theme.selection_control.interaction_background,
+                hovered_background: theme.selection_control.interaction_hovered_background,
                 border: Color::TRANSPARENT,
                 hovered_border: Color::TRANSPARENT,
-                foreground: theme.colors.text_primary,
+                foreground: theme.selection_control.foreground,
             })
-            .radius(CornerRadius::Small)
+            .radius(theme.selection_control.interaction_radius)
             .shadow(ShadowStyle::None)
             .alignment(ZStackAlignment::Leading)
             .enabled(self.enabled)
-            .content(Padding::all(theme.spacing.extra_small).content(content))
+            .content(Padding::all(theme.selection_control.content_padding).content(content))
+            .accessibility_role(AccessibilityRole::Checkbox)
+            .accessibility_checked(checked)
             .on_click(move || {
-                checked.set(!checked.get());
-            })
+                checked_binding.set(!checked_binding.get());
+            });
+
+        if let Some(label) = self.label.as_ref() {
+            button = button.accessibility_label(label.clone());
+        }
+
+        button
     }
 }
 
@@ -118,9 +131,9 @@ impl View for CheckboxMark {
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
         if self.checked {
             let color = if self.enabled {
-                context.theme.colors.accent
+                context.theme.selection_control.selected
             } else {
-                context.theme.colors.accent.alpha(0.42)
+                context.theme.selection_control.disabled_selected
             };
 
             Rectangle::new()
@@ -134,15 +147,22 @@ impl View for CheckboxMark {
                 .paint(bounds, context);
         } else {
             let border = if self.enabled {
-                context.theme.colors.border_strong
+                context.theme.selection_control.border
             } else {
-                context.theme.colors.border
+                context.theme.selection_control.disabled_border
             };
 
             Rectangle::new()
-                .color(RectangleColor::Custom(context.theme.colors.surface_muted))
+                .color(RectangleColor::Custom(if self.enabled {
+                    context.theme.selection_control.indicator_background
+                } else {
+                    context.theme.selection_control.disabled_indicator_background
+                }))
                 .radius(CornerRadius::Custom(context.theme.layout.checkbox_radius))
-                .border(BorderStyle::custom(border, 1.0))
+                .border(BorderStyle::custom(
+                    border,
+                    context.theme.selection_control.stroke_width,
+                ))
                 .paint(bounds, context);
         }
     }

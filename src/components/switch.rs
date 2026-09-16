@@ -2,13 +2,14 @@ use super::{
     Button, ButtonInteractionState, ButtonStyle, HStack, Padding, Rectangle, RectangleColor, Text,
     ZStackAlignment,
 };
+use crate::accessibility::AccessibilityRole;
 use crate::animation::{Animation, Transition, interpolate};
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
 use crate::layout::{StackAlignment, StackGap, ViewExt};
 use crate::platform::PointerButton;
 use crate::state::Binding;
-use crate::theme::{Color, CornerRadius, Motion, Shadow, ShadowSet, ShadowStyle, Theme};
+use crate::theme::{Color, CornerRadius, Motion, ShadowStyle, Theme};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -129,10 +130,11 @@ impl Switch {
         if let Some(label) = self.label.as_ref() {
             content = content.child(
                 Text::label(label.clone())
+                    .accessibility_hidden(true)
                     .color(if self.enabled {
-                        theme.colors.text_primary
+                        theme.switch.foreground
                     } else {
-                        theme.colors.text_disabled
+                        theme.switch.disabled_foreground
                     })
                     .layout()
                     .flex_shrink(0.0),
@@ -155,16 +157,19 @@ impl Switch {
 
         Button::with_interaction(self.interaction.clone())
             .style(ButtonStyle::Custom {
-                background: Color::TRANSPARENT,
-                hovered_background: Color::TRANSPARENT,
+                background: theme.switch.interaction_background,
+                hovered_background: theme.switch.interaction_background,
                 border: Color::TRANSPARENT,
                 hovered_border: Color::TRANSPARENT,
-                foreground: theme.colors.text_primary,
+                foreground: theme.switch.foreground,
             })
             .shadow(ShadowStyle::None)
             .alignment(ZStackAlignment::Leading)
             .enabled(self.enabled)
-            .content(Padding::all(theme.spacing.extra_small).content(content))
+            .content(Padding::all(theme.switch.content_padding).content(content))
+            .accessibility_role(AccessibilityRole::Switch)
+            .accessibility_checked(self.checked.get())
+            .accessibility_label_option(self.label.clone())
     }
 
     fn handle_switch_event(
@@ -180,6 +185,15 @@ impl Switch {
         let metrics = SwitchMetrics::from_theme(context.theme());
 
         match event {
+            ViewEvent::KeyPressed {
+                key: crate::platform::Key::Enter | crate::platform::Key::Space,
+                ..
+            } if self.interaction.is_focused() => {
+                self.checked.set(!self.checked.get());
+                context.request_redraw_in(bounds.expanded(16.0));
+                EventResult::Consumed
+            }
+
             ViewEvent::PointerPressed {
                 position,
                 button: PointerButton::Primary,
@@ -458,16 +472,13 @@ impl View for SwitchMark {
         let knob_bounds = Rect::new(knob_x, knob_y, knob_width, metrics.knob_size);
 
         let knob_color = if self.enabled {
-            Color::WHITE
+            context.theme.switch.knob
         } else {
-            Color::rgba(255, 255, 255, 170)
+            context.theme.switch.disabled_knob
         };
 
         let knob_shadow = if self.enabled {
-            ShadowStyle::Custom(ShadowSet::double(
-                Shadow::new(Color::rgba(0, 0, 0, 28), 0.0, 1.0, 2.0, 0.0),
-                Shadow::new(Color::rgba(0, 0, 0, 14), 0.0, 2.0, 4.0, 0.0),
-            ))
+            context.theme.switch.knob_shadow
         } else {
             ShadowStyle::None
         };
@@ -483,19 +494,19 @@ impl View for SwitchMark {
 impl SwitchMark {
     fn track_color(&self, theme: &Theme, hovered: bool, pressed: bool, position: f32) -> Color {
         let off_color = if pressed {
-            theme.colors.border_strong
+            theme.switch.off_pressed
         } else if hovered {
-            theme.colors.border
+            theme.switch.off_hovered
         } else {
-            theme.colors.surface_muted
+            theme.switch.off
         };
 
         let on_color = if pressed {
-            theme.colors.accent_pressed
+            theme.switch.on_pressed
         } else if hovered {
-            theme.colors.accent_hovered
+            theme.switch.on_hovered
         } else {
-            theme.colors.accent
+            theme.switch.on
         };
 
         let color = interpolate(off_color, on_color, position);
@@ -503,7 +514,7 @@ impl SwitchMark {
         if self.enabled {
             color
         } else {
-            with_opacity(color, 0.45)
+            with_opacity(color, theme.switch.disabled_opacity)
         }
     }
 

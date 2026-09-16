@@ -10,11 +10,11 @@ pub struct RadiusTokens {
 
 impl RadiusTokens {
     pub const DEFAULT: Self = Self {
-        small: 8.0,
-        medium: 10.0,
-        large: 14.0,
-        extra_large: 18.0,
-        card: 14.0,
+        small: FigmaTokens::SHAPE.radius_small,
+        medium: FigmaTokens::SHAPE.radius_medium,
+        large: FigmaTokens::SHAPE.radius_large,
+        extra_large: FigmaTokens::SHAPE.radius_xlarge,
+        card: FigmaTokens::SHAPE.radius_large,
         full: 9999.0,
     };
 }
@@ -48,3 +48,4 @@ impl CornerRadius {
         value.max(0.0).min(width.min(height) / 2.0)
     }
 }
+use super::FigmaTokens;

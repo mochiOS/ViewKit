@@ -1,5 +1,6 @@
 //! 画像を表示するImageコンポーネント
 
+use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 use crate::draw_command::{DrawCommand, ImageCommand, ImageSampling};
 use crate::geometry::{Rect, Size};
 use crate::image::ImageData;
@@ -39,6 +40,7 @@ pub struct Image {
 
     opacity: f32,
     sampling: ImageSampling,
+    accessibility_label: Option<String>,
 }
 
 impl Image {
@@ -49,6 +51,7 @@ impl Image {
             radius: CornerRadius::None,
             opacity: 1.0,
             sampling: ImageSampling::Bicubic,
+            accessibility_label: None,
         }
     }
 
@@ -79,6 +82,11 @@ impl Image {
 
         self
     }
+
+    pub fn accessibility_label(mut self, label: impl Into<String>) -> Self {
+        self.accessibility_label = Some(label.into());
+        self
+    }
 }
 
 impl View for Image {
@@ -99,6 +107,12 @@ impl View for Image {
 
         if image_width <= 0.0 || image_height <= 0.0 {
             return;
+        }
+
+        if let Some(label) = self.accessibility_label.as_ref() {
+            let mut node = AccessibilityNode::new(AccessibilityRole::Image, bounds);
+            node.label = Some(label.clone());
+            context.record_accessibility(node);
         }
 
         let image_bounds =

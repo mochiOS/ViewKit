@@ -3,9 +3,10 @@ use viewkit::ffi::{
     VK_ALIGNMENT_CENTER, VK_BORDER_STANDARD, VK_BUTTON_COLOR_ACCENT, VK_CORNER_RADIUS_CARD,
     VK_DISTRIBUTION_CENTER, VK_DISTRIBUTION_START, VK_RECTANGLE_COLOR_SURFACE, VK_STACK_GAP_LARGE,
     VK_STACK_GAP_SMALL, VK_TEXT_ALIGNMENT_START, VK_TEXT_COLOR_BLACK, VkActionEvent, VkLength,
-    VkRectangleStyle, VkStatus, VkString, vk_abi_version, vk_begin_background, vk_begin_frame,
-    vk_begin_hstack, vk_begin_padding, vk_begin_vstack, vk_end_node, vk_poll_action,
-    vk_push_button, vk_push_divider, vk_push_rectangle, vk_push_spacer, vk_push_text,
+    VK_TEXT_ROLE_TITLE_LARGE, VK_TEXT_TONE_PRIMARY, VkRectangleStyle, VkStatus, VkString,
+    vk_abi_version, vk_begin_background, vk_begin_frame, vk_begin_hstack, vk_begin_padding,
+    vk_begin_vstack, vk_end_node, vk_poll_action, vk_push_button, vk_push_divider,
+    vk_push_rectangle, vk_push_spacer, vk_push_text, vk_push_text_role,
     vk_runtime_collect_actions, vk_runtime_create, vk_runtime_destroy, vk_status_name,
     vk_tree_begin, vk_tree_commit,
 };
@@ -120,6 +121,55 @@ fn ffi_rejects_invalid_enum_value() {
     );
 
     assert_eq!(destroy_runtime(runtime,), VkStatus::Ok as i32,);
+}
+
+#[test]
+fn ffi_builds_semantic_text_and_rejects_invalid_semantics() {
+    let runtime = vk_runtime_create(1);
+
+    assert!(!runtime.is_null(),);
+    assert_eq!(vk_tree_begin(runtime, 100,), VkStatus::Ok as i32,);
+
+    let title = String::from("Semantic title");
+
+    assert_eq!(
+        vk_push_text_role(
+            runtime,
+            101,
+            VkString::from_borrowed(&title),
+            VK_TEXT_ROLE_TITLE_LARGE,
+            VK_TEXT_TONE_PRIMARY,
+            VK_TEXT_ALIGNMENT_START,
+        ),
+        VkStatus::Ok as i32,
+    );
+
+    assert_eq!(
+        vk_push_text_role(
+            runtime,
+            102,
+            VkString::from_borrowed(&title),
+            999,
+            VK_TEXT_TONE_PRIMARY,
+            VK_TEXT_ALIGNMENT_START,
+        ),
+        VkStatus::InvalidEnumValue as i32,
+    );
+
+    assert_eq!(
+        vk_push_text_role(
+            runtime,
+            103,
+            VkString::from_borrowed(&title),
+            VK_TEXT_ROLE_TITLE_LARGE,
+            999,
+            VK_TEXT_ALIGNMENT_START,
+        ),
+        VkStatus::InvalidEnumValue as i32,
+    );
+
+    assert_eq!(vk_tree_commit(runtime), VkStatus::Ok as i32,);
+    assert_eq!(destroy_runtime(runtime), VkStatus::Ok as i32,);
 }
 
 #[test]
@@ -334,13 +384,13 @@ fn ffi_builds_rectangle_and_background() {
 fn ffi_reports_abi_version() {
     assert_eq!(VK_ABI_VERSION_MAJOR, 1,);
 
-    assert_eq!(VK_ABI_VERSION_MINOR, 0,);
+    assert_eq!(VK_ABI_VERSION_MINOR, 1,);
 
     assert_eq!(VK_ABI_VERSION_PATCH, 0,);
 
     assert_eq!(vk_abi_version(), VK_ABI_VERSION,);
 
-    assert_eq!(vk_abi_version(), 0x0001_0000,);
+    assert_eq!(vk_abi_version(), 0x0001_0100,);
 }
 
 #[test]

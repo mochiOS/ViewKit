@@ -61,4 +61,10 @@ pub trait PlatformApplication {
     fn next_redraw_at(&self) -> Option<Instant> {
         None
     }
+
+
+    fn accessibility_nodes(&self) -> &[AccessibilityNode] {
+        &[]
+    }
 }
+use crate::accessibility::AccessibilityNode;

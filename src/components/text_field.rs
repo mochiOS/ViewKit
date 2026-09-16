@@ -15,6 +15,7 @@ use std::rc::Rc;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
+use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 const CARET_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 const SECURE_GLYPH: char = '\u{2022}';
 
@@ -463,7 +464,7 @@ impl TextFieldSize {
     }
 
     fn horizontal_padding(self, theme: &crate::theme::Theme) -> f32 {
-        theme.spacing.medium
+        theme.text_field.horizontal_padding
     }
 
     const fn text_role(self) -> TextRole {
@@ -618,25 +619,27 @@ impl TextField {
         let interaction = self.interaction.inner.borrow();
 
         let background = if !interaction.enabled {
-            context.theme.colors.surface_subtle
+            context.theme.text_field.disabled_background
         } else {
-            context.theme.colors.surface
+            context.theme.text_field.background
         };
 
         let border = if self.invalid {
-            context.theme.colors.destructive
+            context.theme.text_field.invalid_border
         } else if interaction.focused {
-            context.theme.colors.accent
+            context.theme.text_field.focused_border
         } else if interaction.hovered {
-            Color::rgba(0, 0, 0, 61)
+            context.theme.text_field.hovered_border
         } else {
-            context.theme.colors.border_strong
+            context.theme.text_field.border
         };
 
-        let foreground = if !interaction.enabled || interaction.value.is_empty() {
-            context.theme.colors.text_tertiary
+        let foreground = if !interaction.enabled {
+            context.theme.text_field.disabled_foreground
+        } else if interaction.value.is_empty() {
+            context.theme.text_field.placeholder_foreground
         } else {
-            context.theme.colors.text_primary
+            context.theme.text_field.foreground
         };
 
         TextFieldAppearance {
@@ -702,8 +705,8 @@ impl View for TextField {
         let measured_text =
             text.measure_unbounded_with_typography(context.text_measurer, context.typography);
 
-        let width =
-            (measured_text.width + self.size.horizontal_padding(context.theme) * 2.0).max(100.0);
+        let width = (measured_text.width + self.size.horizontal_padding(context.theme) * 2.0)
+            .max(context.theme.text_field.min_width);
 
         constraints.constrain(Size::new(width, self.size.height(context.theme)))
     }
@@ -729,8 +732,21 @@ impl View for TextField {
             )
         };
 
+        let mut accessibility = AccessibilityNode::new(AccessibilityRole::TextField, bounds);
+        if !self.placeholder.is_empty() {
+            accessibility.label = Some(self.placeholder.clone());
+        }
+        if !self.secure {
+            accessibility.value = Some(value.clone());
+        }
+        accessibility.enabled = self.enabled;
+        accessibility.focusable = true;
+        accessibility.focused = focused;
+        accessibility.invalid = self.invalid;
+        context.record_accessibility(accessibility);
+
         if focused {
-            let ring_width = 3.0;
+            let ring_width = context.theme.text_field.focus_ring_width;
 
             let radius =
                 self.radius
@@ -744,7 +760,7 @@ impl View for TextField {
             );
 
             Rectangle::new()
-                .color(RectangleColor::Custom(context.theme.colors.accent_soft))
+                .color(RectangleColor::Custom(context.theme.text_field.focus_ring))
                 .radius(CornerRadius::Custom(radius + ring_width))
                 .shadow(ShadowStyle::None)
                 .border(BorderStyle::None)
@@ -755,7 +771,10 @@ impl View for TextField {
             .color(RectangleColor::Custom(appearance.background))
             .radius(self.radius)
             .shadow(ShadowStyle::None)
-            .border(BorderStyle::custom(appearance.border, 1.0))
+            .border(BorderStyle::custom(
+                appearance.border,
+                context.theme.text_field.stroke_width,
+            ))
             .paint(bounds, context);
 
         let showing_placeholder = value.is_empty();
@@ -820,6 +839,7 @@ impl View for TextField {
         if !display_text.is_empty() {
             if showing_placeholder {
                 Text::styled(display_text, self.size.text_role())
+                    .accessibility_hidden(true)
                     .color(appearance.foreground)
                     .paint(text_bounds, context);
             } else {
@@ -886,14 +906,15 @@ impl View for TextField {
 
                     context.display_list.push(DrawCommand::FillRoundedRect {
                         rect: selection_bounds,
-                        radius: 3.0,
-                        color: context.theme.colors.accent.alpha(0.2),
+                        radius: context.theme.text_field.selection_radius,
+                        color: context.theme.text_field.selection,
                     });
 
                     context.display_list.push(DrawCommand::PopClip);
                 }
 
                 Text::styled(display_text, self.size.text_role())
+                    .accessibility_hidden(true)
                     .color(appearance.foreground)
                     .paint(content_bounds, context);
             }
@@ -920,7 +941,7 @@ impl View for TextField {
             return;
         }
 
-        let caret_width = 2.0;
+        let caret_width = context.theme.text_field.caret_width;
         let caret_half_width = caret_width / 2.0;
 
         let caret_min_x = text_bounds.origin.x;
@@ -939,7 +960,7 @@ impl View for TextField {
         context.display_list.push(DrawCommand::FillRoundedRect {
             rect: Rect::new(caret_x, caret_y, caret_width, caret_height),
             radius: caret_half_width,
-            color: context.theme.colors.accent.alpha(0.5),
+            color: context.theme.text_field.caret,
         });
     }
 
@@ -960,6 +981,25 @@ impl View for TextField {
         }
 
         match event {
+            ViewEvent::KeyboardFocusRequested { bounds: target } => {
+                let should_focus = target.is_some_and(|target| target == bounds);
+                let mut inner = self.interaction.inner.borrow_mut();
+                let changed = inner.focused != should_focus;
+                inner.focused = should_focus && inner.enabled;
+                if !should_focus {
+                    inner.selection_anchor = None;
+                    inner.selecting = false;
+                    inner.caret_blink_origin = None;
+                } else {
+                    inner.caret_blink_origin = Some(Instant::now());
+                }
+                drop(inner);
+                if changed {
+                    context.request_redraw_in(bounds.expanded(16.0));
+                }
+                EventResult::Ignored
+            }
+
             ViewEvent::PointerMoved { position } => {
                 let hovered = bounds.contains(*position);
                 let selecting = {

@@ -1,7 +1,11 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
-use crate::theme::CornerRadius;
+use crate::platform::Key;
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 use super::background::EmptyView;
@@ -9,11 +13,17 @@ use super::{BorderStyle, Rectangle, RectangleColor};
 
 pub struct Popover<Content = EmptyView> {
     content: Content,
+    focus_scope: bool,
+    on_dismiss: Option<Rc<RefCell<Box<dyn FnMut()>>>>,
 }
 
 impl Popover<EmptyView> {
     pub const fn new() -> Self {
-        Self { content: EmptyView }
+        Self {
+            content: EmptyView,
+            focus_scope: false,
+            on_dismiss: None,
+        }
     }
 }
 
@@ -25,13 +35,27 @@ impl Default for Popover<EmptyView> {
 
 impl<Content> Popover<Content> {
     pub fn content<NewContent: View>(self, content: NewContent) -> Popover<NewContent> {
-        Popover { content }
+        Popover {
+            content,
+            focus_scope: self.focus_scope,
+            on_dismiss: self.on_dismiss,
+        }
+    }
+
+    pub fn focus_scope(mut self, focus_scope: bool) -> Self {
+        self.focus_scope = focus_scope;
+        self
+    }
+
+    pub fn on_dismiss(mut self, callback: impl FnMut() + 'static) -> Self {
+        self.on_dismiss = Some(Rc::new(RefCell::new(Box::new(callback))));
+        self
     }
 }
 
 impl<Content: View> View for Popover<Content> {
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
-        let inset = context.theme.spacing.small;
+        let inset = context.theme.popover.padding;
         let child = self.content.measure(
             Constraints::loose(Size::new(
                 (constraints.maximum.width - inset * 2.0).max(0.0),
@@ -46,16 +70,24 @@ impl<Content: View> View for Popover<Content> {
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
+        if self.focus_scope {
+            let mut node = AccessibilityNode::new(AccessibilityRole::Group, bounds);
+            node.focus_scope = true;
+            context.record_accessibility(node);
+        }
         Rectangle::new()
-            .color(RectangleColor::Surface)
-            .radius(CornerRadius::Medium)
-            .border(BorderStyle::strong(1.0))
+            .color(RectangleColor::Custom(context.theme.popover.background))
+            .radius(context.theme.popover.radius)
+            .border(BorderStyle::custom(
+                context.theme.popover.border,
+                context.theme.popover.stroke_width,
+            ))
             .paint(bounds, context);
         context
             .display_list
             .push(DrawCommand::PushClip { rect: bounds });
         self.content
-            .paint(inset_rect(bounds, context.theme.spacing.small), context);
+            .paint(inset_rect(bounds, context.theme.popover.padding), context);
         context.display_list.push(DrawCommand::PopClip);
     }
 
@@ -65,11 +97,22 @@ impl<Content: View> View for Popover<Content> {
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
-        self.content.handle_event(
-            inset_rect(bounds, context.theme.spacing.small),
+        let result = self.content.handle_event(
+            inset_rect(bounds, context.theme.popover.padding),
             event,
             context,
-        )
+        );
+        if result.is_consumed() {
+            return result;
+        }
+        if matches!(event, ViewEvent::KeyPressed { key: Key::Escape, .. })
+            && let Some(callback) = self.on_dismiss.as_ref()
+        {
+            (callback.borrow_mut())();
+            context.request_redraw();
+            return EventResult::Consumed;
+        }
+        result
     }
 }
 

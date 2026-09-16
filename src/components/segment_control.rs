@@ -2,6 +2,7 @@ use super::{BorderStyle, Button, ButtonInteractionState, ButtonStyle, Rectangle,
 use crate::animation::{Animation, interpolate};
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
+use crate::platform::Key;
 use crate::state::Binding;
 use crate::theme::{CornerRadius, Motion, ShadowStyle};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
@@ -18,6 +19,7 @@ pub struct SegmentedControl {
     selection: Binding<usize>,
     items: Vec<SegmentedItem>,
     enabled: bool,
+    accessibility_label: Option<String>,
 }
 
 impl SegmentedControl {
@@ -26,6 +28,7 @@ impl SegmentedControl {
             selection,
             items: Vec::new(),
             enabled: true,
+            accessibility_label: None,
         }
     }
 
@@ -56,6 +59,11 @@ impl SegmentedControl {
         self
     }
 
+    pub fn accessibility_label(mut self, label: impl Into<String>) -> Self {
+        self.accessibility_label = Some(label.into());
+        self
+    }
+
     pub fn selected_value(&self) -> usize {
         self.selection.get()
     }
@@ -71,6 +79,9 @@ impl SegmentedControl {
             .radius(CornerRadius::ExtraLarge)
             .shadow(ShadowStyle::None)
             .enabled(enabled)
+            .accessibility_role(AccessibilityRole::RadioButton)
+            .accessibility_checked(self.selection.get() == value)
+            .accessibility_selected(self.selection.get() == value)
             .on_click(move || {
                 if selection.get() != value {
                     selection.set(value);
@@ -145,6 +156,45 @@ impl SegmentedControl {
 
         (Some(index), sample.next_redraw_at)
     }
+
+    fn keyboard_target(&self, event: &ViewEvent) -> Option<usize> {
+        if !self.enabled || self.items.is_empty() {
+            return None;
+        }
+        let current = self
+            .items
+            .iter()
+            .position(|item| item.interaction.is_focused())?;
+        let direction = match event {
+            ViewEvent::KeyPressed {
+                key: Key::ArrowRight | Key::ArrowDown,
+                ..
+            } => 1,
+            ViewEvent::KeyPressed {
+                key: Key::ArrowLeft | Key::ArrowUp,
+                ..
+            } => -1,
+            ViewEvent::KeyPressed { key: Key::Home, .. } => {
+                return self.items.iter().position(|item| item.enabled);
+            }
+            ViewEvent::KeyPressed { key: Key::End, .. } => {
+                return self.items.iter().rposition(|item| item.enabled);
+            }
+            _ => return None,
+        };
+        let mut index = current;
+        for _ in 0..self.items.len() {
+            index = if direction > 0 {
+                (index + 1) % self.items.len()
+            } else {
+                (index + self.items.len() - 1) % self.items.len()
+            };
+            if self.items[index].enabled {
+                return Some(index);
+            }
+        }
+        None
+    }
 }
 
 impl View for SegmentedControl {
@@ -177,11 +227,21 @@ impl View for SegmentedControl {
             return;
         }
 
+        let mut node = AccessibilityNode::new(AccessibilityRole::RadioGroup, bounds);
+        node.label = self.accessibility_label.clone();
+        node.enabled = self.enabled;
+        context.record_accessibility(node);
+
         Rectangle::new()
-            .color(RectangleColor::Custom(context.theme.colors.surface_subtle))
-            .radius(CornerRadius::ExtraLarge)
+            .color(RectangleColor::Custom(
+                context.theme.segmented_control.background,
+            ))
+            .radius(context.theme.segmented_control.radius)
             .shadow(ShadowStyle::None)
-            .border(BorderStyle::standard(1.0))
+            .border(BorderStyle::custom(
+                context.theme.segmented_control.border,
+                context.theme.segmented_control.stroke_width,
+            ))
             .paint(bounds, context);
 
         let inset = context.theme.layout.segmented_control_inset;
@@ -210,7 +270,7 @@ impl View for SegmentedControl {
                 segment_bounds[0].size.height,
             );
 
-            let outer_radius = CornerRadius::ExtraLarge.resolve(
+            let outer_radius = context.theme.segmented_control.radius.resolve(
                 &context.theme.radius,
                 bounds.size.width,
                 bounds.size.height,
@@ -219,10 +279,15 @@ impl View for SegmentedControl {
             let indicator_radius = (outer_radius - inset).max(0.0);
 
             Rectangle::new()
-                .color(RectangleColor::Surface)
+                .color(RectangleColor::Custom(
+                    context.theme.segmented_control.indicator_background,
+                ))
                 .radius(CornerRadius::Custom(indicator_radius))
                 .shadow(ShadowStyle::Card)
-                .border(BorderStyle::standard(1.0))
+                .border(BorderStyle::custom(
+                    context.theme.segmented_control.indicator_border,
+                    context.theme.segmented_control.stroke_width,
+                ))
                 .paint(indicator_bounds, context);
         }
 
@@ -239,6 +304,15 @@ impl View for SegmentedControl {
     ) -> EventResult {
         let segment_bounds =
             self.segment_bounds(bounds, context.theme().layout.segmented_control_inset);
+
+        if let Some(index) = self.keyboard_target(event)
+            && let Some(target_bounds) = segment_bounds.get(index).copied()
+        {
+            self.selection.set_if_changed(self.items[index].value);
+            context.request_keyboard_focus(target_bounds);
+            context.request_redraw_in(bounds.expanded(16.0));
+            return EventResult::Consumed;
+        }
 
         let broadcast = event.requires_broadcast();
         let mut result = EventResult::Ignored;
@@ -262,3 +336,4 @@ impl View for SegmentedControl {
         result
     }
 }
+use crate::accessibility::{AccessibilityNode, AccessibilityRole};

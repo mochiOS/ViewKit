@@ -1,7 +1,7 @@
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
 use crate::layout::{StackAlignment, StackGap, ViewExt};
-use crate::theme::{CornerRadius, ShadowStyle, Theme};
+use crate::theme::{ShadowStyle, Theme};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 use super::{
@@ -31,30 +31,37 @@ impl Picker {
 
     fn button(&self, theme: &Theme) -> Button {
         let foreground = if self.enabled {
-            theme.colors.text_primary
+            theme.picker.foreground
         } else {
-            theme.colors.text_disabled
+            theme.picker.disabled_foreground
         };
 
         Button::with_interaction(self.interaction.clone())
             .style(ButtonStyle::Custom {
-                background: theme.colors.surface,
-                hovered_background: theme.colors.surface_subtle,
-                border: theme.colors.border,
-                hovered_border: theme.colors.border_strong,
+                background: theme.picker.background,
+                hovered_background: theme.picker.hovered_background,
+                border: theme.picker.border,
+                hovered_border: theme.picker.hovered_border,
                 foreground,
             })
-            .radius(CornerRadius::Small)
+            .radius(theme.picker.radius)
             .shadow(ShadowStyle::None)
             .alignment(ZStackAlignment::Leading)
             .enabled(self.enabled)
+            .accessibility_role(AccessibilityRole::ComboBox)
+            .accessibility_label(self.label.clone())
             .content(
-                Padding::symmetric(theme.spacing.small, theme.spacing.micro).content(
+                Padding::symmetric(
+                    theme.picker.horizontal_padding,
+                    theme.picker.vertical_padding,
+                )
+                .content(
                     HStack::new()
                         .alignment(StackAlignment::Center)
                         .gap(StackGap::Small)
                         .child(
                             Text::label(self.label.clone())
+                                .accessibility_hidden(true)
                                 .color(foreground)
                                 .layout()
                                 .flex_grow(1.0),
@@ -63,7 +70,7 @@ impl Picker {
                         .child(
                             Icon::new(IconName::ChevronDown)
                                 .size(theme.layout.compact_icon_size)
-                                .color(theme.colors.text_secondary)
+                                .color(theme.picker.indicator)
                                 .frame(
                                     theme.layout.compact_icon_size,
                                     theme.layout.compact_icon_size,
@@ -102,3 +109,4 @@ impl View for Picker {
             .handle_event(bounds, event, context)
     }
 }
+use crate::accessibility::AccessibilityRole;

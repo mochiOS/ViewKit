@@ -3,11 +3,9 @@
 use super::Svg;
 use crate::geometry::Size;
 use crate::svg::SvgData;
-use crate::theme::Color;
+use crate::theme::{Color, LayoutTokens};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 use std::sync::OnceLock;
-
-const DEFAULT_ICON_SIZE: f32 = crate::theme::LayoutTokens::DEFAULT.icon_button_size;
 
 macro_rules! viewkit_svg {
     ($name:literal) => {{
@@ -176,21 +174,22 @@ impl IconName {
         }
     }
 
-    pub(crate) const fn control_size(self) -> f32 {
+    pub(crate) const fn control_size(self, layout: LayoutTokens) -> f32 {
         match self {
-            Self::ArrowUp => 12.0,
-            _ => 14.0,
+            Self::ArrowUp => layout.compact_icon_size,
+            _ => layout.control_icon_size,
         }
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Icon {
     name: IconName,
 
-    size: f32,
+    size: Option<f32>,
     color: Color,
     opacity: f32,
+    accessibility_label: Option<String>,
 }
 
 impl Icon {
@@ -198,11 +197,13 @@ impl Icon {
         Self {
             name,
 
-            size: DEFAULT_ICON_SIZE,
+            size: None,
 
             color: Color::from_rgb_hex(0x17181a),
 
             opacity: 1.0,
+
+            accessibility_label: None,
         }
     }
 
@@ -227,15 +228,26 @@ impl Icon {
 
         self
     }
+
+    pub fn accessibility_label(mut self, label: impl Into<String>) -> Self {
+        self.accessibility_label = Some(label.into());
+        self
+    }
 }
 
 impl View for Icon {
-    fn measure(&self, constraints: Constraints, _context: &mut MeasureContext<'_>) -> Size {
-        constraints.constrain(Size::new(self.size, self.size))
+    fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
+        let size = self
+            .size
+            .unwrap_or(context.theme.layout.icon_button_size);
+        constraints.constrain(Size::new(size, size))
     }
 
     fn paint(&self, bounds: crate::geometry::Rect, context: &mut PaintContext<'_>) {
-        let side = self.size.min(bounds.size.width).min(bounds.size.height);
+        let size = self
+            .size
+            .unwrap_or(context.theme.layout.icon_button_size);
+        let side = size.min(bounds.size.width).min(bounds.size.height);
         let icon_bounds = crate::geometry::Rect::new(
             bounds.origin.x + (bounds.size.width - side) / 2.0,
             bounds.origin.y + (bounds.size.height - side) / 2.0,
@@ -243,18 +255,21 @@ impl View for Icon {
             side,
         );
 
-        Svg::new(self.name.svg())
+        let mut svg = Svg::new(self.name.svg())
             .tint(self.color)
-            .opacity(self.opacity)
-            .paint(icon_bounds, context);
+            .opacity(self.opacity);
+        if let Some(label) = self.accessibility_label.as_ref() {
+            svg = svg.accessibility_label(label.clone());
+        }
+        svg.paint(icon_bounds, context);
     }
 }
 
-fn sanitize_size(size: f32) -> f32 {
+fn sanitize_size(size: f32) -> Option<f32> {
     if size.is_finite() && size > 0.0 {
-        size
+        Some(size)
     } else {
-        DEFAULT_ICON_SIZE
+        None
     }
 }
 

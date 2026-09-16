@@ -3,7 +3,7 @@
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Point, Rect, Size};
 use crate::layout::{IntoStackChild, StackChild};
-use crate::view::{PaintContext, View};
+use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ZStackAlignment {
@@ -105,6 +105,16 @@ impl ZStack {
 }
 
 impl View for ZStack {
+    fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
+        let mut measured = Size::new(0.0, 0.0);
+        for child in &self.children {
+            let size = child.measure(Constraints::loose(constraints.maximum), context);
+            measured.width = measured.width.max(size.width);
+            measured.height = measured.height.max(size.height);
+        }
+        constraints.constrain(measured)
+    }
+
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
         if bounds.size.width <= 0.0 || bounds.size.height <= 0.0 {
             return;

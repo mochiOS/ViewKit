@@ -1,0 +1,25 @@
+{
+  "Layout": {
+    "Toolbar": {
+      "Height": { "$type": "number", "$value": 48 }
+    },
+    "Sidebar": {
+      "Width": { "$type": "number", "$value": 240 }
+    },
+    "Page": {
+      "Margin": { "$type": "number", "$value": 40 }
+    },
+    "Content": {
+      "MaxWidth": { "$type": "number", "$value": 720 }
+    },
+    "Form": {
+      "Width": { "$type": "number", "$value": 480 }
+    },
+    "Section": {
+      "Gap": { "$type": "number", "$value": 32 }
+    }
+  },
+  "$extensions": {
+    "com.mochios.source": "Layout Example.png"
+  }
+}

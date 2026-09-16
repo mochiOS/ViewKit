@@ -59,6 +59,21 @@ impl<T> State<T> {
         mark_changed();
     }
 
+    /// 値が実際に変化した場合だけ置き換え、再描画を要求します。
+    ///
+    /// ポーリング結果やプラットフォーム状態を同期するときに、同じ値による
+    /// 不要なViewツリー再構築を避けるために使用します。
+    pub fn set_if_changed(&self, value: T) -> bool
+    where
+        T: PartialEq,
+    {
+        if *self.value.borrow() == value {
+            return false;
+        }
+        self.set(value);
+        true
+    }
+
     /// 現在の値を変更します。
     pub fn update<R>(&self, update: impl FnOnce(&mut T) -> R) -> R {
         self.previous_value.replace(None);
@@ -68,6 +83,22 @@ impl<T> State<T> {
         mark_changed();
 
         result
+    }
+
+    /// 更新後の値が異なる場合だけ変更通知を発生させます。
+    pub fn update_if_changed<R>(&self, update: impl FnOnce(&mut T) -> R) -> (R, bool)
+    where
+        T: Clone + PartialEq,
+    {
+        let previous = self.value.borrow().clone();
+        let result = update(&mut self.value.borrow_mut());
+        if *self.value.borrow() == previous {
+            return (result, false);
+        }
+        self.previous_value.replace(Some(previous));
+        self.last_changed_at.set(Some(Instant::now()));
+        mark_changed();
+        (result, true)
     }
 
     /// Viewへ渡すためのBindingを作成します。
@@ -117,6 +148,18 @@ impl<T> Binding<T> {
         mark_changed();
     }
 
+    /// 値が実際に変化した場合だけ置き換え、再描画を要求します。
+    pub fn set_if_changed(&self, value: T) -> bool
+    where
+        T: PartialEq,
+    {
+        if *self.value.borrow() == value {
+            return false;
+        }
+        self.set(value);
+        true
+    }
+
     /// 現在の値を変更します。
     pub fn update<R>(&self, update: impl FnOnce(&mut T) -> R) -> R {
         self.previous_value.replace(None);
@@ -126,6 +169,22 @@ impl<T> Binding<T> {
         mark_changed();
 
         result
+    }
+
+    /// 更新後の値が異なる場合だけ変更通知を発生させます。
+    pub fn update_if_changed<R>(&self, update: impl FnOnce(&mut T) -> R) -> (R, bool)
+    where
+        T: Clone + PartialEq,
+    {
+        let previous = self.value.borrow().clone();
+        let result = update(&mut self.value.borrow_mut());
+        if *self.value.borrow() == previous {
+            return (result, false);
+        }
+        self.previous_value.replace(Some(previous));
+        self.last_changed_at.set(Some(Instant::now()));
+        mark_changed();
+        (result, true)
     }
 
     /// 状態変更通知を発生させずに値を置き換えます。

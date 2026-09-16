@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::layout::ViewExt;
-use crate::theme::{Color, CornerRadius, ShadowStyle, Theme};
+use crate::theme::{ShadowStyle, Theme};
 
 use super::{Button, ButtonInteractionState, ButtonStyle, Icon, IconName, ZStackAlignment};
 
@@ -21,6 +21,7 @@ pub struct IconButton {
     enabled: bool,
     interaction: ButtonInteractionState,
     on_click: Option<Callback>,
+    accessibility_label: Option<String>,
 }
 
 impl IconButton {
@@ -31,6 +32,7 @@ impl IconButton {
             enabled: true,
             interaction: ButtonInteractionState::new(),
             on_click: None,
+            accessibility_label: None,
         }
     }
 
@@ -53,54 +55,46 @@ impl IconButton {
         self
     }
 
+    pub fn accessibility_label(mut self, label: impl Into<String>) -> Self {
+        self.accessibility_label = Some(label.into());
+        self
+    }
+
     pub(crate) fn button(&self, theme: &Theme) -> Button {
-        let (style, icon_color, control_size, radius) = match self.tone {
+        let (style, icon_color, control_size) = match self.tone {
             IconButtonTone::Plain => {
                 let icon_color = if self.enabled {
-                    theme.colors.text_primary
+                    theme.button.ghost.rest.foreground
                 } else {
                     theme.colors.text_disabled
                 };
 
                 (
-                    ButtonStyle::Custom {
-                        background: Color::TRANSPARENT,
-                        hovered_background: theme.colors.surface_subtle,
-                        border: Color::TRANSPARENT,
-                        hovered_border: Color::TRANSPARENT,
-                        foreground: icon_color,
-                    },
+                    ButtonStyle::Ghost,
                     icon_color,
                     theme.layout.icon_button_size,
-                    CornerRadius::Small,
                 )
             }
             IconButtonTone::Accent => {
-                let icon_color = Color::WHITE;
+                let icon_color = theme.button.accent.rest.foreground;
                 (
-                    ButtonStyle::Custom {
-                        background: theme.colors.accent,
-                        hovered_background: theme.colors.accent_hovered,
-                        border: Color::TRANSPARENT,
-                        hovered_border: Color::TRANSPARENT,
-                        foreground: icon_color,
-                    },
+                    ButtonStyle::Accent,
                     icon_color,
                     theme.layout.prominent_icon_button_size,
-                    CornerRadius::Medium,
                 )
             }
         };
 
         let mut button = Button::with_interaction(self.interaction.clone())
             .style(style)
-            .radius(radius)
+            .radius(theme.button.radius)
             .shadow(ShadowStyle::None)
             .alignment(ZStackAlignment::Center)
             .enabled(self.enabled)
+            .accessibility_label_option(self.accessibility_label.clone())
             .content(
                 Icon::new(self.icon)
-                    .size(self.icon.control_size())
+                    .size(self.icon.control_size(theme.layout))
                     .color(icon_color)
                     .frame(control_size, control_size),
             );

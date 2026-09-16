@@ -5,6 +5,7 @@
 use std::cell::Cell;
 use std::time::Instant;
 
+use crate::accessibility::AccessibilityNode;
 use crate::app::{App, ViewContext};
 use crate::appearance::AppearanceSettings;
 use crate::draw_command::{DisplayList, DrawCommand};
@@ -14,7 +15,7 @@ use crate::platform::{PlatformApplication, PlatformEvent, PlatformWindow, Window
 use crate::renderer::Viewport;
 use crate::state::take_state_changed;
 use crate::theme::Theme;
-use crate::typography::{TextMeasurer, Typography};
+use crate::typography::TextMeasurer;
 use crate::view::{PaintContext, RedrawSchedule, View};
 
 thread_local! {
@@ -47,8 +48,8 @@ where
     root: Option<A::Body>,
     viewport: Option<Viewport>,
     theme: Theme,
-    typography: Typography,
     text_measurer: TextMeasurer,
+    accessibility_nodes: Vec<AccessibilityNode>,
     appearance: AppearanceSettings,
 
     event_dispatcher: EventDispatcher,
@@ -73,8 +74,8 @@ where
             root: None,
             viewport: None,
             theme,
-            typography: Typography::DEFAULT,
             text_measurer,
+            accessibility_nodes: Vec::new(),
             appearance,
 
             event_dispatcher: EventDispatcher::new(),
@@ -148,8 +149,11 @@ where
                 .as_ref()
                 .expect("root view must exist after ensure_root");
 
-            let mut context =
-                EventContext::new(&self.theme, &self.typography, &mut self.text_measurer);
+            let mut context = EventContext::new(
+                &self.theme,
+                &self.theme.typography,
+                &mut self.text_measurer,
+            );
 
             self.event_dispatcher
                 .dispatch(root, viewport.logical_bounds(), &event, &mut context);
@@ -205,14 +209,16 @@ where
         });
 
         self.redraw_schedule.clear();
+        self.accessibility_nodes.clear();
 
         let mut context = PaintContext::new(
             display_list,
             &self.theme,
-            &self.typography,
+            &self.theme.typography,
             &mut self.text_measurer,
         )
-        .with_redraw_schedule(&mut self.redraw_schedule);
+        .with_redraw_schedule(&mut self.redraw_schedule)
+        .with_accessibility_nodes(&mut self.accessibility_nodes);
 
         let root = self
             .root
@@ -220,12 +226,19 @@ where
             .expect("root view must exist after ensure_root");
 
         root.paint(viewport_bounds, &mut context);
+        drop(context);
+        self.event_dispatcher
+            .set_accessibility_nodes(&self.accessibility_nodes);
 
         dirty_bounds
     }
 
     fn next_redraw_at(&self) -> Option<Instant> {
         self.redraw_schedule.deadline()
+    }
+
+    fn accessibility_nodes(&self) -> &[AccessibilityNode] {
+        &self.accessibility_nodes
     }
 
     fn reload_appearance(&mut self) -> bool {

@@ -1,5 +1,6 @@
 //! SVGを表示するコンポーネント
 
+use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 use crate::draw_command::{DrawCommand, SvgCommand};
 use crate::geometry::{Rect, Size};
 use crate::svg::SvgData;
@@ -23,6 +24,7 @@ pub struct Svg {
 
     opacity: f32,
     tint: Option<Color>,
+    accessibility_label: Option<String>,
 }
 
 impl Svg {
@@ -37,6 +39,8 @@ impl Svg {
             opacity: 1.0,
 
             tint: None,
+
+            accessibility_label: None,
         }
     }
 
@@ -79,6 +83,11 @@ impl Svg {
 
         self
     }
+
+    pub fn accessibility_label(mut self, label: impl Into<String>) -> Self {
+        self.accessibility_label = Some(label.into());
+        self
+    }
 }
 
 impl View for Svg {
@@ -103,6 +112,12 @@ impl View for Svg {
             || svg_height <= 0.0
         {
             return;
+        }
+
+        if let Some(label) = self.accessibility_label.as_ref() {
+            let mut node = AccessibilityNode::new(AccessibilityRole::Image, bounds);
+            node.label = Some(label.clone());
+            context.record_accessibility(node);
         }
 
         let svg_bounds = resolve_svg_bounds(bounds, svg_width, svg_height, self.content_mode);
