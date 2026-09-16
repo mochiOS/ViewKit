@@ -11,11 +11,11 @@ use crate::view::{Constraints, MeasureContext, PaintContext, View};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 use super::{
     Avatar, Button, ButtonInteractionState, ButtonStyle, Ellipse, EllipseColor, HStack, Icon,
     IconName, Padding, Text, VStack, ZStackAlignment,
 };
+use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 
 type Callback = Rc<RefCell<Box<dyn FnMut()>>>;
 
@@ -36,10 +36,7 @@ impl List {
         self
     }
 
-    pub fn rows<Row: IntoStackChildren>(
-        mut self,
-        rows: impl IntoIterator<Item = Row>,
-    ) -> Self {
+    pub fn rows<Row: IntoStackChildren>(mut self, rows: impl IntoIterator<Item = Row>) -> Self {
         for row in rows {
             self.children.extend(row.into_stack_children());
         }
@@ -192,10 +189,8 @@ impl ListRow {
             );
 
         if let Some(trailing) = self.trailing.as_ref() {
-            title_row =
-                title_row.child(
-                    Text::caption(trailing.clone()).color(theme.list.secondary_foreground),
-                );
+            title_row = title_row
+                .child(Text::caption(trailing.clone()).color(theme.list.secondary_foreground));
         }
 
         let mut labels = VStack::new()

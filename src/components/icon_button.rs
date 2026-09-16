@@ -4,7 +4,9 @@ use std::rc::Rc;
 use crate::layout::ViewExt;
 use crate::theme::{ShadowStyle, Theme};
 
-use super::{Button, ButtonInteractionState, ButtonStyle, Icon, IconName, ZStackAlignment};
+use super::{
+    Button, ButtonInteractionState, ButtonSize, ButtonStyle, Icon, IconName, ZStackAlignment,
+};
 
 type Callback = Rc<RefCell<Box<dyn FnMut()>>>;
 
@@ -18,6 +20,7 @@ pub enum IconButtonTone {
 pub struct IconButton {
     icon: IconName,
     tone: IconButtonTone,
+    size: Option<ButtonSize>,
     enabled: bool,
     interaction: ButtonInteractionState,
     on_click: Option<Callback>,
@@ -29,6 +32,7 @@ impl IconButton {
         Self {
             icon,
             tone: IconButtonTone::Plain,
+            size: None,
             enabled: true,
             interaction: ButtonInteractionState::new(),
             on_click: None,
@@ -38,6 +42,11 @@ impl IconButton {
 
     pub fn tone(mut self, tone: IconButtonTone) -> Self {
         self.tone = tone;
+        self
+    }
+
+    pub fn size(mut self, size: ButtonSize) -> Self {
+        self.size = Some(size);
         self
     }
 
@@ -61,7 +70,7 @@ impl IconButton {
     }
 
     pub(crate) fn button(&self, theme: &Theme) -> Button {
-        let (style, icon_color, control_size) = match self.tone {
+        let (style, icon_color, default_size) = match self.tone {
             IconButtonTone::Plain => {
                 let icon_color = if self.enabled {
                     theme.button.ghost.rest.foreground
@@ -69,24 +78,23 @@ impl IconButton {
                     theme.colors.text_disabled
                 };
 
-                (
-                    ButtonStyle::Ghost,
-                    icon_color,
-                    theme.layout.icon_button_size,
-                )
+                (ButtonStyle::Ghost, icon_color, ButtonSize::Small)
             }
             IconButtonTone::Accent => {
                 let icon_color = theme.button.accent.rest.foreground;
-                (
-                    ButtonStyle::Accent,
-                    icon_color,
-                    theme.layout.prominent_icon_button_size,
-                )
+                (ButtonStyle::Accent, icon_color, ButtonSize::Medium)
             }
         };
+        let size = self.size.unwrap_or(default_size);
+        let control_size = size.height(theme);
+        let icon_size = self.size.map_or_else(
+            || self.icon.control_size(theme.layout),
+            |size| size.icon_size(theme),
+        );
 
         let mut button = Button::with_interaction(self.interaction.clone())
             .style(style)
+            .size(size)
             .radius(theme.button.radius)
             .shadow(ShadowStyle::None)
             .alignment(ZStackAlignment::Center)
@@ -94,7 +102,7 @@ impl IconButton {
             .accessibility_label_option(self.accessibility_label.clone())
             .content(
                 Icon::new(self.icon)
-                    .size(self.icon.control_size(theme.layout))
+                    .size(icon_size)
                     .color(icon_color)
                     .frame(control_size, control_size),
             );

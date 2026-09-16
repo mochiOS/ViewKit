@@ -103,10 +103,7 @@ impl Tabs {
             .accessibility_label(item.label.clone())
             .accessibility_selected(selected)
             .content(
-                Padding::symmetric(
-                    theme.tabs.horizontal_padding,
-                    theme.tabs.vertical_padding,
-                )
+                Padding::symmetric(theme.tabs.horizontal_padding, theme.tabs.vertical_padding)
                     .content(
                         Text::label(item.label.clone())
                             .accessibility_hidden(true)
@@ -123,10 +120,8 @@ impl Tabs {
             .alignment(StackAlignment::Center)
             .gap(StackGap::Small)
             .children(self.items.iter().map(|item| {
-                self.item_button(item, theme).frame(
-                    theme.layout.tab_width,
-                    theme.layout.compact_control_height,
-                )
+                self.item_button(item, theme)
+                    .frame(theme.layout.tab_width, theme.layout.compact_control_height)
             }))
     }
 
@@ -148,16 +143,10 @@ impl Tabs {
                 ..
             } => -1,
             ViewEvent::KeyPressed { key: Key::Home, .. } => {
-                return self
-                    .items
-                    .iter()
-                    .position(|item| item.enabled);
+                return self.items.iter().position(|item| item.enabled);
             }
             ViewEvent::KeyPressed { key: Key::End, .. } => {
-                return self
-                    .items
-                    .iter()
-                    .rposition(|item| item.enabled);
+                return self.items.iter().rposition(|item| item.enabled);
             }
             _ => return None,
         };

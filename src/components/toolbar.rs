@@ -74,10 +74,7 @@ impl<Content: View> View for Toolbar<Content> {
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
-        context.record_accessibility(AccessibilityNode::new(
-            AccessibilityRole::Toolbar,
-            bounds,
-        ));
+        context.record_accessibility(AccessibilityNode::new(AccessibilityRole::Toolbar, bounds));
         Rectangle::new()
             .color(RectangleColor::Surface)
             .paint(bounds, context);

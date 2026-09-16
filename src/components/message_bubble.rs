@@ -99,8 +99,8 @@ impl View for MessageBubble {
             context.theme.message_bubble.horizontal_padding,
             context.theme.message_bubble.vertical_padding,
         )
-            .content(self.text_view(self.foreground(context)))
-            .paint(bounds, context);
+        .content(self.text_view(self.foreground(context)))
+        .paint(bounds, context);
     }
 }
 

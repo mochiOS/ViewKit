@@ -2,8 +2,8 @@
 
 use crate::accessibility::AccessibilityNode;
 use crate::components::{
-    BorderStyle, ButtonColor, ImageContentMode, RectangleColor, ScrollAxis, ScrollBarVisibility,
-    SvgContentMode, TextFieldSize, TextTone, ZStackAlignment,
+    BorderStyle, ButtonColor, ButtonSize, ButtonStyle, ImageContentMode, RectangleColor,
+    ScrollAxis, ScrollBarVisibility, SvgContentMode, TextFieldSize, TextTone, ZStackAlignment,
 };
 use crate::draw_command::{DisplayList, DrawCommand, ImageSampling};
 use crate::event::{EventContext, EventDispatcher};
@@ -49,7 +49,7 @@ pub const VK_Z_ALIGNMENT_BOTTOM: u32 = 7;
 pub const VK_Z_ALIGNMENT_BOTTOM_TRAILING: u32 = 8;
 
 pub const VK_ABI_VERSION_MAJOR: u32 = 1;
-pub const VK_ABI_VERSION_MINOR: u32 = 1;
+pub const VK_ABI_VERSION_MINOR: u32 = 2;
 pub const VK_ABI_VERSION_PATCH: u32 = 0;
 
 pub const VK_IMAGE_CONTENT_MODE_FIT: u32 = 0;
@@ -418,6 +418,16 @@ pub const VK_BUTTON_COLOR_ACCENT: u32 = 0;
 
 pub const VK_BUTTON_COLOR_DESTRUCTIVE: u32 = 1;
 
+pub const VK_BUTTON_STYLE_STANDARD: u32 = 0;
+pub const VK_BUTTON_STYLE_PRIMARY: u32 = 1;
+pub const VK_BUTTON_STYLE_ACCENT: u32 = 2;
+pub const VK_BUTTON_STYLE_GHOST: u32 = 3;
+pub const VK_BUTTON_STYLE_DANGER: u32 = 4;
+
+pub const VK_BUTTON_SIZE_SMALL: u32 = 0;
+pub const VK_BUTTON_SIZE_MEDIUM: u32 = 1;
+pub const VK_BUTTON_SIZE_LARGE: u32 = 2;
+
 pub struct VkRuntime {
     component_instance_id: u64,
 
@@ -492,11 +502,8 @@ impl PlatformApplication for VkWindowApplication<'_> {
         let bounds = window.viewport().logical_bounds();
 
         let redraw_request = {
-            let mut context = EventContext::new(
-                &self.theme,
-                &self.theme.typography,
-                &mut self.text_measurer,
-            );
+            let mut context =
+                EventContext::new(&self.theme, &self.theme.typography, &mut self.text_measurer);
 
             self.event_dispatcher
                 .dispatch(root.as_ref(), bounds, &event, &mut context);
@@ -1094,6 +1101,26 @@ fn decode_button_color(value: u32) -> Result<ButtonColor, VkStatus> {
 
         VK_BUTTON_COLOR_DESTRUCTIVE => Ok(ButtonColor::Destructive),
 
+        _ => Err(VkStatus::InvalidEnumValue),
+    }
+}
+
+fn decode_button_style(value: u32) -> Result<ButtonStyle, VkStatus> {
+    match value {
+        VK_BUTTON_STYLE_STANDARD => Ok(ButtonStyle::Standard),
+        VK_BUTTON_STYLE_PRIMARY => Ok(ButtonStyle::Primary),
+        VK_BUTTON_STYLE_ACCENT => Ok(ButtonStyle::Accent),
+        VK_BUTTON_STYLE_GHOST => Ok(ButtonStyle::Ghost),
+        VK_BUTTON_STYLE_DANGER => Ok(ButtonStyle::Danger),
+        _ => Err(VkStatus::InvalidEnumValue),
+    }
+}
+
+fn decode_button_size(value: u32) -> Result<ButtonSize, VkStatus> {
+    match value {
+        VK_BUTTON_SIZE_SMALL => Ok(ButtonSize::Small),
+        VK_BUTTON_SIZE_MEDIUM => Ok(ButtonSize::Medium),
+        VK_BUTTON_SIZE_LARGE => Ok(ButtonSize::Large),
         _ => Err(VkStatus::InvalidEnumValue),
     }
 }

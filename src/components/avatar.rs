@@ -90,8 +90,7 @@ impl View for Avatar {
 
         Ellipse::new()
             .color(EllipseColor::Custom(
-                self.background
-                    .unwrap_or(context.theme.avatar.background),
+                self.background.unwrap_or(context.theme.avatar.background),
             ))
             .paint(bounds, context);
 
@@ -110,10 +109,7 @@ impl View for Avatar {
         Text::styled(self.initials.clone(), self.size.text_role())
             .accessibility_hidden(true)
             .alignment(TextAlignment::Center)
-            .color(
-                self.foreground
-                    .unwrap_or(context.theme.avatar.foreground),
-            )
+            .color(self.foreground.unwrap_or(context.theme.avatar.foreground))
             .paint(text_bounds, context);
     }
 }

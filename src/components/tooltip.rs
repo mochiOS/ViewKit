@@ -55,12 +55,12 @@ impl View for Tooltip {
             .accessibility_hidden(true)
             .color(context.theme.tooltip.foreground)
             .paint(
-            Rect::new(
-                bounds.origin.x + horizontal,
-                bounds.origin.y + vertical,
-                (bounds.size.width - horizontal * 2.0).max(0.0),
-                line_height.min(bounds.size.height),
-            ),
+                Rect::new(
+                    bounds.origin.x + horizontal,
+                    bounds.origin.y + vertical,
+                    (bounds.size.width - horizontal * 2.0).max(0.0),
+                    line_height.min(bounds.size.height),
+                ),
                 context,
             );
     }

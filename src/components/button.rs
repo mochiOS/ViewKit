@@ -13,7 +13,7 @@ use crate::platform::{Key, PointerButton};
 use crate::theme::{
     Color, ControlAppearance, ControlVisualState, CornerRadius, ShadowStyle, Theme,
 };
-use crate::typography::TextAlignment;
+use crate::typography::{TextAlignment, TextRole};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 use super::{Rectangle, RectangleColor, ZStackAlignment};
@@ -35,6 +35,49 @@ pub enum ButtonStyle {
         hovered_border: Color,
         foreground: Color,
     },
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ButtonSize {
+    Small,
+
+    #[default]
+    Medium,
+
+    Large,
+}
+
+impl ButtonSize {
+    const fn text_role(self) -> TextRole {
+        match self {
+            Self::Small => TextRole::Caption,
+            Self::Medium | Self::Large => TextRole::Label,
+        }
+    }
+
+    pub(crate) const fn height(self, theme: &Theme) -> f32 {
+        match self {
+            Self::Small => theme.layout.compact_control_height,
+            Self::Medium => theme.layout.control_height,
+            Self::Large => theme.layout.large_control_height,
+        }
+    }
+
+    pub(crate) const fn icon_size(self, theme: &Theme) -> f32 {
+        match self {
+            Self::Small => theme.layout.compact_icon_size,
+            Self::Medium => theme.layout.control_icon_size,
+            Self::Large => theme.layout.stepper_icon_size,
+        }
+    }
+
+    const fn horizontal_padding(self, theme: &Theme) -> f32 {
+        match self {
+            Self::Small => theme.spacing.small,
+            Self::Medium => theme.button.horizontal_padding,
+            Self::Large => theme.spacing.large,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -77,13 +120,19 @@ impl ButtonStyle {
                 hovered_border,
                 foreground,
             } => ControlAppearance {
-                background: if matches!(state, ControlVisualState::Hovered | ControlVisualState::Pressed) {
+                background: if matches!(
+                    state,
+                    ControlVisualState::Hovered | ControlVisualState::Pressed
+                ) {
                     hovered_background
                 } else {
                     background
                 },
 
-                border: if matches!(state, ControlVisualState::Hovered | ControlVisualState::Pressed) {
+                border: if matches!(
+                    state,
+                    ControlVisualState::Hovered | ControlVisualState::Pressed
+                ) {
                     hovered_border
                 } else {
                     border
@@ -246,6 +295,7 @@ pub struct Button {
     content: Option<StackChild>,
     intrinsic_label_size: RefCell<Option<Size>>,
     style: ButtonStyle,
+    size: ButtonSize,
     radius: Option<CornerRadius>,
     shadow: ShadowStyle,
     alignment: ZStackAlignment,
@@ -265,6 +315,7 @@ impl Button {
             label: Some(label.into()),
             content: None,
             style: ButtonStyle::Standard,
+            size: ButtonSize::Medium,
             radius: None,
             shadow: ShadowStyle::None,
             alignment: ZStackAlignment::Center,
@@ -291,6 +342,11 @@ impl Button {
 
     pub fn style(mut self, style: ButtonStyle) -> Self {
         self.style = style;
+        self
+    }
+
+    pub fn size(mut self, size: ButtonSize) -> Self {
+        self.size = size;
         self
     }
 
@@ -365,6 +421,7 @@ impl Button {
             label: None,
             content: None,
             style: ButtonStyle::Standard,
+            size: ButtonSize::Medium,
             radius: None,
             shadow: ShadowStyle::None,
             alignment: ZStackAlignment::Center,
@@ -431,8 +488,9 @@ impl View for Button {
             return;
         }
 
-        let horizontal_padding = context.theme.button.horizontal_padding;
-        let label_style = context.typography.label;
+        let horizontal_padding = self.size.horizontal_padding(context.theme);
+        let label_role = self.size.text_role();
+        let label_style = context.typography.style(label_role);
 
         self.interaction.set_enabled(self.enabled);
 
@@ -499,7 +557,8 @@ impl View for Button {
             .paint(bounds, context);
 
         if let Some(label) = self.label.as_ref() {
-            let text_height = label_style.line_height.min(bounds.size.height);
+            let text_height = (label_style.line_height * context.text_measurer.font_scale())
+                .min(bounds.size.height);
 
             let text_y =
                 bounds.origin.y + (bounds.size.height - text_height) * self.label_vertical_factor();
@@ -511,7 +570,7 @@ impl View for Button {
                 text_height,
             );
 
-            Text::label(label.as_str())
+            Text::styled(label.as_str(), label_role)
                 .accessibility_hidden(true)
                 .alignment(self.label_text_alignment())
                 .color(appearance.foreground)
@@ -710,8 +769,9 @@ impl View for Button {
     }
 
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
-        let horizontal_padding = context.theme.button.horizontal_padding;
-        let intrinsic_height = context.theme.button.height;
+        let horizontal_padding = self.size.horizontal_padding(context.theme);
+        let intrinsic_height = self.size.height(context.theme);
+        let label_role = self.size.text_role();
 
         let width_is_fixed = constraints.minimum.width.is_finite()
             && constraints.maximum.width.is_finite()
@@ -738,7 +798,7 @@ impl View for Button {
                 f32::INFINITY
             };
 
-            let measured = Text::label(label.as_str()).measure(
+            let measured = Text::styled(label.as_str(), label_role).measure(
                 Constraints::loose(Size::new(maximum_text_width, f32::INFINITY)),
                 context,
             );
@@ -755,5 +815,40 @@ impl View for Button {
         };
 
         constraints.constrain(Size::new(width, height))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn semantic_sizes_follow_layout_tokens() {
+        let theme = Theme::LIGHT;
+
+        assert_eq!(
+            ButtonSize::Small.height(&theme),
+            theme.layout.compact_control_height
+        );
+        assert_eq!(
+            ButtonSize::Medium.height(&theme),
+            theme.layout.control_height
+        );
+        assert_eq!(
+            ButtonSize::Large.height(&theme),
+            theme.layout.large_control_height
+        );
+        assert_eq!(
+            ButtonSize::Small.icon_size(&theme),
+            theme.layout.compact_icon_size
+        );
+        assert_eq!(
+            ButtonSize::Medium.icon_size(&theme),
+            theme.layout.control_icon_size
+        );
+        assert_eq!(
+            ButtonSize::Large.icon_size(&theme),
+            theme.layout.stepper_icon_size
+        );
     }
 }

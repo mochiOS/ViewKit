@@ -73,7 +73,8 @@ impl Stepper {
                 Padding::symmetric(
                     theme.stepper.horizontal_padding,
                     theme.stepper.vertical_padding,
-                ).content(
+                )
+                .content(
                     HStack::new()
                         .alignment(StackAlignment::Center)
                         .distribution(StackDistribution::SpaceBetween)

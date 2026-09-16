@@ -57,15 +57,13 @@ impl Checkbox {
             );
 
         if let Some(label) = self.label.as_ref() {
-            content = content.child(
-                Text::label(label.clone())
-                    .accessibility_hidden(true)
-                    .color(if self.enabled {
-                        theme.selection_control.foreground
-                    } else {
-                        theme.selection_control.disabled_foreground
-                    }),
-            );
+            content = content.child(Text::label(label.clone()).accessibility_hidden(true).color(
+                if self.enabled {
+                    theme.selection_control.foreground
+                } else {
+                    theme.selection_control.disabled_foreground
+                },
+            ));
         }
 
         let checked_binding = self.checked.clone();
@@ -156,7 +154,10 @@ impl View for CheckboxMark {
                 .color(RectangleColor::Custom(if self.enabled {
                     context.theme.selection_control.indicator_background
                 } else {
-                    context.theme.selection_control.disabled_indicator_background
+                    context
+                        .theme
+                        .selection_control
+                        .disabled_indicator_background
                 }))
                 .radius(CornerRadius::Custom(context.theme.layout.checkbox_radius))
                 .border(BorderStyle::custom(

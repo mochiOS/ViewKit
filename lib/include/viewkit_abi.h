@@ -29,7 +29,7 @@
 
 #define VK_ABI_VERSION_MAJOR 1
 
-#define VK_ABI_VERSION_MINOR 1
+#define VK_ABI_VERSION_MINOR 2
 
 #define VK_ABI_VERSION_PATCH 0
 
@@ -196,6 +196,22 @@
 #define VK_BUTTON_COLOR_ACCENT 0
 
 #define VK_BUTTON_COLOR_DESTRUCTIVE 1
+
+#define VK_BUTTON_STYLE_STANDARD 0
+
+#define VK_BUTTON_STYLE_PRIMARY 1
+
+#define VK_BUTTON_STYLE_ACCENT 2
+
+#define VK_BUTTON_STYLE_GHOST 3
+
+#define VK_BUTTON_STYLE_DANGER 4
+
+#define VK_BUTTON_SIZE_SMALL 0
+
+#define VK_BUTTON_SIZE_MEDIUM 1
+
+#define VK_BUTTON_SIZE_LARGE 2
 
 #define KeyModifiers_SHIFT (1 << 0)
 
@@ -493,6 +509,13 @@ int32_t vk_push_button(struct VkRuntime *runtime,
                        uint32_t color,
                        float radius,
                        uint64_t action_id);
+
+int32_t vk_push_button_semantic(struct VkRuntime *runtime,
+                                uint64_t node_id,
+                                struct VkString title,
+                                uint32_t style,
+                                uint32_t size,
+                                uint64_t action_id);
 
 int32_t vk_begin_padding(struct VkRuntime *runtime,
                          uint64_t node_id,

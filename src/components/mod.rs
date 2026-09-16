@@ -60,7 +60,7 @@ pub use zstack::{ZStack, ZStackAlignment};
 
 pub use avatar::{Avatar, AvatarSize};
 pub use badge::{Badge, BadgeTone};
-pub use button::{Button, ButtonColor, ButtonInteractionState, ButtonStyle};
+pub use button::{Button, ButtonColor, ButtonInteractionState, ButtonSize, ButtonStyle};
 pub use card::Card;
 pub use checkbox::Checkbox;
 pub use content_area::ContentArea;
@@ -337,6 +337,54 @@ ffi_components! {
                     radius,
                 ),
             );
+
+        if action_id != 0 {
+            button = button.on_click(
+                context.button_callback(
+                    node_id,
+                    action_id,
+                ),
+            );
+        }
+
+        Ok(FfiBuiltView::View(
+            Box::new(button),
+        ))
+    };
+
+    leaf vk_push_button_semantic(
+        title: VkString
+            => title =
+                copy_string(title)?,
+
+        style: u32
+            => style =
+                decode_button_style(
+                    style,
+                )?,
+
+        size: u32
+            => size =
+                decode_button_size(
+                    size,
+                )?,
+
+        action_id: u64,
+    ) build move |
+        node_id,
+        children,
+        context
+    | {
+        expect_no_children(
+            children,
+        )?;
+
+        let mut button =
+            crate::components::Button::new(
+                title,
+            )
+            .style(style)
+            .size(size);
 
         if action_id != 0 {
             button = button.on_click(

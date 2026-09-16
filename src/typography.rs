@@ -51,7 +51,8 @@ impl TextMeasurer {
         self.font_system.get_or_insert_with(create_font_system)
     }
 
-    pub(crate) fn font_scale(&self) -> f32 {
+    /// Returns the active accessibility font scale used by text layout.
+    pub fn font_scale(&self) -> f32 {
         self.font_scale
     }
 

@@ -60,15 +60,15 @@ impl<Content> Surface<Content> {
 
     fn chrome(&self, theme: &Theme) -> Rectangle {
         match self.kind {
-            SurfaceKind::App => Rectangle::new().color(RectangleColor::Custom(
-                theme.surface.app_background,
-            )),
-            SurfaceKind::Pane => Rectangle::new().color(RectangleColor::Custom(
-                theme.surface.pane_background,
-            )),
-            SurfaceKind::Sidebar => Rectangle::new().color(RectangleColor::Custom(
-                theme.surface.sidebar_background,
-            )),
+            SurfaceKind::App => {
+                Rectangle::new().color(RectangleColor::Custom(theme.surface.app_background))
+            }
+            SurfaceKind::Pane => {
+                Rectangle::new().color(RectangleColor::Custom(theme.surface.pane_background))
+            }
+            SurfaceKind::Sidebar => {
+                Rectangle::new().color(RectangleColor::Custom(theme.surface.sidebar_background))
+            }
             SurfaceKind::Floating => Rectangle::new()
                 .color(RectangleColor::Custom(theme.surface.floating_background))
                 .radius(theme.surface.floating_radius)

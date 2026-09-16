@@ -190,6 +190,37 @@ pub extern "C" fn vk_push_button(
 }
 #[unsafe(no_mangle)]
 #[allow(clippy::too_many_arguments)]
+pub extern "C" fn vk_push_button_semantic(
+    runtime: *mut VkRuntime,
+    node_id: u64,
+    title: VkString,
+    style: u32,
+    size: u32,
+    action_id: u64,
+) -> i32 {
+    ffi_status(|| {
+        let title = copy_string(title)?;
+        let style = decode_button_style(style)?;
+        let size = decode_button_size(size)?;
+        let factory: FfiViewFactory = Box::new(move |node_id, children, context| {
+            expect_no_children(children)?;
+            let mut button = crate::components::Button::new(title)
+                .style(style)
+                .size(size);
+            if action_id != 0 {
+                button = button.on_click(context.button_callback(node_id, action_id));
+            }
+            Ok(FfiBuiltView::View(Box::new(button)))
+        });
+        let runtime = runtime_mut(runtime)?;
+        let builder = active_builder(runtime)?;
+        let node = FfiNode::component(node_id, factory);
+        builder.leaf(node);
+        Ok(())
+    })
+}
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
 pub extern "C" fn vk_begin_padding(
     runtime: *mut VkRuntime,
     node_id: u64,

@@ -169,7 +169,10 @@ impl View for RadioMark {
             .color(RectangleColor::Custom(if self.enabled {
                 context.theme.selection_control.indicator_background
             } else {
-                context.theme.selection_control.disabled_indicator_background
+                context
+                    .theme
+                    .selection_control
+                    .disabled_indicator_background
             }))
             .radius(CornerRadius::Full)
             .border(BorderStyle::custom(

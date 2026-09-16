@@ -62,10 +62,7 @@ struct DividerView {
 
 impl View for DividerView {
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
-        context.record_accessibility(AccessibilityNode::new(
-            AccessibilityRole::Separator,
-            bounds,
-        ));
+        context.record_accessibility(AccessibilityNode::new(AccessibilityRole::Separator, bounds));
         context.display_list.push(DrawCommand::FillRect {
             rect: bounds,
             color: self.color.resolve(context),

@@ -111,9 +111,10 @@ where
             radius.resolve(&context.theme.radius, bounds.size.width, bounds.size.height);
 
         Rectangle::new()
-            .color(self.color.unwrap_or(RectangleColor::Custom(
-                context.theme.card.background,
-            )))
+            .color(
+                self.color
+                    .unwrap_or(RectangleColor::Custom(context.theme.card.background)),
+            )
             .radius(radius)
             .shadow(self.shadow.unwrap_or(context.theme.card.shadow))
             .border(self.border.unwrap_or(BorderStyle::custom(

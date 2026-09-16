@@ -53,9 +53,16 @@ impl Overlay {
 }
 
 impl View for Overlay {
-    fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> crate::geometry::Size {
+    fn measure(
+        &self,
+        constraints: Constraints,
+        context: &mut MeasureContext<'_>,
+    ) -> crate::geometry::Size {
         let mut measured = crate::geometry::Size::new(0.0, 0.0);
-        for child in [self.content.as_ref(), self.overlay.as_ref()].into_iter().flatten() {
+        for child in [self.content.as_ref(), self.overlay.as_ref()]
+            .into_iter()
+            .flatten()
+        {
             let size = child.measure(Constraints::loose(constraints.maximum), context);
             measured.width = measured.width.max(size.width);
             measured.height = measured.height.max(size.height);
@@ -93,7 +100,10 @@ impl View for Overlay {
     ) -> EventResult {
         if event.requires_broadcast() {
             let mut result = EventResult::Ignored;
-            for child in [self.content.as_ref(), self.overlay.as_ref()].into_iter().flatten() {
+            for child in [self.content.as_ref(), self.overlay.as_ref()]
+                .into_iter()
+                .flatten()
+            {
                 let child_bounds = self
                     .alignment
                     .child_bounds(bounds, child.overlay_size(bounds.size));
@@ -105,7 +115,10 @@ impl View for Overlay {
         let Some(position) = event.position() else {
             return EventResult::Ignored;
         };
-        for child in [self.overlay.as_ref(), self.content.as_ref()].into_iter().flatten() {
+        for child in [self.overlay.as_ref(), self.content.as_ref()]
+            .into_iter()
+            .flatten()
+        {
             let child_bounds = self
                 .alignment
                 .child_bounds(bounds, child.overlay_size(bounds.size));

@@ -105,8 +105,13 @@ impl<Content: View> View for Popover<Content> {
         if result.is_consumed() {
             return result;
         }
-        if matches!(event, ViewEvent::KeyPressed { key: Key::Escape, .. })
-            && let Some(callback) = self.on_dismiss.as_ref()
+        if matches!(
+            event,
+            ViewEvent::KeyPressed {
+                key: Key::Escape,
+                ..
+            }
+        ) && let Some(callback) = self.on_dismiss.as_ref()
         {
             (callback.borrow_mut())();
             context.request_redraw();

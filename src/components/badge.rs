@@ -52,8 +52,8 @@ impl View for Badge {
             .measure_unbounded_with_typography(context.text_measurer, context.typography);
 
         let horizontal = context.theme.badge.horizontal_padding * 2.0;
-        let height = context.typography.caption.line_height
-            + context.theme.badge.vertical_padding * 2.0;
+        let height =
+            context.typography.caption.line_height + context.theme.badge.vertical_padding * 2.0;
         constraints.constrain(Size::new((measured.width + horizontal).max(height), height))
     }
 

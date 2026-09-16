@@ -89,9 +89,7 @@ impl View for ProgressBar {
 
         let mut node = AccessibilityNode::new(AccessibilityRole::ProgressIndicator, bounds);
         node.label = self.accessibility_label.clone();
-        node.numeric_value = Some(
-            self.minimum + self.progress() * (self.maximum - self.minimum),
-        );
+        node.numeric_value = Some(self.minimum + self.progress() * (self.maximum - self.minimum));
         node.numeric_minimum = Some(self.minimum);
         node.numeric_maximum = Some(self.maximum);
         node.enabled = self.enabled;
