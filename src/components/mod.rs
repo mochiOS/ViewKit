@@ -44,6 +44,7 @@ mod vstack;
 mod zstack;
 
 pub use background::Background;
+pub use content_area::ContentArea;
 pub use dialog::Dialog;
 pub use divider::Divider;
 pub use form::{Form, FormSections};
@@ -74,6 +75,7 @@ pub use image::{Image, ImageContentMode};
 pub use list::{List, ListRow};
 pub use menu::{Menu, MenuItem};
 pub use message_bubble::{MessageBubble, MessageDirection};
+pub use navigation_split_view::NavigationSplitView;
 pub use navigation_split_view::NavigationSplitView;
 pub use picker::Picker;
 pub use popover::Popover;
