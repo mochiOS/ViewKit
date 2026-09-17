@@ -64,6 +64,22 @@ cargo install --force cbindgen
 ./scripts/generate.sh
 ```
 
+## VK Symbols
+
+ViewKit embeds its standard monochrome symbols from `resources/symbols`. Each
+SVG filename is its stable, lowercase, dot-separated identifier, such as
+`chevron.left.svg` or `folder.fill.svg`. Symbols use a 24 by 24 canvas and are
+automatically validated and exposed as `SymbolName` variants during the build.
+
+```rust
+Icon::new(SymbolName::Search)
+IconButton::new(SymbolName::ChevronLeft)
+    .accessibility_label("Back")
+```
+
+`IconName` remains as a deprecated compatibility alias. New code should use
+`SymbolName`.
+
 ## mochiOS builds
 
 mochiOS has no system font service, so its build supplies font files explicitly

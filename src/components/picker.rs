@@ -5,7 +5,7 @@ use crate::theme::{ShadowStyle, Theme};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 use super::{
-    Button, ButtonInteractionState, ButtonStyle, HStack, Icon, IconName, Padding, Spacer, Text,
+    Button, ButtonInteractionState, ButtonStyle, HStack, Icon, Padding, Spacer, SymbolName, Text,
     ZStackAlignment,
 };
 
@@ -68,7 +68,7 @@ impl Picker {
                         )
                         .child(Spacer::new())
                         .child(
-                            Icon::new(IconName::ChevronDown)
+                            Icon::new(SymbolName::ChevronDown)
                                 .size(theme.layout.compact_icon_size)
                                 .color(theme.picker.indicator)
                                 .frame(

@@ -7,7 +7,7 @@ use crate::theme::{Color, CornerRadius, ShadowStyle, Theme};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 use super::{
-    BorderStyle, Button, ButtonInteractionState, ButtonStyle, HStack, Icon, IconName, Padding,
+    BorderStyle, Button, ButtonInteractionState, ButtonStyle, HStack, Icon, Padding, SymbolName,
     Rectangle, RectangleColor, Text, ZStackAlignment,
 };
 
@@ -139,7 +139,7 @@ impl View for CheckboxMark {
                 .radius(CornerRadius::Custom(context.theme.layout.checkbox_radius))
                 .paint(bounds, context);
 
-            Icon::new(IconName::Check)
+            Icon::new(SymbolName::Check)
                 .size(context.theme.layout.checkbox_glyph_size)
                 .color(Color::WHITE)
                 .paint(bounds, context);

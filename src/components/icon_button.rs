@@ -5,7 +5,7 @@ use crate::layout::ViewExt;
 use crate::theme::{ShadowStyle, Theme};
 
 use super::{
-    Button, ButtonInteractionState, ButtonSize, ButtonStyle, Icon, IconName, ZStackAlignment,
+    Button, ButtonInteractionState, ButtonSize, ButtonStyle, Icon, SymbolName, ZStackAlignment,
 };
 
 type Callback = Rc<RefCell<Box<dyn FnMut()>>>;
@@ -18,7 +18,7 @@ pub enum IconButtonTone {
 }
 
 pub struct IconButton {
-    icon: IconName,
+    icon: SymbolName,
     tone: IconButtonTone,
     size: Option<ButtonSize>,
     enabled: bool,
@@ -28,7 +28,7 @@ pub struct IconButton {
 }
 
 impl IconButton {
-    pub fn new(icon: IconName) -> Self {
+    pub fn new(icon: SymbolName) -> Self {
         Self {
             icon,
             tone: IconButtonTone::Plain,

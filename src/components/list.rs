@@ -13,7 +13,7 @@ use std::rc::Rc;
 
 use super::{
     Avatar, Button, ButtonInteractionState, ButtonStyle, Ellipse, EllipseColor, HStack, Icon,
-    IconName, Padding, Text, VStack, ZStackAlignment,
+    Padding, SymbolName, Text, VStack, ZStackAlignment,
 };
 use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 
@@ -103,7 +103,7 @@ pub struct ListRow {
 
     interaction: ButtonInteractionState,
     on_select: Option<Callback>,
-    icon: Option<IconName>,
+    icon: Option<SymbolName>,
     leading_avatar: Option<String>,
     status_marker: bool,
 }
@@ -136,7 +136,7 @@ impl ListRow {
         self
     }
 
-    pub fn icon(mut self, icon: IconName) -> Self {
+    pub fn icon(mut self, icon: SymbolName) -> Self {
         self.icon = Some(icon);
         self.leading_avatar = None;
         self

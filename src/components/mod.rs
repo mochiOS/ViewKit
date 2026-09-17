@@ -66,7 +66,9 @@ pub use checkbox::Checkbox;
 pub use content_area::ContentArea;
 pub use context_menu::ContextMenu;
 pub use ellipse::{Ellipse, EllipseColor};
-pub use icon::{Icon, IconName};
+pub use icon::{Icon, SymbolName};
+#[allow(deprecated)]
+pub use icon::IconName;
 pub use icon_button::{IconButton, IconButtonTone};
 pub use image::{Image, ImageContentMode};
 pub use list::{List, ListRow};

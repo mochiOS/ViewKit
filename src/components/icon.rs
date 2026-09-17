@@ -4,95 +4,28 @@
 //! 新しい資産が登録されるまではアイコンを描画しません。
 
 use crate::geometry::Size;
+use crate::svg::SvgData;
 use crate::theme::{Color, LayoutTokens};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
+use std::sync::OnceLock;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum IconName {
-    Search,
+include!(concat!(env!("OUT_DIR"), "/symbols.rs"));
 
-    Plus,
-    Minus,
-
-    Check,
-    X,
-
-    Settings,
-
-    ChevronLeft,
-    ChevronRight,
-    ChevronDown,
-    ArrowUp,
-
-    House,
-    AppWindow,
-    Download,
-    HardDrive,
-
-    Folder,
-    FolderOpen,
-    FolderPlus,
-
-    File,
-    FileText,
-    FileImage,
-    FileArchive,
-
-    ExternalLink,
-
-    LayoutList,
-    LayoutGrid,
-    Columns3,
-
-    Eye,
-    Volume2,
-}
-
-impl IconName {
-    /// Stable asset name used by the icon rebuild plan.
-    pub const fn asset_name(self) -> &'static str {
-        match self {
-            Self::Search => "search",
-            Self::Plus => "plus",
-            Self::Minus => "minus",
-            Self::Check => "check",
-            Self::X => "x",
-            Self::Settings => "settings",
-            Self::ChevronLeft => "chevron-left",
-            Self::ChevronRight => "chevron-right",
-            Self::ChevronDown => "chevron-down",
-            Self::ArrowUp => "arrow-up",
-            Self::House => "house",
-            Self::AppWindow => "app-window",
-            Self::Download => "download",
-            Self::HardDrive => "hard-drive",
-            Self::Folder => "folder",
-            Self::FolderOpen => "folder-open",
-            Self::FolderPlus => "folder-plus",
-            Self::File => "file",
-            Self::FileText => "file-text",
-            Self::FileImage => "file-image",
-            Self::FileArchive => "file-archive",
-            Self::ExternalLink => "external-link",
-            Self::LayoutList => "layout-list",
-            Self::LayoutGrid => "layout-grid",
-            Self::Columns3 => "columns-3",
-            Self::Eye => "eye",
-            Self::Volume2 => "volume-2",
-        }
-    }
-
+impl SymbolName {
     pub(crate) const fn control_size(self, layout: LayoutTokens) -> f32 {
         match self {
-            Self::ArrowUp => layout.compact_icon_size,
+            Self::ArrowTop | Self::ArrowUp => layout.compact_icon_size,
             _ => layout.control_icon_size,
         }
     }
 }
 
+#[deprecated(since = "2.1.0", note = "use `SymbolName` instead")]
+pub type IconName = SymbolName;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Icon {
-    name: IconName,
+    name: SymbolName,
 
     size: Option<f32>,
     color: Color,
@@ -101,7 +34,7 @@ pub struct Icon {
 }
 
 impl Icon {
-    pub const fn new(name: IconName) -> Self {
+    pub const fn new(name: SymbolName) -> Self {
         Self {
             name,
 
@@ -115,7 +48,7 @@ impl Icon {
         }
     }
 
-    pub const fn name(&self) -> IconName {
+    pub const fn name(&self) -> SymbolName {
         self.name
     }
 
@@ -149,9 +82,17 @@ impl View for Icon {
         constraints.constrain(Size::new(size, size))
     }
 
-    fn paint(&self, _bounds: crate::geometry::Rect, _context: &mut PaintContext<'_>) {
-        // Intentionally empty while the Figma-authored icon set is rebuilt.
-        // See docs/viewkit/icons_plan.md.
+    fn paint(&self, bounds: crate::geometry::Rect, context: &mut PaintContext<'_>) {
+        let Some(svg) = self.name.svg() else {
+            return;
+        };
+        let mut symbol = super::svg::Svg::new(svg)
+            .tint(self.color)
+            .opacity(self.opacity);
+        if let Some(label) = self.accessibility_label.as_ref() {
+            symbol = symbol.accessibility_label(label.clone());
+        }
+        symbol.paint(bounds, context);
     }
 }
 
