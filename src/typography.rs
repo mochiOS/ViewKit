@@ -134,13 +134,7 @@ impl Typography {
         body: text_style(FigmaTokens::TYPOGRAPHY.body, FontFamily::Sans),
         label: text_style(FigmaTokens::TYPOGRAPHY.label, FontFamily::Sans),
         caption: text_style(FigmaTokens::TYPOGRAPHY.caption, FontFamily::Sans),
-        code: TextStyle {
-            family: FontFamily::Monospace,
-            size: 14.0,
-            weight: FontWeight::REGULAR,
-            line_height: 20.0,
-            letter_spacing: 0.0,
-        },
+        code: text_style(FigmaTokens::TYPOGRAPHY.body, FontFamily::Monospace),
     };
 
     pub const fn style(self, role: TextRole) -> TextStyle {

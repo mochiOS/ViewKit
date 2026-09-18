@@ -87,7 +87,7 @@ impl Theme {
         scrollbar: ScrollBarTokens::DEFAULT,
         motion: MotionTokens::DEFAULT,
         shell: ShellTokens::LIGHT,
-        browser: BrowserTokens::LIGHT,
+        browser: BrowserTokens::from_colors(colors_from_figma(FigmaTokens::LIGHT, false)),
     };
     pub const DARK: Self = Self {
         colors: colors_from_figma(FigmaTokens::DARK, true),
@@ -127,7 +127,7 @@ impl Theme {
         scrollbar: ScrollBarTokens::DEFAULT,
         motion: MotionTokens::DEFAULT,
         shell: ShellTokens::DARK,
-        browser: BrowserTokens::DARK,
+        browser: BrowserTokens::from_colors(colors_from_figma(FigmaTokens::DARK, true)),
     };
     pub const DEFAULT: Self = Theme::LIGHT;
 

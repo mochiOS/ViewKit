@@ -1,4 +1,4 @@
-use super::{Color, Shadow, ShadowSet};
+use super::{Color, ColorTokens, Shadow, ShadowSet};
 
 /// Colors and elevation used by desktop-shell surfaces.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -164,47 +164,27 @@ pub struct BrowserTokens {
 }
 
 impl BrowserTokens {
-    pub const LIGHT: Self = Self {
-        window_background: Color::from_rgb_hex(0xf8f8f8),
-        toolbar_background: Color::from_rgb_hex(0xf2f2f2),
-        sidebar_background: Color::from_rgb_hex(0xe9e9e9),
-        content_background: Color::WHITE,
-        border: Color::from_rgb_hex(0xd0d0d0),
-        text_primary: Color::from_rgb_hex(0x252525),
-        text_secondary: Color::from_rgb_hex(0x707070),
-        row_hover: Color::from_rgb_hex(0xf0f5fa),
-        selection: Color::from_rgb_hex(0x3478d4),
-        on_selection: Color::WHITE,
-        field_background: Color::from_rgb_hex(0xe2e2e2),
-        field_focused: Color::WHITE,
-        disabled: Color::from_rgb_hex(0xa7a7a7),
-        sidebar_selection: Color::from_rgb_hex(0xd0d0d0),
-        sidebar_hover: Color::from_rgb_hex(0xdfdfdf),
-        list_header: Color::from_rgb_hex(0xf7f7f7),
-        control_hover: Color::from_rgb_hex(0xe2e2e2),
-        control_selection: Color::from_rgb_hex(0xd3d3d3),
-        control_selection_hover: Color::from_rgb_hex(0xe5e5e5),
-    };
-
-    pub const DARK: Self = Self {
-        window_background: Color::from_rgb_hex(0x1c1c1e),
-        toolbar_background: Color::from_rgb_hex(0x242426),
-        sidebar_background: Color::from_rgb_hex(0x2c2c2e),
-        content_background: Color::from_rgb_hex(0x242426),
-        border: Color::from_rgb_hex(0x48484a),
-        text_primary: Color::from_rgb_hex(0xf5f5f7),
-        text_secondary: Color::from_rgb_hex(0xaeaeb2),
-        row_hover: Color::from_rgb_hex(0x303840),
-        selection: Color::from_rgb_hex(0x0a84ff),
-        on_selection: Color::WHITE,
-        field_background: Color::from_rgb_hex(0x3a3a3c),
-        field_focused: Color::from_rgb_hex(0x48484a),
-        disabled: Color::from_rgb_hex(0x636366),
-        sidebar_selection: Color::from_rgb_hex(0x48484a),
-        sidebar_hover: Color::from_rgb_hex(0x3a3a3c),
-        list_header: Color::from_rgb_hex(0x2c2c2e),
-        control_hover: Color::from_rgb_hex(0x3a3a3c),
-        control_selection: Color::from_rgb_hex(0x48484a),
-        control_selection_hover: Color::from_rgb_hex(0x3a3a3c),
-    };
+    pub const fn from_colors(colors: ColorTokens) -> Self {
+        Self {
+            window_background: colors.background,
+            toolbar_background: colors.surface_subtle,
+            sidebar_background: colors.surface_subtle,
+            content_background: colors.surface,
+            border: colors.border,
+            text_primary: colors.text_primary,
+            text_secondary: colors.text_secondary,
+            row_hover: colors.surface_subtle,
+            selection: colors.accent,
+            on_selection: Color::WHITE,
+            field_background: colors.surface_muted,
+            field_focused: colors.surface,
+            disabled: colors.text_disabled,
+            sidebar_selection: colors.accent_soft,
+            sidebar_hover: colors.surface_muted,
+            list_header: colors.surface_subtle,
+            control_hover: colors.surface_muted,
+            control_selection: colors.accent_soft,
+            control_selection_hover: colors.surface_subtle,
+        }
+    }
 }

@@ -19,7 +19,6 @@
 //!
 //!     fn window(&self) -> WindowOptions {
 //!         WindowOptions::new("Hello, ViewKit")
-//!             .size(800.0, 600.0)
 //!             .resizable(true)
 //!     }
 //!
@@ -42,6 +41,7 @@
 
 use crate::geometry::Size;
 use crate::renderer::Viewport;
+use crate::theme::Theme;
 use crate::view::View;
 
 /// アプリケーションウィンドウの初期設定
@@ -60,12 +60,13 @@ pub struct WindowOptions {
 impl WindowOptions {
     /// 指定されたタイトルでウィンドウ設定を作成します。
     ///
-    /// 初期サイズは800×600論理ピクセルで、サイズ変更は有効です。
+    /// 初期サイズはFigma layout foundationから取得し、サイズ変更は有効です。
     #[must_use]
     pub fn new(title: impl Into<String>) -> Self {
+        let layout = Theme::current().layout;
         Self {
             title: title.into(),
-            size: Size::new(800.0, 600.0),
+            size: Size::new(layout.standard_window_width, layout.standard_window_height),
             resizable: true,
             fullscreen: false,
             secure_overlay: false,
@@ -76,6 +77,14 @@ impl WindowOptions {
     #[must_use]
     pub fn size(mut self, width: f32, height: f32) -> Self {
         self.size = Size::new(width, height);
+        self
+    }
+
+    /// Figma layout foundationに基づくコンパクトな初期サイズを使用します。
+    #[must_use]
+    pub fn compact(mut self) -> Self {
+        let layout = Theme::current().layout;
+        self.size = Size::new(layout.compact_window_width, layout.compact_window_height);
         self
     }
 
