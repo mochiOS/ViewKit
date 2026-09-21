@@ -25,7 +25,7 @@ impl Default for AppearanceSettings {
         Self {
             appearance: 2,
             accent: DEFAULT_ACCENT,
-            wallpaper: String::from("/libraries/wallpapers/default.png"),
+            wallpaper: String::from("/system/libraries/wallpapers/default.png"),
             ui_scale: 1.0,
             font_size: DEFAULT_FONT_SIZE,
         }
