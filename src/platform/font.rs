@@ -1,11 +1,13 @@
 #[cfg(target_os = "linux")]
-pub(crate) const DEFAULT_UI_FONT_FAMILY: &str = "sans-serif";
+pub(crate) const DEFAULT_UI_FONT_FAMILY: &str = "Inter";
 #[cfg(target_os = "linux")]
 pub(crate) const DEFAULT_MONOSPACE_FONT_FAMILY: &str = "monospace";
 
 #[cfg(target_os = "linux")]
 pub(crate) fn load_platform_fonts(db: &mut cosmic_text::fontdb::Database) {
     db.load_system_fonts();
+    db.load_font_data(include_bytes!("../../resources/fonts/InterVariable.ttf").to_vec());
+    db.set_sans_serif_family(DEFAULT_UI_FONT_FAMILY);
 }
 
 #[cfg(target_os = "windows")]

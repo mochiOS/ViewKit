@@ -1,10 +1,25 @@
 //! 文字スタイルを定義
 
 use crate::font::create_font_system;
+use crate::geometry::Size;
 use crate::theme::{FigmaTokens, TypographyToken};
 use cosmic_text::{Align, FontSystem};
+use std::collections::HashMap;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+const TEXT_MEASUREMENT_CACHE_CAPACITY: usize = 2048;
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct TextMeasurementKey {
+    pub text: String,
+    pub font_family: String,
+    pub font_size_bits: u32,
+    pub line_height_bits: u32,
+    pub maximum_width_bits: Option<u32>,
+    pub weight: u16,
+    pub alignment: TextAlignment,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum TextAlignment {
     #[default]
     Start,
@@ -31,6 +46,7 @@ impl TextAlignment {
 pub struct TextMeasurer {
     font_system: Option<FontSystem>,
     font_scale: f32,
+    measurements: HashMap<TextMeasurementKey, Size>,
 }
 
 impl Default for TextMeasurer {
@@ -44,6 +60,7 @@ impl TextMeasurer {
         Self {
             font_system: None,
             font_scale: 1.0,
+            measurements: HashMap::new(),
         }
     }
 
@@ -57,11 +74,31 @@ impl TextMeasurer {
     }
 
     pub(crate) fn set_font_scale(&mut self, scale: f32) {
-        self.font_scale = if scale.is_finite() && scale > 0.0 {
+        let next = if scale.is_finite() && scale > 0.0 {
             scale
         } else {
             1.0
         };
+        if self.font_scale != next {
+            self.font_scale = next;
+            self.measurements.clear();
+        }
+    }
+
+    pub(crate) fn cached_measurement(&self, key: &TextMeasurementKey) -> Option<Size> {
+        self.measurements.get(key).copied()
+    }
+
+    pub(crate) fn cache_measurement(&mut self, key: TextMeasurementKey, size: Size) {
+        if self.measurements.len() >= TEXT_MEASUREMENT_CACHE_CAPACITY {
+            self.measurements.clear();
+        }
+        self.measurements.insert(key, size);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn measurement_cache_len(&self) -> usize {
+        self.measurements.len()
     }
 }
 

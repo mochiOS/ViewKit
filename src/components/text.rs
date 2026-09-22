@@ -9,7 +9,7 @@ use crate::geometry::{Rect, Size};
 use crate::runtime::{IntoViewNode, TextNode, ViewNode, ViewNodeContext, ViewNodeKind};
 use crate::theme::{Color, Theme};
 use crate::typography::{
-    FontFamily, FontWeight, TextAlignment, TextMeasurer, TextRole, Typography,
+    FontFamily, FontWeight, TextAlignment, TextMeasurementKey, TextMeasurer, TextRole, Typography,
 };
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
@@ -162,11 +162,23 @@ impl Text {
         let font_scale = measurer.font_scale();
         let font_size = resolved_font_size(style.size) * font_scale;
         let line_height = resolved_line_height(font_size, style.line_height * font_scale);
+        let maximum_width = normalize_maximum_width(maximum_width);
+        let cache_key = self.cache_layout.then(|| TextMeasurementKey {
+            text: self.value.clone(),
+            font_family: self.resolved_family(style.family).to_owned(),
+            font_size_bits: font_size.to_bits(),
+            line_height_bits: line_height.to_bits(),
+            maximum_width_bits: maximum_width.map(f32::to_bits),
+            weight: style.weight.0.clamp(1, 1000),
+            alignment: self.alignment,
+        });
+        if let Some(size) = cache_key.as_ref().and_then(|key| measurer.cached_measurement(key)) {
+            return size;
+        }
         let metrics = Metrics::new(font_size, line_height);
         let font_system = measurer.font_system_mut();
         let mut buffer = Buffer::new(font_system, metrics);
         let attrs = self.create_attrs(typography);
-        let maximum_width = normalize_maximum_width(maximum_width);
         let mut buffer = buffer.borrow_with(font_system);
 
         /*
@@ -188,19 +200,20 @@ impl Text {
             measured_width = measured_width.max(run.line_w);
             measured_height = measured_height.max(run.line_top + run.line_height);
         }
+        drop(buffer);
 
-        if measured_width <= 0.0 || measured_height <= 0.0 {
-            return self.measure_text_without_font(typography, maximum_width, font_scale);
+        let measured = if measured_width <= 0.0 || measured_height <= 0.0 {
+            self.measure_text_without_font(typography, maximum_width, font_scale)
+        } else {
+            if let Some(maximum_width) = maximum_width {
+                measured_width = measured_width.min(maximum_width);
+            }
+            Size::new(measured_width.max(0.0).ceil(), measured_height.max(0.0).ceil())
+        };
+        if let Some(key) = cache_key {
+            measurer.cache_measurement(key, measured);
         }
-
-        if let Some(maximum_width) = maximum_width {
-            measured_width = measured_width.min(maximum_width);
-        }
-
-        Size::new(
-            measured_width.max(0.0).ceil(),
-            measured_height.max(0.0).ceil(),
-        )
+        measured
     }
 
     pub fn measure_unbounded(&self, measurer: &mut TextMeasurer) -> Size {
@@ -305,6 +318,10 @@ impl IntoViewNode for Text {
 }
 
 impl View for Text {
+    fn stack_flex_shrink(&self) -> f32 {
+        0.0
+    }
+
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
         let maximum_width = if constraints.maximum.width.is_finite() {
             Some(constraints.maximum.width.max(0.0))
@@ -417,6 +434,8 @@ fn finite_positive_or(value: f32, fallback: f32) -> f32 {
 mod tests {
     use super::Text;
     use crate::font::DEFAULT_MONOSPACE_FONT_FAMILY;
+    use crate::typography::TextMeasurer;
+    use crate::view::View;
 
     #[test]
     fn monospaced_uses_the_embedded_monospace_family() {
@@ -433,5 +452,25 @@ mod tests {
         let text = Text::new("changing").cache_layout(false);
 
         assert!(!text.cache_layout);
+    }
+
+    #[test]
+    fn text_measurements_are_reused_and_reset_on_font_scale_change() {
+        let text = Text::new("A readable default label");
+        let mut measurer = TextMeasurer::new();
+        let first = text.measure_text(&mut measurer, Some(200.0));
+        assert!(first.width > 0.0 && first.height > 0.0);
+        assert_eq!(measurer.measurement_cache_len(), 1);
+        assert_eq!(text.measure_text(&mut measurer, Some(200.0)), first);
+        assert_eq!(measurer.measurement_cache_len(), 1);
+        text.measure_text(&mut measurer, Some(100.0));
+        assert_eq!(measurer.measurement_cache_len(), 2);
+        measurer.set_font_scale(1.25);
+        assert_eq!(measurer.measurement_cache_len(), 0);
+    }
+
+    #[test]
+    fn text_keeps_its_natural_size_in_stacks_by_default() {
+        assert_eq!(Text::new("Readable").stack_flex_shrink(), 0.0);
     }
 }

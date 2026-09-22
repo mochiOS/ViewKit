@@ -3,7 +3,9 @@
 //! アイコン資産はFigmaを正として再構築中です。公開APIは維持しますが、
 //! 新しい資産が登録されるまではアイコンを描画しません。
 
-use crate::geometry::Size;
+use crate::accessibility::{AccessibilityNode, AccessibilityRole};
+use crate::draw_command::DrawCommand;
+use crate::geometry::{Rect, Size};
 use crate::svg::SvgData;
 use crate::theme::{Color, LayoutTokens};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
@@ -82,17 +84,30 @@ impl View for Icon {
         constraints.constrain(Size::new(size, size))
     }
 
-    fn paint(&self, bounds: crate::geometry::Rect, context: &mut PaintContext<'_>) {
+    fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
         let Some(svg) = self.name.svg() else {
             return;
         };
-        let mut symbol = super::svg::Svg::new(svg)
+        // VK Symbols use a 24px canvas, but most artwork occupies only its
+        // central ~10px. Enlarge the artwork inside the logical icon bounds.
+        let scale = 1.8;
+        let artwork = Rect::new(
+            bounds.origin.x - bounds.size.width * (scale - 1.0) / 2.0,
+            bounds.origin.y - bounds.size.height * (scale - 1.0) / 2.0,
+            bounds.size.width * scale,
+            bounds.size.height * scale,
+        );
+        if let Some(label) = self.accessibility_label.as_ref() {
+            let mut node = AccessibilityNode::new(AccessibilityRole::Image, bounds);
+            node.label = Some(label.clone());
+            context.record_accessibility(node);
+        }
+        let symbol = super::svg::Svg::new(svg)
             .tint(self.color)
             .opacity(self.opacity);
-        if let Some(label) = self.accessibility_label.as_ref() {
-            symbol = symbol.accessibility_label(label.clone());
-        }
-        symbol.paint(bounds, context);
+        context.display_list.push(DrawCommand::PushClip { rect: bounds });
+        symbol.paint(artwork, context);
+        context.display_list.push(DrawCommand::PopClip);
     }
 }
 

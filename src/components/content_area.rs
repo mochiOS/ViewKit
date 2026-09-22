@@ -6,11 +6,21 @@ use super::{Rectangle, RectangleColor};
 
 pub struct ContentArea<Content> {
     content: Content,
+    maximum_width: Option<f32>,
 }
 
 impl<Content> ContentArea<Content> {
     pub fn new(content: Content) -> Self {
-        Self { content }
+        Self { content, maximum_width: None }
+    }
+
+    pub fn maximum_width(mut self, width: f32) -> Self {
+        self.maximum_width = Some(width.max(0.0));
+        self
+    }
+
+    fn resolved_maximum_width(&self, default: f32) -> f32 {
+        self.maximum_width.unwrap_or(default)
     }
 
     fn content_bounds(bounds: Rect, margin: f32, maximum_width: f32) -> Rect {
@@ -33,7 +43,7 @@ impl<Content: View> View for ContentArea<Content> {
             Constraints::loose(Size::new(
                 (constraints.maximum.width - margin * 2.0)
                     .max(0.0)
-                    .min(context.theme.layout.content_max_width),
+                    .min(self.resolved_maximum_width(context.theme.layout.content_max_width)),
                 (constraints.maximum.height - margin * 2.0).max(0.0),
             )),
             context,
@@ -52,7 +62,7 @@ impl<Content: View> View for ContentArea<Content> {
             Self::content_bounds(
                 bounds,
                 context.theme.layout.page_margin,
-                context.theme.layout.content_max_width,
+                self.resolved_maximum_width(context.theme.layout.content_max_width),
             ),
             context,
         );
@@ -68,7 +78,7 @@ impl<Content: View> View for ContentArea<Content> {
             Self::content_bounds(
                 bounds,
                 context.theme.layout.page_margin,
-                context.theme.layout.content_max_width,
+                self.resolved_maximum_width(context.theme.layout.content_max_width),
             ),
             event,
             context,
@@ -109,5 +119,23 @@ mod tests {
         view.paint(Rect::new(0.0, 0.0, 859.0, 640.0), &mut context);
 
         assert_eq!(recorded.get(), Some(Rect::new(69.5, 40.0, 720.0, 560.0)));
+    }
+
+    #[test]
+    fn maximum_width_keeps_forms_compact_without_changing_page_margins() {
+        let recorded = Rc::new(Cell::new(None));
+        let view = ContentArea::new(Recorder(recorded.clone())).maximum_width(640.0);
+        let mut display_list = DisplayList::new();
+        let mut text_measurer = TextMeasurer::new();
+        let mut context = PaintContext::new(
+            &mut display_list,
+            &Theme::LIGHT,
+            &Typography::DEFAULT,
+            &mut text_measurer,
+        );
+
+        view.paint(Rect::new(0.0, 0.0, 859.0, 640.0), &mut context);
+
+        assert_eq!(recorded.get(), Some(Rect::new(109.5, 40.0, 640.0, 560.0)));
     }
 }

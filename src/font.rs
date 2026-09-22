@@ -13,6 +13,9 @@ const DEFAULT_UI_FONT_BYTES: &[u8] =
 #[cfg(target_os = "mochios")]
 const DEFAULT_MONOSPACE_FONT_BYTES: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/default_monospace_font.ttf"));
+#[cfg(target_os = "mochios")]
+const DEFAULT_JAPANESE_FONT_BYTES: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/default_japanese_font.ttf"));
 
 pub(crate) fn resolve_font_family(name: &str) -> Family<'_> {
     match name {
@@ -27,11 +30,12 @@ pub(crate) fn create_font_system() -> FontSystem {
     let mut db = fontdb::Database::new();
     db.load_font_data(DEFAULT_UI_FONT_BYTES.to_vec());
     db.load_font_data(DEFAULT_MONOSPACE_FONT_BYTES.to_vec());
+    db.load_font_data(DEFAULT_JAPANESE_FONT_BYTES.to_vec());
     load_platform_fonts(&mut db);
     db.set_sans_serif_family(DEFAULT_UI_FONT_FAMILY);
     db.set_monospace_family(DEFAULT_MONOSPACE_FONT_FAMILY);
 
-    FontSystem::new_with_locale_and_db(String::from("en-US"), db)
+    FontSystem::new_with_locale_and_db(String::from("ja-JP"), db)
 }
 
 #[cfg(not(target_os = "mochios"))]

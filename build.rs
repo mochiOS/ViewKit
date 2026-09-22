@@ -34,6 +34,7 @@ fn main() {
 
     println!("cargo:rerun-if-env-changed=VIEWKIT_UI_FONT_PATH");
     println!("cargo:rerun-if-env-changed=VIEWKIT_MONOSPACE_FONT_PATH");
+    println!("cargo:rerun-if-env-changed=VIEWKIT_JAPANESE_FONT_PATH");
     println!("cargo:rerun-if-env-changed=VIEWKIT_UI_FONT_FAMILY");
     println!("cargo:rerun-if-env-changed=VIEWKIT_MONOSPACE_FONT_FAMILY");
 
@@ -43,6 +44,7 @@ fn main() {
 
     let candidate = required_font("VIEWKIT_UI_FONT_PATH", "Inter Variable");
     let monospace = required_font("VIEWKIT_MONOSPACE_FONT_PATH", "UDEV Gothic");
+    let japanese = required_font("VIEWKIT_JAPANESE_FONT_PATH", "IBM Plex Sans JP");
 
     let target_path = out_dir.join("default_ui_font.ttf");
     fs::copy(&candidate.path, &target_path)
@@ -50,6 +52,8 @@ fn main() {
     let monospace_target_path = out_dir.join("default_monospace_font.ttf");
     fs::copy(&monospace.path, &monospace_target_path)
         .unwrap_or_else(|err| panic!("failed to copy default monospace font: {err}"));
+    fs::copy(&japanese.path, out_dir.join("default_japanese_font.ttf"))
+        .unwrap_or_else(|err| panic!("failed to copy Japanese fallback font: {err}"));
 
     println!(
         "cargo:rustc-env=VIEWKIT_DEFAULT_UI_FONT_FAMILY={}",
