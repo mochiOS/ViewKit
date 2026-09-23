@@ -1,4 +1,5 @@
 mod avatar;
+mod adaptive_grid;
 mod background;
 mod badge;
 mod button;
@@ -65,6 +66,7 @@ pub use vstack::VStack;
 pub use zstack::{ZStack, ZStackAlignment};
 
 pub use avatar::{Avatar, AvatarSize};
+pub use adaptive_grid::AdaptiveGrid;
 pub use badge::{Badge, BadgeTone};
 pub use button::{Button, ButtonColor, ButtonInteractionState, ButtonSize, ButtonStyle};
 pub use card::Card;
