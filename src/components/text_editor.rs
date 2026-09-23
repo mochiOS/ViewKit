@@ -54,6 +54,8 @@ struct TextEditorInteractionInner {
     cached_layout_value: String,
     cached_layout_monospaced: bool,
     cached_layout_line_height: f32,
+    cached_layout_wrap_width: Option<f32>,
+    cached_line_ranges: Vec<Range<usize>>,
     cached_line_widths: Vec<f32>,
     caret_blink_origin: Option<Instant>,
     undo: Vec<EditorSnapshot>,
@@ -84,6 +86,8 @@ impl Default for TextEditorInteractionInner {
             cached_layout_value: String::new(),
             cached_layout_monospaced: false,
             cached_layout_line_height: 0.0,
+            cached_layout_wrap_width: None,
+            cached_line_ranges: Vec::new(),
             cached_line_widths: Vec::new(),
             caret_blink_origin: None,
             undo: Vec::new(),
@@ -131,6 +135,15 @@ impl TextEditorInteractionState {
 
     pub fn is_focused(&self) -> bool {
         self.inner.borrow().focused
+    }
+
+    /// Gives the editor initial keyboard focus before the first pointer event.
+    /// Later focus changes from the window system still take precedence.
+    pub fn focus(&self) {
+        let mut inner = self.inner.borrow_mut();
+        inner.focused = true;
+        inner.caret_blink_origin = Some(Instant::now());
+        inner.reveal_caret = true;
     }
 
     pub fn revision(&self) -> u64 {
@@ -281,9 +294,9 @@ impl TextEditorInteractionState {
             let now = Instant::now();
             let grouped = kind != EditKind::Discrete
                 && inner.last_edit_kind == Some(kind)
-                && inner
-                    .last_edit_at
-                    .is_some_and(|previous| now.saturating_duration_since(previous) <= HISTORY_GROUP_INTERVAL);
+                && inner.last_edit_at.is_some_and(|previous| {
+                    now.saturating_duration_since(previous) <= HISTORY_GROUP_INTERVAL
+                });
             if !grouped && inner.undo.last() != Some(&before) {
                 inner.undo.push(before);
                 if inner.undo.len() > MAX_HISTORY {
@@ -311,6 +324,8 @@ pub struct TextEditor {
     placeholder: String,
     enabled: bool,
     monospaced: bool,
+    font_size: Option<f32>,
+    line_wrap: bool,
     bordered: bool,
     on_change: Option<RefCell<Box<dyn FnMut(&str)>>>,
 }
@@ -325,6 +340,8 @@ impl TextEditor {
             placeholder: String::new(),
             enabled: true,
             monospaced: false,
+            font_size: None,
+            line_wrap: false,
             bordered: false,
             on_change: None,
         }
@@ -337,13 +354,16 @@ impl TextEditor {
             placeholder: String::new(),
             enabled: true,
             monospaced: false,
+            font_size: None,
+            line_wrap: false,
             bordered: false,
             on_change: None,
         }
     }
 
     pub fn value(self, value: impl Into<String>) -> Self {
-        self.interaction.initialize(normalize_newlines(value.into()));
+        self.interaction
+            .initialize(normalize_newlines(value.into()));
         self
     }
 
@@ -362,6 +382,18 @@ impl TextEditor {
         self
     }
 
+    /// Sets the editor text size in logical pixels.
+    pub fn font_size(mut self, font_size: f32) -> Self {
+        self.font_size = (font_size.is_finite() && font_size > 0.0).then_some(font_size);
+        self
+    }
+
+    /// Wraps long logical lines to the available editor width.
+    pub fn line_wrap(mut self, line_wrap: bool) -> Self {
+        self.line_wrap = line_wrap;
+        self
+    }
+
     pub fn bordered(mut self, bordered: bool) -> Self {
         self.bordered = bordered;
         self
@@ -377,17 +409,28 @@ impl TextEditor {
     }
 
     fn text(&self, value: impl Into<String>) -> Text {
-        let text = Text::styled(value, TextRole::Body).cache_layout(false);
-        if self.monospaced { text.monospaced() } else { text }
+        let mut text = Text::styled(value, TextRole::Body).cache_layout(false);
+        if let Some(font_size) = self.font_size {
+            text = text.font_size(font_size).line_height(font_size * 1.4);
+        }
+        if self.monospaced {
+            text.monospaced()
+        } else {
+            text
+        }
     }
 
     fn line_height(&self, context: &PaintContext<'_>) -> f32 {
-        context.typography.style(TextRole::Body).line_height
+        self.font_size
+            .map(|font_size| font_size * 1.4)
+            .unwrap_or(context.typography.style(TextRole::Body).line_height)
             * context.text_measurer.font_scale()
     }
 
     fn event_line_height(&self, context: &EventContext<'_>) -> f32 {
-        context.typography.style(TextRole::Body).line_height
+        self.font_size
+            .map(|font_size| font_size * 1.4)
+            .unwrap_or(context.typography.style(TextRole::Body).line_height)
             * context.text_measurer.font_scale()
     }
 
@@ -411,21 +454,44 @@ impl TextEditor {
     }
 
     fn index_at_point(&self, point: Point, bounds: Rect, context: &mut EventContext<'_>) -> usize {
-        let inner = self.interaction.inner.borrow();
         let padding = context.theme.spacing.large;
         let line_height = self.event_line_height(context).max(1.0);
+        let content = Self::content_bounds(bounds, padding);
+        let mut inner = self.interaction.inner.borrow_mut();
+        refresh_line_width_cache(
+            &mut inner,
+            self.monospaced,
+            line_height,
+            self.line_wrap.then_some(content.size.width),
+            |line| {
+                self.text(line)
+                    .measure_unbounded_with_typography(context.text_measurer, context.typography)
+                    .width
+            },
+        );
         let target_line = ((point.y - bounds.origin.y - padding + inner.scroll_y) / line_height)
             .floor()
             .max(0.0) as usize;
-        let lines = line_ranges(&inner.value);
-        let range = lines.get(target_line).or_else(|| lines.last()).cloned().unwrap_or(0..0);
+        let lines = if self.line_wrap && !inner.cached_line_ranges.is_empty() {
+            inner.cached_line_ranges.clone()
+        } else {
+            line_ranges(&inner.value)
+        };
+        let range = lines
+            .get(target_line)
+            .or_else(|| lines.last())
+            .cloned()
+            .unwrap_or(0..0);
         let line = &inner.value[range.clone()];
-        let target_x = (point.x - bounds.origin.x - padding + inner.scroll_x).max(0.0);
+        let target_x = (point.x - bounds.origin.x - padding
+            + if self.line_wrap { 0.0 } else { inner.scroll_x })
+        .max(0.0);
         let mut previous = range.start;
         let mut previous_width = 0.0;
         for (relative, character) in line.char_indices() {
             let next = relative + character.len_utf8();
-            let width = self.text(&line[..next])
+            let width = self
+                .text(&line[..next])
                 .measure_unbounded_with_typography(context.text_measurer, context.typography)
                 .width;
             if target_x < (previous_width + width) / 2.0 {
@@ -459,7 +525,11 @@ impl TextEditor {
         let cursor = inner.cursor;
         if !extend {
             if let Some(selection) = selection_range(&inner) {
-                let target = if right { selection.end } else { selection.start };
+                let target = if right {
+                    selection.end
+                } else {
+                    selection.start
+                };
                 drop(inner);
                 return self.set_cursor(target, false);
             }
@@ -479,7 +549,11 @@ impl TextEditor {
 
     fn move_vertical_by(&self, amount: isize, extend: bool) -> bool {
         let inner = self.interaction.inner.borrow();
-        let lines = line_ranges(&inner.value);
+        let lines = if self.line_wrap && !inner.cached_line_ranges.is_empty() {
+            inner.cached_line_ranges.clone()
+        } else {
+            line_ranges(&inner.value)
+        };
         let (line_index, column) = line_and_column(&inner.value, inner.cursor, &lines);
         let target_line = line_index
             .saturating_add_signed(amount)
@@ -491,9 +565,17 @@ impl TextEditor {
 
     fn move_line_edge(&self, end: bool, extend: bool) -> bool {
         let inner = self.interaction.inner.borrow();
-        let lines = line_ranges(&inner.value);
+        let lines = if self.line_wrap && !inner.cached_line_ranges.is_empty() {
+            inner.cached_line_ranges.clone()
+        } else {
+            line_ranges(&inner.value)
+        };
         let (line, _) = line_and_column(&inner.value, inner.cursor, &lines);
-        let target = if end { lines[line].end } else { lines[line].start };
+        let target = if end {
+            lines[line].end
+        } else {
+            lines[line].start
+        };
         drop(inner);
         self.set_cursor(target, extend)
     }
@@ -524,22 +606,28 @@ impl TextEditor {
         true
     }
 
-    fn event_document_size(&self, context: &mut EventContext<'_>) -> Size {
+    fn event_document_size(&self, bounds: Rect, context: &mut EventContext<'_>) -> Size {
         let line_height = self.event_line_height(context).max(1.0);
+        let content = Self::content_bounds(bounds, context.theme.spacing.large);
         let mut inner = self.interaction.inner.borrow_mut();
         refresh_line_width_cache(
             &mut inner,
             self.monospaced,
             line_height,
+            self.line_wrap.then_some(content.size.width),
             |line| {
                 self.text(line)
                     .measure_unbounded_with_typography(context.text_measurer, context.typography)
                     .width
             },
         );
-        let width = inner.cached_line_widths.iter().copied().fold(0.0_f32, f32::max)
+        let width = inner
+            .cached_line_widths
+            .iter()
+            .copied()
+            .fold(0.0_f32, f32::max)
             + context.theme.text_field.caret_width;
-        let line_count = inner.cached_line_widths.len();
+        let line_count = inner.cached_line_ranges.len();
         Size::new(width, line_count as f32 * line_height)
     }
 
@@ -551,12 +639,13 @@ impl TextEditor {
     ) -> bool {
         let padding = context.theme.spacing.large;
         let viewport = Self::content_bounds(bounds, padding);
-        let document = self.event_document_size(context);
+        let document = self.event_document_size(bounds, context);
         let offset = {
             let inner = self.interaction.inner.borrow();
             Point::new(inner.scroll_x, inner.scroll_y)
         };
-        let geometry = editor_scrollbar_geometry(viewport, document, offset, context.theme.scrollbar);
+        let geometry =
+            editor_scrollbar_geometry(viewport, document, offset, context.theme.scrollbar);
 
         if let Some(vertical) = geometry.vertical
             && vertical.track.expanded(4.0).contains(position)
@@ -624,8 +713,9 @@ impl TextEditor {
         }
 
         let viewport = Self::content_bounds(bounds, context.theme.spacing.large);
-        let document = self.event_document_size(context);
-        let geometry = editor_scrollbar_geometry(viewport, document, offset, context.theme.scrollbar);
+        let document = self.event_document_size(bounds, context);
+        let geometry =
+            editor_scrollbar_geometry(viewport, document, offset, context.theme.scrollbar);
         let mut inner = self.interaction.inner.borrow_mut();
         if let (Some(grab), Some(vertical)) = (vertical_grab, geometry.vertical) {
             inner.scroll_y = scrollbar_offset(
@@ -670,29 +760,35 @@ impl View for TextEditor {
         let selection = selection_range(&inner);
         let focused = inner.focused && inner.enabled;
         let line_height = self.line_height(context).max(1.0);
-        let lines = line_ranges(&value);
         refresh_line_width_cache(
             &mut inner,
             self.monospaced,
             line_height,
+            self.line_wrap.then_some(content.size.width),
             |line| {
                 self.text(line)
                     .measure_unbounded_with_typography(context.text_measurer, context.typography)
                     .width
             },
         );
+        let lines = inner.cached_line_ranges.clone();
         let line_widths = inner.cached_line_widths.clone();
         let content_width = line_widths.iter().copied().fold(0.0_f32, f32::max)
             + context.theme.text_field.caret_width;
         let content_height = lines.len() as f32 * line_height;
-        let maximum_x = (content_width - content.size.width).max(0.0);
+        let maximum_x = if self.line_wrap {
+            0.0
+        } else {
+            (content_width - content.size.width).max(0.0)
+        };
         let maximum_y = (content_height - content.size.height).max(0.0);
         inner.scroll_x = inner.scroll_x.clamp(0.0, maximum_x);
         inner.scroll_y = inner.scroll_y.clamp(0.0, maximum_y);
 
         let (cursor_line, _) = line_and_column(&value, cursor, &lines);
         let cursor_prefix = &value[lines[cursor_line].start..cursor];
-        let cursor_x = self.text(cursor_prefix)
+        let cursor_x = self
+            .text(cursor_prefix)
             .measure_unbounded_with_typography(context.text_measurer, context.typography)
             .width;
         if inner.reveal_caret && focused {
@@ -719,7 +815,11 @@ impl View for TextEditor {
         let visible_lines = first_visible_line.min(lines.len())..last_visible_line.min(lines.len());
 
         let mut node = AccessibilityNode::new(AccessibilityRole::TextField, bounds);
-        node.label = Some(if self.placeholder.is_empty() { "Document".into() } else { self.placeholder.clone() });
+        node.label = Some(if self.placeholder.is_empty() {
+            "Document".into()
+        } else {
+            self.placeholder.clone()
+        });
         node.value = Some(value.clone());
         node.enabled = self.enabled;
         node.focusable = true;
@@ -728,16 +828,25 @@ impl View for TextEditor {
 
         Rectangle::new()
             .color(RectangleColor::Custom(context.theme.colors.surface))
-            .radius(if self.bordered { CornerRadius::Small } else { CornerRadius::None })
+            .radius(if self.bordered {
+                CornerRadius::Small
+            } else {
+                CornerRadius::None
+            })
             .shadow(ShadowStyle::None)
             .border(if self.bordered {
-                BorderStyle::custom(context.theme.text_field.border, context.theme.text_field.stroke_width)
+                BorderStyle::custom(
+                    context.theme.text_field.border,
+                    context.theme.text_field.stroke_width,
+                )
             } else {
                 BorderStyle::None
             })
             .paint(bounds, context);
 
-        context.display_list.push(DrawCommand::PushClip { rect: content });
+        context
+            .display_list
+            .push(DrawCommand::PushClip { rect: content });
         if let Some(selection) = selection.as_ref() {
             for line_index in visible_lines.clone() {
                 let range = &lines[line_index];
@@ -747,10 +856,14 @@ impl View for TextEditor {
                     continue;
                 }
                 let line = &value[range.clone()];
-                let start_width = self.text(&line[..start.saturating_sub(range.start)])
-                    .measure_unbounded_with_typography(context.text_measurer, context.typography).width;
-                let end_width = self.text(&line[..end.saturating_sub(range.start)])
-                    .measure_unbounded_with_typography(context.text_measurer, context.typography).width;
+                let start_width = self
+                    .text(&line[..start.saturating_sub(range.start)])
+                    .measure_unbounded_with_typography(context.text_measurer, context.typography)
+                    .width;
+                let end_width = self
+                    .text(&line[..end.saturating_sub(range.start)])
+                    .measure_unbounded_with_typography(context.text_measurer, context.typography)
+                    .width;
                 let width = (end_width - start_width).max(if start == end { 3.0 } else { 0.0 });
                 context.display_list.push(DrawCommand::FillRoundedRect {
                     rect: Rect::new(
@@ -817,7 +930,12 @@ impl View for TextEditor {
         );
     }
 
-    fn handle_event(&self, bounds: Rect, event: &ViewEvent, context: &mut EventContext<'_>) -> EventResult {
+    fn handle_event(
+        &self,
+        bounds: Rect,
+        event: &ViewEvent,
+        context: &mut EventContext<'_>,
+    ) -> EventResult {
         match event {
             ViewEvent::PointerMoved { position } => {
                 if self.update_scrollbar_drag(*position, bounds, context) {
@@ -840,22 +958,18 @@ impl View for TextEditor {
                         if position.y < content.origin.y {
                             inner.scroll_y = (inner.scroll_y
                                 - (content.origin.y - position.y).min(32.0))
-                                .max(0.0);
+                            .max(0.0);
                         } else if position.y > content.origin.y + content.size.height {
-                            inner.scroll_y += (position.y
-                                - content.origin.y
-                                - content.size.height)
-                                .min(32.0);
+                            inner.scroll_y +=
+                                (position.y - content.origin.y - content.size.height).min(32.0);
                         }
                         if position.x < content.origin.x {
                             inner.scroll_x = (inner.scroll_x
                                 - (content.origin.x - position.x).min(32.0))
-                                .max(0.0);
+                            .max(0.0);
                         } else if position.x > content.origin.x + content.size.width {
-                            inner.scroll_x += (position.x
-                                - content.origin.x
-                                - content.size.width)
-                                .min(32.0);
+                            inner.scroll_x +=
+                                (position.x - content.origin.x - content.size.width).min(32.0);
                         }
                         inner.reveal_caret = false;
                     }
@@ -865,7 +979,10 @@ impl View for TextEditor {
                 }
                 EventResult::Ignored
             }
-            ViewEvent::PointerPressed { position, button: PointerButton::Primary } if bounds.contains(*position) => {
+            ViewEvent::PointerPressed {
+                position,
+                button: PointerButton::Primary,
+            } if bounds.contains(*position) => {
                 if self.begin_scrollbar_drag(*position, bounds, context) {
                     context.request_redraw_in(bounds);
                     return EventResult::Consumed;
@@ -885,7 +1002,10 @@ impl View for TextEditor {
                 context.request_redraw_in(bounds);
                 EventResult::Consumed
             }
-            ViewEvent::PointerReleased { button: PointerButton::Primary, .. } => {
+            ViewEvent::PointerReleased {
+                button: PointerButton::Primary,
+                ..
+            } => {
                 let mut inner = self.interaction.inner.borrow_mut();
                 let ended_scroll_drag = inner.vertical_scroll_drag.take().is_some()
                     || inner.horizontal_scroll_drag.take().is_some();
@@ -894,9 +1014,13 @@ impl View for TextEditor {
                     context.request_redraw_in(bounds);
                     return EventResult::Consumed;
                 }
-                if !inner.selecting { return EventResult::Ignored; }
+                if !inner.selecting {
+                    return EventResult::Ignored;
+                }
                 inner.selecting = false;
-                if inner.selection_anchor == Some(inner.cursor) { inner.selection_anchor = None; }
+                if inner.selection_anchor == Some(inner.cursor) {
+                    inner.selection_anchor = None;
+                }
                 drop(inner);
                 context.request_redraw_in(bounds);
                 EventResult::Consumed
@@ -905,7 +1029,10 @@ impl View for TextEditor {
                 let focused = bounds.contains(*position) && self.enabled;
                 let mut inner = self.interaction.inner.borrow_mut();
                 inner.focused = focused;
-                if !focused { inner.selecting = false; inner.caret_blink_origin = None; }
+                if !focused {
+                    inner.selecting = false;
+                    inner.caret_blink_origin = None;
+                }
                 EventResult::Ignored
             }
             ViewEvent::KeyboardFocusRequested { bounds: target } => {
@@ -920,7 +1047,11 @@ impl View for TextEditor {
                 inner.caret_blink_origin = None;
                 EventResult::Ignored
             }
-            ViewEvent::Scroll { position, delta_x, delta_y } if bounds.contains(*position) => {
+            ViewEvent::Scroll {
+                position,
+                delta_x,
+                delta_y,
+            } if bounds.contains(*position) => {
                 let mut inner = self.interaction.inner.borrow_mut();
                 inner.scroll_x = (inner.scroll_x + delta_x).max(0.0);
                 inner.scroll_y = (inner.scroll_y + delta_y).max(0.0);
@@ -930,30 +1061,83 @@ impl View for TextEditor {
                 EventResult::Consumed
             }
             ViewEvent::TextInput { text } if self.interaction.is_focused() => {
-                let inserted: String = text.chars().filter(|character| *character == '\t' || !character.is_control()).collect();
-                if !inserted.is_empty() && self.interaction.edit_with_kind(EditKind::Insert, |inner| Self::replace_selection(inner, &inserted)) {
-                    self.synchronize(); self.interaction.reset_caret(); context.request_redraw_in(bounds);
+                let inserted: String = text
+                    .chars()
+                    .filter(|character| *character == '\t' || !character.is_control())
+                    .collect();
+                if !inserted.is_empty()
+                    && self.interaction.edit_with_kind(EditKind::Insert, |inner| {
+                        Self::replace_selection(inner, &inserted)
+                    })
+                {
+                    self.synchronize();
+                    self.interaction.reset_caret();
+                    context.request_redraw_in(bounds);
                 }
                 EventResult::Consumed
             }
-            ViewEvent::KeyPressed { key: Key::Enter, .. } if self.interaction.is_focused() => {
-                if self.interaction.edit(|inner| Self::replace_selection(inner, "\n")) { self.synchronize(); }
-                self.interaction.reset_caret(); context.request_redraw_in(bounds); EventResult::Consumed
+            ViewEvent::KeyPressed {
+                key: Key::Enter, ..
+            } if self.interaction.is_focused() => {
+                if self
+                    .interaction
+                    .edit(|inner| Self::replace_selection(inner, "\n"))
+                {
+                    self.synchronize();
+                }
+                self.interaction.reset_caret();
+                context.request_redraw_in(bounds);
+                EventResult::Consumed
             }
             ViewEvent::KeyPressed { key: Key::Tab, .. } if self.interaction.is_focused() => {
-                if self.interaction.edit(|inner| Self::replace_selection(inner, "    ")) { self.synchronize(); }
-                self.interaction.reset_caret(); context.request_redraw_in(bounds); EventResult::Consumed
-            }
-            ViewEvent::KeyPressed { key: Key::Character(character), modifiers } if self.interaction.is_focused() && modifiers.shortcut() && (*character == 'z' || *character == 'Z') => {
-                let changed = if modifiers.shift() { self.interaction.redo() } else { self.interaction.undo() };
-                if changed { self.synchronize(); context.request_redraw_in(bounds); }
+                if self
+                    .interaction
+                    .edit(|inner| Self::replace_selection(inner, "    "))
+                {
+                    self.synchronize();
+                }
+                self.interaction.reset_caret();
+                context.request_redraw_in(bounds);
                 EventResult::Consumed
             }
-            ViewEvent::KeyPressed { key: Key::Character(character), modifiers } if self.interaction.is_focused() && modifiers.shortcut() && (*character == 'y' || *character == 'Y') => {
-                if self.interaction.redo() { self.synchronize(); context.request_redraw_in(bounds); }
+            ViewEvent::KeyPressed {
+                key: Key::Character(character),
+                modifiers,
+            } if self.interaction.is_focused()
+                && modifiers.shortcut()
+                && (*character == 'z' || *character == 'Z') =>
+            {
+                let changed = if modifiers.shift() {
+                    self.interaction.redo()
+                } else {
+                    self.interaction.undo()
+                };
+                if changed {
+                    self.synchronize();
+                    context.request_redraw_in(bounds);
+                }
                 EventResult::Consumed
             }
-            ViewEvent::KeyPressed { key: Key::Character(character), modifiers } if self.interaction.is_focused() && modifiers.shortcut() && (*character == 'c' || *character == 'C') => {
+            ViewEvent::KeyPressed {
+                key: Key::Character(character),
+                modifiers,
+            } if self.interaction.is_focused()
+                && modifiers.shortcut()
+                && (*character == 'y' || *character == 'Y') =>
+            {
+                if self.interaction.redo() {
+                    self.synchronize();
+                    context.request_redraw_in(bounds);
+                }
+                EventResult::Consumed
+            }
+            ViewEvent::KeyPressed {
+                key: Key::Character(character),
+                modifiers,
+            } if self.interaction.is_focused()
+                && modifiers.shortcut()
+                && (*character == 'c' || *character == 'C') =>
+            {
                 let selected = {
                     let inner = self.interaction.inner.borrow();
                     selection_range(&inner).map(|range| inner.value[range].to_owned())
@@ -963,14 +1147,22 @@ impl View for TextEditor {
                 }
                 EventResult::Consumed
             }
-            ViewEvent::KeyPressed { key: Key::Character(character), modifiers } if self.interaction.is_focused() && modifiers.shortcut() && (*character == 'x' || *character == 'X') => {
+            ViewEvent::KeyPressed {
+                key: Key::Character(character),
+                modifiers,
+            } if self.interaction.is_focused()
+                && modifiers.shortcut()
+                && (*character == 'x' || *character == 'X') =>
+            {
                 let selected = {
                     let inner = self.interaction.inner.borrow();
                     selection_range(&inner).map(|range| inner.value[range].to_owned())
                 };
                 if let Some(selected) = selected
                     && set_system_clipboard_text(&selected)
-                    && self.interaction.edit(|inner| Self::replace_selection(inner, ""))
+                    && self
+                        .interaction
+                        .edit(|inner| Self::replace_selection(inner, ""))
                 {
                     self.synchronize();
                     self.interaction.reset_caret();
@@ -978,10 +1170,18 @@ impl View for TextEditor {
                 }
                 EventResult::Consumed
             }
-            ViewEvent::KeyPressed { key: Key::Character(character), modifiers } if self.interaction.is_focused() && modifiers.shortcut() && (*character == 'v' || *character == 'V') => {
+            ViewEvent::KeyPressed {
+                key: Key::Character(character),
+                modifiers,
+            } if self.interaction.is_focused()
+                && modifiers.shortcut()
+                && (*character == 'v' || *character == 'V') =>
+            {
                 if let Some(pasted) = system_clipboard_text()
                     && !pasted.is_empty()
-                    && self.interaction.edit(|inner| Self::replace_selection(inner, &normalize_newlines(pasted)))
+                    && self
+                        .interaction
+                        .edit(|inner| Self::replace_selection(inner, &normalize_newlines(pasted)))
                 {
                     self.synchronize();
                     self.interaction.reset_caret();
@@ -991,50 +1191,115 @@ impl View for TextEditor {
             }
             ViewEvent::Backspace if self.interaction.is_focused() => {
                 let changed = self.interaction.edit_with_kind(EditKind::Delete, |inner| {
-                    if selection_range(inner).is_some() { return Self::replace_selection(inner, ""); }
+                    if selection_range(inner).is_some() {
+                        return Self::replace_selection(inner, "");
+                    }
                     let previous = previous_boundary(&inner.value, inner.cursor);
-                    if previous == inner.cursor { false } else { inner.value.replace_range(previous..inner.cursor, ""); inner.cursor = previous; true }
+                    if previous == inner.cursor {
+                        false
+                    } else {
+                        inner.value.replace_range(previous..inner.cursor, "");
+                        inner.cursor = previous;
+                        true
+                    }
                 });
-                if changed { self.synchronize(); self.interaction.reset_caret(); context.request_redraw_in(bounds); }
+                if changed {
+                    self.synchronize();
+                    self.interaction.reset_caret();
+                    context.request_redraw_in(bounds);
+                }
                 EventResult::Consumed
             }
             ViewEvent::Delete if self.interaction.is_focused() => {
                 let changed = self.interaction.edit_with_kind(EditKind::Delete, |inner| {
-                    if selection_range(inner).is_some() { return Self::replace_selection(inner, ""); }
+                    if selection_range(inner).is_some() {
+                        return Self::replace_selection(inner, "");
+                    }
                     let next = next_boundary(&inner.value, inner.cursor);
-                    if next == inner.cursor { false } else { inner.value.replace_range(inner.cursor..next, ""); true }
+                    if next == inner.cursor {
+                        false
+                    } else {
+                        inner.value.replace_range(inner.cursor..next, "");
+                        true
+                    }
                 });
-                if changed { self.synchronize(); self.interaction.reset_caret(); context.request_redraw_in(bounds); }
+                if changed {
+                    self.synchronize();
+                    self.interaction.reset_caret();
+                    context.request_redraw_in(bounds);
+                }
                 EventResult::Consumed
             }
             ViewEvent::ArrowLeft | ViewEvent::SelectLeft if self.interaction.is_focused() => {
-                self.move_horizontal(false, matches!(event, ViewEvent::SelectLeft)); self.interaction.reset_caret(); context.request_redraw_in(bounds); EventResult::Consumed
+                self.move_horizontal(false, matches!(event, ViewEvent::SelectLeft));
+                self.interaction.reset_caret();
+                context.request_redraw_in(bounds);
+                EventResult::Consumed
             }
             ViewEvent::ArrowRight | ViewEvent::SelectRight if self.interaction.is_focused() => {
-                self.move_horizontal(true, matches!(event, ViewEvent::SelectRight)); self.interaction.reset_caret(); context.request_redraw_in(bounds); EventResult::Consumed
+                self.move_horizontal(true, matches!(event, ViewEvent::SelectRight));
+                self.interaction.reset_caret();
+                context.request_redraw_in(bounds);
+                EventResult::Consumed
             }
-            ViewEvent::KeyPressed { key: Key::ArrowUp, modifiers } if self.interaction.is_focused() => {
-                self.move_vertical(false, modifiers.shift()); self.interaction.reset_caret(); context.request_redraw_in(bounds); EventResult::Consumed
+            ViewEvent::KeyPressed {
+                key: Key::ArrowUp,
+                modifiers,
+            } if self.interaction.is_focused() => {
+                self.move_vertical(false, modifiers.shift());
+                self.interaction.reset_caret();
+                context.request_redraw_in(bounds);
+                EventResult::Consumed
             }
-            ViewEvent::KeyPressed { key: Key::ArrowDown, modifiers } if self.interaction.is_focused() => {
-                self.move_vertical(true, modifiers.shift()); self.interaction.reset_caret(); context.request_redraw_in(bounds); EventResult::Consumed
+            ViewEvent::KeyPressed {
+                key: Key::ArrowDown,
+                modifiers,
+            } if self.interaction.is_focused() => {
+                self.move_vertical(true, modifiers.shift());
+                self.interaction.reset_caret();
+                context.request_redraw_in(bounds);
+                EventResult::Consumed
             }
-            ViewEvent::KeyPressed { key: Key::PageUp, modifiers } if self.interaction.is_focused() => {
-                let page = (bounds.size.height / self.event_line_height(context).max(1.0)).floor().max(1.0) as isize;
-                self.move_vertical_by(-page, modifiers.shift()); self.interaction.reset_caret(); context.request_redraw_in(bounds); EventResult::Consumed
+            ViewEvent::KeyPressed {
+                key: Key::PageUp,
+                modifiers,
+            } if self.interaction.is_focused() => {
+                let page = (bounds.size.height / self.event_line_height(context).max(1.0))
+                    .floor()
+                    .max(1.0) as isize;
+                self.move_vertical_by(-page, modifiers.shift());
+                self.interaction.reset_caret();
+                context.request_redraw_in(bounds);
+                EventResult::Consumed
             }
-            ViewEvent::KeyPressed { key: Key::PageDown, modifiers } if self.interaction.is_focused() => {
-                let page = (bounds.size.height / self.event_line_height(context).max(1.0)).floor().max(1.0) as isize;
-                self.move_vertical_by(page, modifiers.shift()); self.interaction.reset_caret(); context.request_redraw_in(bounds); EventResult::Consumed
+            ViewEvent::KeyPressed {
+                key: Key::PageDown,
+                modifiers,
+            } if self.interaction.is_focused() => {
+                let page = (bounds.size.height / self.event_line_height(context).max(1.0))
+                    .floor()
+                    .max(1.0) as isize;
+                self.move_vertical_by(page, modifiers.shift());
+                self.interaction.reset_caret();
+                context.request_redraw_in(bounds);
+                EventResult::Consumed
             }
             ViewEvent::Home | ViewEvent::SelectHome if self.interaction.is_focused() => {
-                self.move_line_edge(false, matches!(event, ViewEvent::SelectHome)); self.interaction.reset_caret(); context.request_redraw_in(bounds); EventResult::Consumed
+                self.move_line_edge(false, matches!(event, ViewEvent::SelectHome));
+                self.interaction.reset_caret();
+                context.request_redraw_in(bounds);
+                EventResult::Consumed
             }
             ViewEvent::End | ViewEvent::SelectEnd if self.interaction.is_focused() => {
-                self.move_line_edge(true, matches!(event, ViewEvent::SelectEnd)); self.interaction.reset_caret(); context.request_redraw_in(bounds); EventResult::Consumed
+                self.move_line_edge(true, matches!(event, ViewEvent::SelectEnd));
+                self.interaction.reset_caret();
+                context.request_redraw_in(bounds);
+                EventResult::Consumed
             }
             ViewEvent::SelectAll if self.interaction.is_focused() => {
-                self.select_all(); context.request_redraw_in(bounds); EventResult::Consumed
+                self.select_all();
+                context.request_redraw_in(bounds);
+                EventResult::Consumed
             }
             _ => EventResult::Ignored,
         }
@@ -1070,12 +1335,13 @@ fn editor_scrollbar_geometry(
     }
 
     let vertical = vertical_visible.then(|| {
-        let reserved_bottom = if horizontal_visible { thickness + inset } else { 0.0 };
-        let track_length = (viewport.size.height
-            - inset * 2.0
-            - length_inset * 2.0
-            - reserved_bottom)
-            .max(0.0);
+        let reserved_bottom = if horizontal_visible {
+            thickness + inset
+        } else {
+            0.0
+        };
+        let track_length =
+            (viewport.size.height - inset * 2.0 - length_inset * 2.0 - reserved_bottom).max(0.0);
         let track = Rect::new(
             viewport.origin.x + viewport.size.width - inset - thickness - tokens.horizontal_offset,
             viewport.origin.y + inset + length_inset,
@@ -1100,11 +1366,19 @@ fn editor_scrollbar_geometry(
             thickness,
             thumb_length,
         );
-        EditorScrollbar { track, thumb, maximum_offset }
+        EditorScrollbar {
+            track,
+            thumb,
+            maximum_offset,
+        }
     });
 
     let horizontal = horizontal_visible.then(|| {
-        let reserved_right = if vertical_visible { thickness + inset } else { 0.0 };
+        let reserved_right = if vertical_visible {
+            thickness + inset
+        } else {
+            0.0
+        };
         let track_length = (viewport.size.width - inset * 2.0 - reserved_right).max(0.0);
         let track = Rect::new(
             viewport.origin.x + inset,
@@ -1130,10 +1404,17 @@ fn editor_scrollbar_geometry(
             thumb_length,
             thickness,
         );
-        EditorScrollbar { track, thumb, maximum_offset }
+        EditorScrollbar {
+            track,
+            thumb,
+            maximum_offset,
+        }
     });
 
-    EditorScrollbarGeometry { vertical, horizontal }
+    EditorScrollbarGeometry {
+        vertical,
+        horizontal,
+    }
 }
 
 fn scrollbar_thumb_length(track: f32, viewport: f32, document: f32, minimum: f32) -> f32 {
@@ -1175,7 +1456,10 @@ fn paint_editor_scrollbars(
     context: &mut PaintContext<'_>,
 ) {
     let geometry = editor_scrollbar_geometry(viewport, document, offset, tokens);
-    for scrollbar in [geometry.vertical, geometry.horizontal].into_iter().flatten() {
+    for scrollbar in [geometry.vertical, geometry.horizontal]
+        .into_iter()
+        .flatten()
+    {
         context.display_list.push(DrawCommand::FillRoundedRect {
             rect: scrollbar.track,
             radius: scrollbar.track.size.width.min(scrollbar.track.size.height) / 2.0,
@@ -1193,24 +1477,101 @@ fn refresh_line_width_cache(
     inner: &mut TextEditorInteractionInner,
     monospaced: bool,
     line_height: f32,
+    wrap_width: Option<f32>,
     mut measure: impl FnMut(String) -> f32,
 ) {
+    let wrap_width = wrap_width.filter(|width| width.is_finite() && *width > 0.0);
     if inner.cached_layout_value == inner.value
         && inner.cached_layout_monospaced == monospaced
         && inner.cached_layout_line_height == line_height
+        && inner.cached_layout_wrap_width == wrap_width
+        && !inner.cached_line_ranges.is_empty()
         && !inner.cached_line_widths.is_empty()
     {
         return;
     }
 
     let value = inner.value.clone();
-    inner.cached_line_widths = line_ranges(&value)
-        .into_iter()
-        .map(|range| measure(value[range].to_owned()))
+    let ranges = visual_line_ranges(&value, wrap_width, &mut measure);
+    inner.cached_line_widths = ranges
+        .iter()
+        .map(|range| measure(value[range.clone()].to_owned()))
         .collect();
+    inner.cached_line_ranges = ranges;
     inner.cached_layout_value = value;
     inner.cached_layout_monospaced = monospaced;
     inner.cached_layout_line_height = line_height;
+    inner.cached_layout_wrap_width = wrap_width;
+}
+
+fn visual_line_ranges(
+    value: &str,
+    wrap_width: Option<f32>,
+    measure: &mut impl FnMut(String) -> f32,
+) -> Vec<Range<usize>> {
+    let Some(wrap_width) = wrap_width else {
+        return line_ranges(value);
+    };
+    let mut visual = Vec::new();
+    for logical in line_ranges(value) {
+        if logical.is_empty() {
+            visual.push(logical);
+            continue;
+        }
+        let line = &value[logical.clone()];
+        if measure(line.to_owned()) <= wrap_width {
+            visual.push(logical);
+            continue;
+        }
+
+        let mut boundaries: Vec<usize> = line.char_indices().map(|(index, _)| index).collect();
+        boundaries.push(line.len());
+        let mut start_index = 0usize;
+        while start_index + 1 < boundaries.len() {
+            let mut low = start_index + 1;
+            let mut high = boundaries.len() - 1;
+            let mut fitting = low;
+            while low <= high {
+                let middle = low + (high - low) / 2;
+                let width = measure(line[boundaries[start_index]..boundaries[middle]].to_owned());
+                if width <= wrap_width || middle == start_index + 1 {
+                    fitting = middle;
+                    low = middle + 1;
+                } else {
+                    high = middle.saturating_sub(1);
+                }
+            }
+
+            if fitting < boundaries.len() - 1 {
+                let segment = &line[boundaries[start_index]..boundaries[fitting]];
+                if let Some((break_index, character)) = segment
+                    .char_indices()
+                    .rev()
+                    .find(|(_, character)| character.is_whitespace())
+                {
+                    let after_break = boundaries[start_index] + break_index + character.len_utf8();
+                    if after_break > boundaries[start_index] {
+                        fitting = boundaries.binary_search(&after_break).unwrap_or(fitting);
+                    }
+                }
+
+                while fitting < boundaries.len() - 1
+                    && line[boundaries[fitting]..]
+                        .chars()
+                        .next()
+                        .is_some_and(char::is_whitespace)
+                {
+                    fitting += 1;
+                }
+            }
+
+            let start = logical.start + boundaries[start_index];
+            let end = logical.start + boundaries[fitting];
+            visual.push(start..end);
+            start_index = fitting;
+        }
+    }
+    visual
 }
 
 fn normalize_newlines(value: String) -> String {
@@ -1234,7 +1595,9 @@ fn set_system_clipboard_text(_value: &str) -> bool {
 
 #[cfg(target_os = "mochios")]
 fn system_clipboard_text() -> Option<String> {
-    mochi_user_platform::workspace::clipboard_text().ok().flatten()
+    mochi_user_platform::workspace::clipboard_text()
+        .ok()
+        .flatten()
 }
 
 #[cfg(not(target_os = "mochios"))]
@@ -1263,28 +1626,45 @@ fn selection_range(inner: &TextEditorInteractionInner) -> Option<Range<usize>> {
 
 fn clamp_boundary(value: &str, index: usize) -> usize {
     let mut index = index.min(value.len());
-    while index > 0 && !value.is_char_boundary(index) { index -= 1; }
+    while index > 0 && !value.is_char_boundary(index) {
+        index -= 1;
+    }
     index
 }
 
 fn previous_boundary(value: &str, cursor: usize) -> usize {
-    value[..clamp_boundary(value, cursor)].char_indices().next_back().map(|(index, _)| index).unwrap_or(0)
+    value[..clamp_boundary(value, cursor)]
+        .char_indices()
+        .next_back()
+        .map(|(index, _)| index)
+        .unwrap_or(0)
 }
 
 fn next_boundary(value: &str, cursor: usize) -> usize {
     let cursor = clamp_boundary(value, cursor);
-    value[cursor..].chars().next().map(|character| cursor + character.len_utf8()).unwrap_or(cursor)
+    value[cursor..]
+        .chars()
+        .next()
+        .map(|character| cursor + character.len_utf8())
+        .unwrap_or(cursor)
 }
 
 fn line_and_column(value: &str, cursor: usize, lines: &[Range<usize>]) -> (usize, usize) {
     let cursor = clamp_boundary(value, cursor);
-    let line = lines.iter().position(|range| cursor <= range.end).unwrap_or(lines.len().saturating_sub(1));
+    let line = lines
+        .iter()
+        .rposition(|range| cursor >= range.start && cursor <= range.end)
+        .unwrap_or(lines.len().saturating_sub(1));
     let column = value[lines[line].start..cursor].chars().count();
     (line, column)
 }
 
 fn index_for_column(value: &str, range: &Range<usize>, column: usize) -> usize {
-    value[range.clone()].char_indices().nth(column).map(|(index, _)| range.start + index).unwrap_or(range.end)
+    value[range.clone()]
+        .char_indices()
+        .nth(column)
+        .map(|(index, _)| range.start + index)
+        .unwrap_or(range.end)
 }
 
 fn caret_state(interaction: &TextEditorInteractionState, now: Instant) -> (bool, Instant) {
@@ -1293,7 +1673,10 @@ fn caret_state(interaction: &TextEditorInteractionState, now: Instant) -> (bool,
     let elapsed = now.saturating_duration_since(origin).as_millis();
     let interval = CARET_BLINK_INTERVAL.as_millis();
     let visible = (elapsed / interval).is_multiple_of(2);
-    (visible, now + Duration::from_millis((interval - elapsed % interval) as u64))
+    (
+        visible,
+        now + Duration::from_millis((interval - elapsed % interval) as u64),
+    )
 }
 
 #[cfg(test)]
@@ -1309,6 +1692,32 @@ mod tests {
         assert_eq!(line_and_column(value, 2, &lines), (0, 2));
         assert_eq!(index_for_column(value, &lines[1], 2), 10);
         assert_eq!(index_for_column(value, &lines[2], 8), value.len());
+    }
+
+    #[test]
+    fn visual_lines_wrap_at_character_boundaries_and_prefer_whitespace() {
+        let mut measure = |value: String| value.chars().count() as f32 * 10.0;
+        let ranges = visual_line_ranges("alpha beta", Some(60.0), &mut measure);
+        let lines: Vec<&str> = ranges
+            .iter()
+            .map(|range| &"alpha beta"[range.clone()])
+            .collect();
+        assert_eq!(lines, ["alpha ", "beta"]);
+
+        let mut measure = |value: String| value.chars().count() as f32 * 10.0;
+        let ranges = visual_line_ranges("日本語文", Some(20.0), &mut measure);
+        let lines: Vec<&str> = ranges
+            .iter()
+            .map(|range| &"日本語文"[range.clone()])
+            .collect();
+        assert_eq!(lines, ["日本", "語文"]);
+    }
+
+    #[test]
+    fn cursor_at_soft_wrap_boundary_uses_the_continuation_line() {
+        let value = "abcdef";
+        let lines = vec![0..3, 3..6];
+        assert_eq!(line_and_column(value, 3, &lines), (1, 0));
     }
 
     #[test]
@@ -1367,12 +1776,8 @@ mod tests {
         let viewport = Rect::new(10.0, 20.0, 200.0, 100.0);
         let document = Size::new(200.0, 300.0);
         let tokens = crate::theme::Theme::DEFAULT.scrollbar;
-        let geometry = editor_scrollbar_geometry(
-            viewport,
-            document,
-            Point::new(0.0, 200.0),
-            tokens,
-        );
+        let geometry =
+            editor_scrollbar_geometry(viewport, document, Point::new(0.0, 200.0), tokens);
         let vertical = geometry.vertical.expect("vertical scrollbar");
         assert_eq!(vertical.maximum_offset, 200.0);
         assert_eq!(
@@ -1387,11 +1792,7 @@ mod tests {
         state.set_value("line\n".repeat(100));
         let editor = TextEditor::with_interaction(state.clone());
         let mut measurer = TextMeasurer::new();
-        let mut context = EventContext::new(
-            &Theme::DEFAULT,
-            &Typography::DEFAULT,
-            &mut measurer,
-        );
+        let mut context = EventContext::new(&Theme::DEFAULT, &Typography::DEFAULT, &mut measurer);
         let result = editor.handle_event(
             Rect::new(0.0, 0.0, 320.0, 200.0),
             &ViewEvent::Scroll {
