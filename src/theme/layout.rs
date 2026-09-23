@@ -1,4 +1,5 @@
 use super::FigmaTokens;
+use crate::geometry::Size;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LayoutTokens {
@@ -42,6 +43,7 @@ pub struct LayoutTokens {
     pub tab_width: f32,
     pub compact_icon_size: f32,
     pub control_icon_size: f32,
+    pub icon_optical_scale: f32,
     pub stepper_icon_size: f32,
     pub radio_size: f32,
     pub radio_inset: f32,
@@ -50,13 +52,12 @@ pub struct LayoutTokens {
     pub range_control_height: f32,
     pub range_track_height: f32,
     pub message_max_width: f32,
-    pub range_knob_size: f32,
-    pub range_dragging_knob_size: f32,
+    pub control_thumb_height: f32,
+    pub control_thumb_aspect_ratio: f32,
+    pub control_pressed_thumb_aspect_ratio: f32,
     pub range_hit_padding: f32,
     pub switch_track_width: f32,
     pub switch_track_height: f32,
-    pub switch_knob_size: f32,
-    pub switch_pressed_knob_width: f32,
     pub switch_knob_inset: f32,
     pub switch_drag_threshold: f32,
     pub switch_hit_padding: f32,
@@ -100,13 +101,14 @@ impl LayoutTokens {
         control_height: FigmaTokens::SPACING.space_32,
         large_control_height: FigmaTokens::SPACING.space_40,
         dialog_width: FigmaTokens::LAYOUT.form_width - FigmaTokens::SPACING.space_24 * 5.0,
-        dialog_height: FigmaTokens::LAYOUT.sidebar_width - FigmaTokens::LAYOUT.page_margin,
+        dialog_height: FigmaTokens::LAYOUT.sidebar_width - FigmaTokens::SPACING.space_40,
         popover_width: FigmaTokens::LAYOUT.sidebar_width,
         popover_height: FigmaTokens::LAYOUT.sidebar_width / 2.0,
         control_min_width: FigmaTokens::LAYOUT.sidebar_width / 2.0,
         tab_width: FigmaTokens::SPACING.space_64 + FigmaTokens::SPACING.space_8,
         compact_icon_size: FigmaTokens::SPACING.space_16,
         control_icon_size: FigmaTokens::SPACING.space_16 + FigmaTokens::SPACING.space_4,
+        icon_optical_scale: 0.84,
         stepper_icon_size: FigmaTokens::SPACING.space_24,
         radio_size: FigmaTokens::SPACING.space_24,
         radio_inset: FigmaTokens::SPACING.space_4,
@@ -115,13 +117,12 @@ impl LayoutTokens {
         range_control_height: FigmaTokens::SPACING.space_24,
         range_track_height: FigmaTokens::SPACING.space_4,
         message_max_width: FigmaTokens::LAYOUT.form_width - FigmaTokens::SPACING.space_24 * 5.0,
-        range_knob_size: FigmaTokens::SPACING.space_12,
-        range_dragging_knob_size: FigmaTokens::SPACING.space_12,
+        control_thumb_height: FigmaTokens::SHAPE.radius_xlarge,
+        control_thumb_aspect_ratio: 1.1,
+        control_pressed_thumb_aspect_ratio: 1.2,
         range_hit_padding: FigmaTokens::SPACING.space_8,
         switch_track_width: FigmaTokens::SPACING.space_40,
         switch_track_height: FigmaTokens::SPACING.space_24,
-        switch_knob_size: FigmaTokens::SHAPE.radius_xlarge,
-        switch_pressed_knob_width: FigmaTokens::SPACING.space_24,
         switch_knob_inset: FigmaTokens::SPACING.space_2,
         switch_drag_threshold: FigmaTokens::SPACING.space_2,
         switch_hit_padding: FigmaTokens::SPACING.space_8,
@@ -129,4 +130,23 @@ impl LayoutTokens {
         segmented_control_height: FigmaTokens::SPACING.space_32,
         segmented_item_min_width: FigmaTokens::SPACING.space_64,
     };
+
+    pub fn control_thumb_size(self, pressed: bool) -> Size {
+        let height = if self.control_thumb_height.is_finite() && self.control_thumb_height > 0.0 {
+            self.control_thumb_height
+        } else {
+            FigmaTokens::SHAPE.radius_xlarge
+        };
+        let configured_ratio = if pressed {
+            self.control_pressed_thumb_aspect_ratio
+        } else {
+            self.control_thumb_aspect_ratio
+        };
+        let ratio = if configured_ratio.is_finite() && configured_ratio > 0.0 {
+            configured_ratio
+        } else {
+            1.0
+        };
+        Size::new(height * ratio, height)
+    }
 }

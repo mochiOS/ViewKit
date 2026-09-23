@@ -27,6 +27,15 @@ struct SvgDataInner {
 
     width: f32,
     height: f32,
+    content_bounds: SvgContentBounds,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct SvgContentBounds {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
 }
 
 impl SvgData {
@@ -64,10 +73,15 @@ impl SvgData {
         &self.inner.tree
     }
 
+    pub(crate) fn content_bounds(&self) -> SvgContentBounds {
+        self.inner.content_bounds
+    }
+
     fn decode_with_options(bytes: &[u8], options: &usvg::Options<'_>) -> Result<Self, SvgError> {
         let tree = usvg::Tree::from_data(bytes, options)?;
 
         let size = tree.size();
+        let content = tree.root().abs_layer_bounding_box();
 
         Ok(Self {
             inner: Arc::new(SvgDataInner {
@@ -75,6 +89,12 @@ impl SvgData {
 
                 width: size.width(),
                 height: size.height(),
+                content_bounds: SvgContentBounds {
+                    x: content.x(),
+                    y: content.y(),
+                    width: content.width(),
+                    height: content.height(),
+                },
             }),
         })
     }

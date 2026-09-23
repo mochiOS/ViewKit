@@ -25,7 +25,8 @@ struct SliderInteractionInner {
 struct SliderMetrics {
     label_height: f32,
     label_spacing: f32,
-    knob_size: f32,
+    thumb_width: f32,
+    thumb_height: f32,
     track_height: f32,
     hit_padding: f32,
 }
@@ -210,13 +211,13 @@ impl Slider {
         }
     }
 
-    fn track_bounds(&self, bounds: Rect, knob_size: f32, track_height: f32) -> Rect {
-        let knob_radius = knob_size / 2.0;
+    fn track_bounds(&self, bounds: Rect, thumb_width: f32, track_height: f32) -> Rect {
+        let thumb_radius = thumb_width / 2.0;
 
-        let width = (bounds.size.width - knob_size).max(0.0);
+        let width = (bounds.size.width - thumb_width).max(0.0);
 
         Rect::new(
-            bounds.origin.x + knob_radius,
+            bounds.origin.x + thumb_radius,
             bounds.origin.y + (bounds.size.height - track_height) / 2.0,
             width,
             track_height,
@@ -239,12 +240,12 @@ impl Slider {
         bounds: Rect,
         label_height: f32,
         label_spacing: f32,
-        knob_size: f32,
+        thumb_width: f32,
         track_height: f32,
     ) -> f32 {
         let track = self.track_bounds(
             self.slider_bounds(bounds, label_height, label_spacing),
-            knob_size,
+            thumb_width,
             track_height,
         );
 
@@ -256,26 +257,27 @@ impl Slider {
         bounds: Rect,
         label_height: f32,
         label_spacing: f32,
-        knob_size: f32,
+        thumb_width: f32,
+        thumb_height: f32,
         track_height: f32,
     ) -> Rect {
         let slider_bounds = self.slider_bounds(bounds, label_height, label_spacing);
 
         let center_x =
-            self.knob_center_x(bounds, label_height, label_spacing, knob_size, track_height);
+            self.knob_center_x(bounds, label_height, label_spacing, thumb_width, track_height);
 
         Rect::new(
-            center_x - knob_size / 2.0,
-            slider_bounds.origin.y + (slider_bounds.size.height - knob_size) / 2.0,
-            knob_size,
-            knob_size,
+            center_x - thumb_width / 2.0,
+            slider_bounds.origin.y + (slider_bounds.size.height - thumb_height) / 2.0,
+            thumb_width,
+            thumb_height,
         )
     }
 
     fn value_from_pointer(&self, bounds: Rect, pointer_x: f32, metrics: SliderMetrics) -> f32 {
         let track = self.track_bounds(
             self.slider_bounds(bounds, metrics.label_height, metrics.label_spacing),
-            metrics.knob_size,
+            metrics.thumb_width,
             metrics.track_height,
         );
 
@@ -361,11 +363,11 @@ impl View for Slider {
 
         let label_height = context.typography.label.line_height;
         let label_spacing = context.theme.spacing.extra_small;
-        let knob_size = context.theme.layout.range_knob_size;
+        let thumb = context.theme.layout.control_thumb_size(false);
         let track_height = context.theme.layout.range_track_height;
         let slider_bounds = self.slider_bounds(bounds, label_height, label_spacing);
 
-        let track_bounds = self.track_bounds(slider_bounds, knob_size, track_height);
+        let track_bounds = self.track_bounds(slider_bounds, thumb.width, track_height);
 
         let progress = self.progress();
 
@@ -421,17 +423,17 @@ impl View for Slider {
 
         let knob_center_x = track_bounds.origin.x + track_bounds.size.width * progress;
 
-        let knob_size = if dragging {
-            context.theme.layout.range_dragging_knob_size
+        let visible_thumb = if dragging {
+            context.theme.layout.control_thumb_size(true)
         } else {
-            knob_size
+            thumb
         };
 
         let knob_bounds = Rect::new(
-            knob_center_x - knob_size / 2.0,
-            slider_bounds.origin.y + (slider_bounds.size.height - knob_size) / 2.0,
-            knob_size,
-            knob_size,
+            knob_center_x - visible_thumb.width / 2.0,
+            slider_bounds.origin.y + (slider_bounds.size.height - visible_thumb.height) / 2.0,
+            visible_thumb.width,
+            visible_thumb.height,
         );
 
         let knob_color = if !self.enabled {
@@ -484,10 +486,12 @@ impl View for Slider {
             return EventResult::Ignored;
         }
 
+        let thumb = context.theme().layout.control_thumb_size(false);
         let metrics = SliderMetrics {
             label_height: context.typography().label.line_height,
             label_spacing: context.theme().spacing.extra_small,
-            knob_size: context.theme().layout.range_knob_size,
+            thumb_width: thumb.width,
+            thumb_height: thumb.height,
             track_height: context.theme().layout.range_track_height,
             hit_padding: context.theme().layout.range_hit_padding,
         };
@@ -566,7 +570,8 @@ impl View for Slider {
                     bounds,
                     metrics.label_height,
                     metrics.label_spacing,
-                    metrics.knob_size,
+                    metrics.thumb_width,
+                    metrics.thumb_height,
                     metrics.track_height,
                 );
 
@@ -578,7 +583,7 @@ impl View for Slider {
                             bounds,
                             metrics.label_height,
                             metrics.label_spacing,
-                            metrics.knob_size,
+                            metrics.thumb_width,
                             metrics.track_height,
                         )
                 } else {

@@ -6,7 +6,7 @@
 use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 use crate::draw_command::DrawCommand;
 use crate::geometry::{Rect, Size};
-use crate::svg::SvgData;
+use crate::svg::{SvgContentBounds, SvgData};
 use crate::theme::{Color, LayoutTokens};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 use std::sync::OnceLock;
@@ -88,14 +88,10 @@ impl View for Icon {
         let Some(svg) = self.name.svg() else {
             return;
         };
-        // VK Symbols use a 24px canvas, but most artwork occupies only its
-        // central ~10px. Enlarge the artwork inside the logical icon bounds.
-        let scale = 1.8;
-        let artwork = Rect::new(
-            bounds.origin.x - bounds.size.width * (scale - 1.0) / 2.0,
-            bounds.origin.y - bounds.size.height * (scale - 1.0) / 2.0,
-            bounds.size.width * scale,
-            bounds.size.height * scale,
+        let artwork = normalized_svg_bounds(
+            bounds,
+            &svg,
+            context.theme.layout.icon_optical_scale,
         );
         if let Some(label) = self.accessibility_label.as_ref() {
             let mut node = AccessibilityNode::new(AccessibilityRole::Image, bounds);
@@ -111,6 +107,45 @@ impl View for Icon {
     }
 }
 
+fn normalized_svg_bounds(bounds: Rect, svg: &SvgData, optical_scale: f32) -> Rect {
+    let content = svg.content_bounds();
+    if !valid_content_bounds(content) {
+        return bounds;
+    }
+
+    let optical_scale = if optical_scale.is_finite() && optical_scale > 0.0 {
+        optical_scale.min(1.0)
+    } else {
+        1.0
+    };
+    let target_width = bounds.size.width * optical_scale;
+    let target_height = bounds.size.height * optical_scale;
+    let scale = (target_width / content.width).min(target_height / content.height);
+    if !scale.is_finite() || scale <= 0.0 {
+        return bounds;
+    }
+
+    let content_center_x = content.x + content.width / 2.0;
+    let content_center_y = content.y + content.height / 2.0;
+    let target_center_x = bounds.origin.x + bounds.size.width / 2.0;
+    let target_center_y = bounds.origin.y + bounds.size.height / 2.0;
+    Rect::new(
+        target_center_x - content_center_x * scale,
+        target_center_y - content_center_y * scale,
+        svg.width() * scale,
+        svg.height() * scale,
+    )
+}
+
+fn valid_content_bounds(bounds: SvgContentBounds) -> bool {
+    bounds.x.is_finite()
+        && bounds.y.is_finite()
+        && bounds.width.is_finite()
+        && bounds.height.is_finite()
+        && bounds.width > 0.0
+        && bounds.height > 0.0
+}
+
 fn sanitize_size(size: f32) -> Option<f32> {
     if size.is_finite() && size > 0.0 {
         Some(size)
@@ -124,5 +159,43 @@ fn sanitize_opacity(opacity: f32) -> f32 {
         opacity.clamp(0.0, 1.0)
     } else {
         1.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn svg_with_rect(x: u32) -> SvgData {
+        SvgData::decode(
+            format!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="{x}" y="6" width="10" height="8"/></svg>"#
+            )
+            .as_bytes(),
+        )
+        .expect("test SVG should decode")
+    }
+
+    #[test]
+    fn optical_normalization_ignores_canvas_padding() {
+        let bounds = Rect::new(10.0, 20.0, 20.0, 20.0);
+        let left = svg_with_rect(2);
+        let right = svg_with_rect(10);
+        let left_bounds = normalized_svg_bounds(bounds, &left, 0.84);
+        let right_bounds = normalized_svg_bounds(bounds, &right, 0.84);
+        let left_content = left.content_bounds();
+        let right_content = right.content_bounds();
+
+        let left_scale = left_bounds.size.width / left.width();
+        let right_scale = right_bounds.size.width / right.width();
+        let left_visual_center = left_bounds.origin.x
+            + (left_content.x + left_content.width / 2.0) * left_scale;
+        let right_visual_center = right_bounds.origin.x
+            + (right_content.x + right_content.width / 2.0) * right_scale;
+
+        assert!((left_visual_center - 20.0).abs() < 0.001);
+        assert!((right_visual_center - 20.0).abs() < 0.001);
+        assert!((left_content.width * left_scale - 16.8).abs() < 0.001);
+        assert!((right_content.width * right_scale - 16.8).abs() < 0.001);
     }
 }

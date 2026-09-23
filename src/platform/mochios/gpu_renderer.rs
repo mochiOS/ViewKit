@@ -73,8 +73,8 @@ impl GpuSceneRenderer {
         Self {
             vertices: Vec::new(),
             atlas: Vec::new(),
-            atlas_x: 1,
-            atlas_y: 0,
+            atlas_x: 2,
+            atlas_y: 1,
             atlas_row_height: 1,
             atlas_dirty_rows: None,
             clips: Vec::new(),
@@ -241,8 +241,8 @@ impl GpuSceneRenderer {
 
     fn clear_atlas_cache(&mut self) {
         self.atlas.clear();
-        self.atlas_x = 1;
-        self.atlas_y = 0;
+        self.atlas_x = 2;
+        self.atlas_y = 1;
         self.atlas_row_height = 1;
         self.atlas_dirty_rows = None;
         self.glyph_atlas_cache.clear();
@@ -659,11 +659,14 @@ impl GpuSceneRenderer {
             if self.svg_raster_cache.len() >= SVG_RASTER_CACHE_CAPACITY {
                 return Err(self.atlas_capacity_error());
             }
-            let mut pixmap =
-                Pixmap::new(width, height).ok_or(MochiOsBackendError::InvalidWindowSize)?;
+            let raster_scale = svg_raster_scale(width, height);
+            let raster_width = width.saturating_mul(raster_scale);
+            let raster_height = height.saturating_mul(raster_scale);
+            let mut pixmap = Pixmap::new(raster_width, raster_height)
+                .ok_or(MochiOsBackendError::InvalidWindowSize)?;
             let transform = Transform::from_scale(
-                width as f32 / command.svg.width(),
-                height as f32 / command.svg.height(),
+                raster_width as f32 / command.svg.width(),
+                raster_height as f32 / command.svg.height(),
             );
             resvg::render(command.svg.tree(), transform, &mut pixmap.as_mut());
             if let Some(tint) = command.tint {
@@ -675,7 +678,14 @@ impl GpuSceneRenderer {
                     pixel[3] = alpha;
                 }
             }
-            let pixels = rgba_to_bgra(pixmap.data());
+            let rgba = downsample_premultiplied_rgba(
+                pixmap.data(),
+                raster_width,
+                raster_height,
+                width,
+                height,
+            );
+            let pixels = rgba_to_bgra(&rgba);
             let atlas = self.pack_bgra(width, height, &pixels)?;
             self.svg_raster_cache.push(SvgRasterCacheEntry {
                 svg: command.svg.clone(),
@@ -964,7 +974,7 @@ impl GpuSceneRenderer {
             return Err(MochiOsBackendError::InvalidWindowSize);
         }
         if self.atlas_x + width > ATLAS_WIDTH {
-            self.atlas_x = 0;
+            self.atlas_x = 1;
             self.atlas_y = self.atlas_y.saturating_add(self.atlas_row_height);
             self.atlas_row_height = 0;
         }
@@ -1006,7 +1016,7 @@ impl GpuSceneRenderer {
             return Err(MochiOsBackendError::InvalidWindowSize);
         }
         if self.atlas_x + width > ATLAS_WIDTH {
-            self.atlas_x = 0;
+            self.atlas_x = 1;
             self.atlas_y = self.atlas_y.saturating_add(self.atlas_row_height);
             self.atlas_row_height = 0;
         }
@@ -1171,6 +1181,53 @@ fn premultiply(channel: u8, alpha: u8) -> u8 {
 
 fn combine_alpha(mask: u8, alpha: u8) -> u8 {
     ((u16::from(mask) * u16::from(alpha) + 127) / 255) as u8
+}
+
+fn svg_raster_scale(width: u32, height: u32) -> u32 {
+    let longest_edge = width.max(height);
+    if longest_edge <= 32 {
+        4
+    } else if longest_edge <= 64 {
+        2
+    } else {
+        1
+    }
+}
+
+fn downsample_premultiplied_rgba(
+    pixels: &[u8],
+    source_width: u32,
+    source_height: u32,
+    width: u32,
+    height: u32,
+) -> Vec<u8> {
+    if source_width == width && source_height == height {
+        return pixels.to_vec();
+    }
+    let scale_x = source_width / width;
+    let scale_y = source_height / height;
+    let sample_count = scale_x.saturating_mul(scale_y).max(1);
+    let mut output = vec![0; width as usize * height as usize * 4];
+    for y in 0..height {
+        for x in 0..width {
+            let mut sum = [0_u32; 4];
+            for sample_y in 0..scale_y {
+                for sample_x in 0..scale_x {
+                    let source_x = x * scale_x + sample_x;
+                    let source_y = y * scale_y + sample_y;
+                    let source = ((source_y * source_width + source_x) * 4) as usize;
+                    for channel in 0..4 {
+                        sum[channel] += u32::from(pixels[source + channel]);
+                    }
+                }
+            }
+            let target = ((y * width + x) * 4) as usize;
+            for channel in 0..4 {
+                output[target + channel] = ((sum[channel] + sample_count / 2) / sample_count) as u8;
+            }
+        }
+    }
+    output
 }
 
 fn ellipse_points(rect: Rect) -> Vec<(f32, f32)> {
