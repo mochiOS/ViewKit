@@ -416,13 +416,29 @@ impl EventDispatcher {
             modifiers,
         } = event
         {
+            // Give the focused control the first opportunity to consume Tab.
+            // Multi-line editors use it as document input, while controls that
+            // ignore it retain the normal keyboard focus traversal behavior.
+            let tab_result = root.handle_event(
+                bounds,
+                &ViewEvent::KeyPressed {
+                    key: Key::Tab,
+                    modifiers: *modifiers,
+                },
+                context,
+            );
+            result = result.merge(tab_result);
+            if tab_result.is_consumed() {
+                return result;
+            }
+
             let target = self.next_focus(modifiers.shift());
             self.focused_bounds = target;
-            return root.handle_event(
+            return result.merge(root.handle_event(
                 bounds,
                 &ViewEvent::KeyboardFocusRequested { bounds: target },
                 context,
-            );
+            ));
         }
 
         let is_primary_press = matches!(

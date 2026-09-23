@@ -7,7 +7,7 @@ use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Point, Rect, Size};
 use crate::platform::{CursorIcon, Key, PointerButton};
 use crate::state::Binding;
-use crate::theme::{CornerRadius, ShadowStyle};
+use crate::theme::{CornerRadius, ScrollBarTokens, ShadowStyle};
 use crate::typography::TextRole;
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 use std::cell::RefCell;
@@ -16,7 +16,15 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 const CARET_BLINK_INTERVAL: Duration = Duration::from_millis(500);
+const HISTORY_GROUP_INTERVAL: Duration = Duration::from_millis(750);
 const MAX_HISTORY: usize = 100;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EditKind {
+    Insert,
+    Delete,
+    Discrete,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 struct EditorSnapshot {
@@ -37,9 +45,18 @@ struct TextEditorInteractionInner {
     initialized: bool,
     scroll_x: f32,
     scroll_y: f32,
+    reveal_caret: bool,
+    vertical_scroll_drag: Option<f32>,
+    horizontal_scroll_drag: Option<f32>,
+    cached_layout_value: String,
+    cached_layout_monospaced: bool,
+    cached_layout_line_height: f32,
+    cached_line_widths: Vec<f32>,
     caret_blink_origin: Option<Instant>,
     undo: Vec<EditorSnapshot>,
     redo: Vec<EditorSnapshot>,
+    last_edit_kind: Option<EditKind>,
+    last_edit_at: Option<Instant>,
 }
 
 impl Default for TextEditorInteractionInner {
@@ -55,9 +72,18 @@ impl Default for TextEditorInteractionInner {
             initialized: false,
             scroll_x: 0.0,
             scroll_y: 0.0,
+            reveal_caret: true,
+            vertical_scroll_drag: None,
+            horizontal_scroll_drag: None,
+            cached_layout_value: String::new(),
+            cached_layout_monospaced: false,
+            cached_layout_line_height: 0.0,
+            cached_line_widths: Vec::new(),
             caret_blink_origin: None,
             undo: Vec::new(),
             redo: Vec::new(),
+            last_edit_kind: None,
+            last_edit_at: None,
         }
     }
 }
@@ -85,8 +111,13 @@ impl TextEditorInteractionState {
         inner.selecting = false;
         inner.scroll_x = 0.0;
         inner.scroll_y = 0.0;
+        inner.reveal_caret = true;
+        inner.vertical_scroll_drag = None;
+        inner.horizontal_scroll_drag = None;
         inner.undo.clear();
         inner.redo.clear();
+        inner.last_edit_kind = None;
+        inner.last_edit_at = None;
         inner.initialized = true;
     }
 
@@ -130,6 +161,9 @@ impl TextEditorInteractionState {
         inner.cursor = snapshot.cursor.min(inner.value.len());
         inner.selection_anchor = snapshot.selection_anchor;
         inner.selecting = false;
+        inner.reveal_caret = true;
+        inner.last_edit_kind = None;
+        inner.last_edit_at = None;
     }
 
     fn undo(&self) -> bool {
@@ -155,6 +189,14 @@ impl TextEditorInteractionState {
     }
 
     fn edit(&self, operation: impl FnOnce(&mut TextEditorInteractionInner) -> bool) -> bool {
+        self.edit_with_kind(EditKind::Discrete, operation)
+    }
+
+    fn edit_with_kind(
+        &self,
+        kind: EditKind,
+        operation: impl FnOnce(&mut TextEditorInteractionInner) -> bool,
+    ) -> bool {
         let mut inner = self.inner.borrow_mut();
         let before = Self::snapshot(&inner);
         if !operation(&mut inner) {
@@ -164,19 +206,30 @@ impl TextEditorInteractionState {
             return false;
         }
         if inner.value != before.value {
-            if inner.undo.last() != Some(&before) {
+            let now = Instant::now();
+            let grouped = kind != EditKind::Discrete
+                && inner.last_edit_kind == Some(kind)
+                && inner
+                    .last_edit_at
+                    .is_some_and(|previous| now.saturating_duration_since(previous) <= HISTORY_GROUP_INTERVAL);
+            if !grouped && inner.undo.last() != Some(&before) {
                 inner.undo.push(before);
                 if inner.undo.len() > MAX_HISTORY {
                     inner.undo.remove(0);
                 }
             }
             inner.redo.clear();
+            inner.last_edit_kind = Some(kind);
+            inner.last_edit_at = Some(now);
         }
+        inner.reveal_caret = true;
         true
     }
 
     fn reset_caret(&self) {
-        self.inner.borrow_mut().caret_blink_origin = Some(Instant::now());
+        let mut inner = self.inner.borrow_mut();
+        inner.caret_blink_origin = Some(Instant::now());
+        inner.reveal_caret = true;
     }
 }
 
@@ -323,6 +376,9 @@ impl TextEditor {
         let changed = inner.cursor != cursor;
         inner.cursor = cursor;
         inner.selecting = false;
+        inner.reveal_caret = true;
+        inner.last_edit_kind = None;
+        inner.last_edit_at = None;
         changed
     }
 
@@ -346,14 +402,16 @@ impl TextEditor {
     }
 
     fn move_vertical(&self, down: bool, extend: bool) -> bool {
+        self.move_vertical_by(if down { 1 } else { -1 }, extend)
+    }
+
+    fn move_vertical_by(&self, amount: isize, extend: bool) -> bool {
         let inner = self.interaction.inner.borrow();
         let lines = line_ranges(&inner.value);
         let (line_index, column) = line_and_column(&inner.value, inner.cursor, &lines);
-        let target_line = if down {
-            (line_index + 1).min(lines.len().saturating_sub(1))
-        } else {
-            line_index.saturating_sub(1)
-        };
+        let target_line = line_index
+            .saturating_add_signed(amount)
+            .min(lines.len().saturating_sub(1));
         let target = index_for_column(&inner.value, &lines[target_line], column);
         drop(inner);
         self.set_cursor(target, extend)
@@ -377,6 +435,8 @@ impl TextEditor {
         inner.selection_anchor = Some(0);
         inner.cursor = inner.value.len();
         inner.selecting = false;
+        inner.last_edit_kind = None;
+        inner.last_edit_at = None;
         changed
     }
 
@@ -389,6 +449,130 @@ impl TextEditor {
         inner.cursor = range.start + replacement.len();
         inner.selection_anchor = None;
         inner.selecting = false;
+        true
+    }
+
+    fn event_document_size(&self, context: &mut EventContext<'_>) -> Size {
+        let line_height = self.event_line_height(context).max(1.0);
+        let mut inner = self.interaction.inner.borrow_mut();
+        refresh_line_width_cache(
+            &mut inner,
+            self.monospaced,
+            line_height,
+            |line| {
+                self.text(line)
+                    .measure_unbounded_with_typography(context.text_measurer, context.typography)
+                    .width
+            },
+        );
+        let width = inner.cached_line_widths.iter().copied().fold(0.0_f32, f32::max)
+            + context.theme.text_field.caret_width;
+        let line_count = inner.cached_line_widths.len();
+        Size::new(width, line_count as f32 * line_height)
+    }
+
+    fn begin_scrollbar_drag(
+        &self,
+        position: Point,
+        bounds: Rect,
+        context: &mut EventContext<'_>,
+    ) -> bool {
+        let padding = context.theme.spacing.large;
+        let viewport = Self::content_bounds(bounds, padding);
+        let document = self.event_document_size(context);
+        let offset = {
+            let inner = self.interaction.inner.borrow();
+            Point::new(inner.scroll_x, inner.scroll_y)
+        };
+        let geometry = editor_scrollbar_geometry(viewport, document, offset, context.theme.scrollbar);
+
+        if let Some(vertical) = geometry.vertical
+            && vertical.track.expanded(4.0).contains(position)
+        {
+            let grab = if vertical.thumb.contains(position) {
+                position.y - vertical.thumb.origin.y
+            } else {
+                vertical.thumb.size.height / 2.0
+            };
+            let mut inner = self.interaction.inner.borrow_mut();
+            inner.vertical_scroll_drag = Some(grab);
+            inner.horizontal_scroll_drag = None;
+            inner.reveal_caret = false;
+            inner.scroll_y = scrollbar_offset(
+                position.y,
+                grab,
+                vertical.track,
+                vertical.thumb.size.height,
+                vertical.maximum_offset,
+            );
+            return true;
+        }
+
+        if let Some(horizontal) = geometry.horizontal
+            && horizontal.track.expanded(4.0).contains(position)
+        {
+            let grab = if horizontal.thumb.contains(position) {
+                position.x - horizontal.thumb.origin.x
+            } else {
+                horizontal.thumb.size.width / 2.0
+            };
+            let mut inner = self.interaction.inner.borrow_mut();
+            inner.horizontal_scroll_drag = Some(grab);
+            inner.vertical_scroll_drag = None;
+            inner.reveal_caret = false;
+            inner.scroll_x = scrollbar_offset(
+                position.x,
+                grab,
+                horizontal.track,
+                horizontal.thumb.size.width,
+                horizontal.maximum_offset,
+            );
+            return true;
+        }
+
+        false
+    }
+
+    fn update_scrollbar_drag(
+        &self,
+        position: Point,
+        bounds: Rect,
+        context: &mut EventContext<'_>,
+    ) -> bool {
+        let (vertical_grab, horizontal_grab, offset) = {
+            let inner = self.interaction.inner.borrow();
+            (
+                inner.vertical_scroll_drag,
+                inner.horizontal_scroll_drag,
+                Point::new(inner.scroll_x, inner.scroll_y),
+            )
+        };
+        if vertical_grab.is_none() && horizontal_grab.is_none() {
+            return false;
+        }
+
+        let viewport = Self::content_bounds(bounds, context.theme.spacing.large);
+        let document = self.event_document_size(context);
+        let geometry = editor_scrollbar_geometry(viewport, document, offset, context.theme.scrollbar);
+        let mut inner = self.interaction.inner.borrow_mut();
+        if let (Some(grab), Some(vertical)) = (vertical_grab, geometry.vertical) {
+            inner.scroll_y = scrollbar_offset(
+                position.y,
+                grab,
+                vertical.track,
+                vertical.thumb.size.height,
+                vertical.maximum_offset,
+            );
+        }
+        if let (Some(grab), Some(horizontal)) = (horizontal_grab, geometry.horizontal) {
+            inner.scroll_x = scrollbar_offset(
+                position.x,
+                grab,
+                horizontal.track,
+                horizontal.thumb.size.width,
+                horizontal.maximum_offset,
+            );
+        }
         true
     }
 }
@@ -415,20 +599,52 @@ impl View for TextEditor {
         let focused = inner.focused && inner.enabled;
         let line_height = self.line_height(context).max(1.0);
         let lines = line_ranges(&value);
-        let content_height = lines.len() as f32 * line_height;
-        let content_width = lines
-            .iter()
-            .map(|range| {
-                self.text(&value[range.clone()])
+        refresh_line_width_cache(
+            &mut inner,
+            self.monospaced,
+            line_height,
+            |line| {
+                self.text(line)
                     .measure_unbounded_with_typography(context.text_measurer, context.typography)
                     .width
-            })
-            .fold(0.0_f32, f32::max);
-        inner.scroll_x = inner.scroll_x.clamp(0.0, (content_width - content.size.width).max(0.0));
-        inner.scroll_y = inner.scroll_y.clamp(0.0, (content_height - content.size.height).max(0.0));
+            },
+        );
+        let line_widths = inner.cached_line_widths.clone();
+        let content_width = line_widths.iter().copied().fold(0.0_f32, f32::max)
+            + context.theme.text_field.caret_width;
+        let content_height = lines.len() as f32 * line_height;
+        let maximum_x = (content_width - content.size.width).max(0.0);
+        let maximum_y = (content_height - content.size.height).max(0.0);
+        inner.scroll_x = inner.scroll_x.clamp(0.0, maximum_x);
+        inner.scroll_y = inner.scroll_y.clamp(0.0, maximum_y);
+
+        let (cursor_line, _) = line_and_column(&value, cursor, &lines);
+        let cursor_prefix = &value[lines[cursor_line].start..cursor];
+        let cursor_x = self.text(cursor_prefix)
+            .measure_unbounded_with_typography(context.text_measurer, context.typography)
+            .width;
+        if inner.reveal_caret && focused {
+            let horizontal_margin = context.theme.spacing.small;
+            if cursor_x < inner.scroll_x {
+                inner.scroll_x = cursor_x.max(0.0);
+            } else if cursor_x + horizontal_margin > inner.scroll_x + content.size.width {
+                inner.scroll_x = (cursor_x + horizontal_margin - content.size.width).min(maximum_x);
+            }
+            let cursor_y = cursor_line as f32 * line_height;
+            if cursor_y < inner.scroll_y {
+                inner.scroll_y = cursor_y;
+            } else if cursor_y + line_height > inner.scroll_y + content.size.height {
+                inner.scroll_y = (cursor_y + line_height - content.size.height).min(maximum_y);
+            }
+            inner.reveal_caret = false;
+        }
         let scroll_x = inner.scroll_x;
         let scroll_y = inner.scroll_y;
         drop(inner);
+
+        let first_visible_line = (scroll_y / line_height).floor() as usize;
+        let last_visible_line = ((scroll_y + content.size.height) / line_height).ceil() as usize;
+        let visible_lines = first_visible_line.min(lines.len())..last_visible_line.min(lines.len());
 
         let mut node = AccessibilityNode::new(AccessibilityRole::TextField, bounds);
         node.label = Some(if self.placeholder.is_empty() { "Document".into() } else { self.placeholder.clone() });
@@ -451,7 +667,8 @@ impl View for TextEditor {
 
         context.display_list.push(DrawCommand::PushClip { rect: content });
         if let Some(selection) = selection.as_ref() {
-            for (line_index, range) in lines.iter().enumerate() {
+            for line_index in visible_lines.clone() {
+                let range = &lines[line_index];
                 let start = selection.start.max(range.start);
                 let end = selection.end.min(range.end);
                 if start >= end && !(selection.end > range.end && selection.start <= range.end) {
@@ -482,34 +699,33 @@ impl View for TextEditor {
                 .accessibility_hidden(true)
                 .paint(content, context);
         } else if !value.is_empty() {
-            self.text(value.clone())
-                .color(context.theme.colors.text_primary)
-                .accessibility_hidden(true)
-                .paint(
-                    Rect::new(
-                        content.origin.x - scroll_x,
-                        content.origin.y - scroll_y,
-                        content_width.max(content.size.width),
-                        content_height.max(content.size.height),
-                    ),
-                    context,
-                );
+            for line_index in visible_lines.clone() {
+                let range = &lines[line_index];
+                self.text(value[range.clone()].to_owned())
+                    .color(context.theme.colors.text_primary)
+                    .accessibility_hidden(true)
+                    .paint(
+                        Rect::new(
+                            content.origin.x - scroll_x,
+                            content.origin.y + line_index as f32 * line_height - scroll_y,
+                            (line_widths[line_index] + context.theme.text_field.caret_width)
+                                .max(content.size.width),
+                            line_height,
+                        ),
+                        context,
+                    );
+            }
         }
 
         if focused && selection.is_none() {
-            let (line_index, _) = line_and_column(&value, cursor, &lines);
-            let line = &lines[line_index];
-            let prefix = &value[line.start..cursor];
-            let prefix_width = self.text(prefix)
-                .measure_unbounded_with_typography(context.text_measurer, context.typography).width;
             let now = Instant::now();
             let (visible, next_redraw) = caret_state(&self.interaction, now);
             context.request_redraw_in_at(bounds, next_redraw);
             if visible {
                 context.display_list.push(DrawCommand::FillRoundedRect {
                     rect: Rect::new(
-                        content.origin.x + prefix_width - scroll_x,
-                        content.origin.y + line_index as f32 * line_height - scroll_y,
+                        content.origin.x + cursor_x - scroll_x,
+                        content.origin.y + cursor_line as f32 * line_height - scroll_y,
                         context.theme.text_field.caret_width,
                         line_height,
                     ),
@@ -519,11 +735,23 @@ impl View for TextEditor {
             }
         }
         context.display_list.push(DrawCommand::PopClip);
+
+        paint_editor_scrollbars(
+            content,
+            Size::new(content_width, content_height),
+            Point::new(scroll_x, scroll_y),
+            context.theme.scrollbar,
+            context,
+        );
     }
 
     fn handle_event(&self, bounds: Rect, event: &ViewEvent, context: &mut EventContext<'_>) -> EventResult {
         match event {
             ViewEvent::PointerMoved { position } => {
+                if self.update_scrollbar_drag(*position, bounds, context) {
+                    context.request_redraw_in(bounds);
+                    return EventResult::Consumed;
+                }
                 let hovered = bounds.contains(*position);
                 let selecting = {
                     let mut inner = self.interaction.inner.borrow_mut();
@@ -534,6 +762,31 @@ impl View for TextEditor {
                     context.set_cursor(CursorIcon::Text);
                 }
                 if selecting {
+                    let content = Self::content_bounds(bounds, context.theme.spacing.large);
+                    {
+                        let mut inner = self.interaction.inner.borrow_mut();
+                        if position.y < content.origin.y {
+                            inner.scroll_y = (inner.scroll_y
+                                - (content.origin.y - position.y).min(32.0))
+                                .max(0.0);
+                        } else if position.y > content.origin.y + content.size.height {
+                            inner.scroll_y += (position.y
+                                - content.origin.y
+                                - content.size.height)
+                                .min(32.0);
+                        }
+                        if position.x < content.origin.x {
+                            inner.scroll_x = (inner.scroll_x
+                                - (content.origin.x - position.x).min(32.0))
+                                .max(0.0);
+                        } else if position.x > content.origin.x + content.size.width {
+                            inner.scroll_x += (position.x
+                                - content.origin.x
+                                - content.size.width)
+                                .min(32.0);
+                        }
+                        inner.reveal_caret = false;
+                    }
                     let cursor = self.index_at_point(*position, bounds, context);
                     self.interaction.inner.borrow_mut().cursor = cursor;
                     context.request_redraw_in(bounds);
@@ -541,12 +794,19 @@ impl View for TextEditor {
                 EventResult::Ignored
             }
             ViewEvent::PointerPressed { position, button: PointerButton::Primary } if bounds.contains(*position) => {
+                if self.begin_scrollbar_drag(*position, bounds, context) {
+                    context.request_redraw_in(bounds);
+                    return EventResult::Consumed;
+                }
                 let cursor = self.index_at_point(*position, bounds, context);
                 let mut inner = self.interaction.inner.borrow_mut();
                 inner.focused = self.enabled;
                 inner.cursor = cursor;
                 inner.selection_anchor = Some(cursor);
                 inner.selecting = true;
+                inner.reveal_caret = true;
+                inner.last_edit_kind = None;
+                inner.last_edit_at = None;
                 inner.caret_blink_origin = Some(Instant::now());
                 drop(inner);
                 context.request_keyboard_focus(bounds);
@@ -555,6 +815,13 @@ impl View for TextEditor {
             }
             ViewEvent::PointerReleased { button: PointerButton::Primary, .. } => {
                 let mut inner = self.interaction.inner.borrow_mut();
+                let ended_scroll_drag = inner.vertical_scroll_drag.take().is_some()
+                    || inner.horizontal_scroll_drag.take().is_some();
+                if ended_scroll_drag {
+                    drop(inner);
+                    context.request_redraw_in(bounds);
+                    return EventResult::Consumed;
+                }
                 if !inner.selecting { return EventResult::Ignored; }
                 inner.selecting = false;
                 if inner.selection_anchor == Some(inner.cursor) { inner.selection_anchor = None; }
@@ -583,15 +850,16 @@ impl View for TextEditor {
             }
             ViewEvent::Scroll { position, delta_x, delta_y } if bounds.contains(*position) => {
                 let mut inner = self.interaction.inner.borrow_mut();
-                inner.scroll_x = (inner.scroll_x - delta_x).max(0.0);
-                inner.scroll_y = (inner.scroll_y - delta_y).max(0.0);
+                inner.scroll_x = (inner.scroll_x + delta_x).max(0.0);
+                inner.scroll_y = (inner.scroll_y + delta_y).max(0.0);
+                inner.reveal_caret = false;
                 drop(inner);
                 context.request_redraw_in(bounds);
                 EventResult::Consumed
             }
             ViewEvent::TextInput { text } if self.interaction.is_focused() => {
                 let inserted: String = text.chars().filter(|character| *character == '\t' || !character.is_control()).collect();
-                if !inserted.is_empty() && self.interaction.edit(|inner| Self::replace_selection(inner, &inserted)) {
+                if !inserted.is_empty() && self.interaction.edit_with_kind(EditKind::Insert, |inner| Self::replace_selection(inner, &inserted)) {
                     self.synchronize(); self.interaction.reset_caret(); context.request_redraw_in(bounds);
                 }
                 EventResult::Consumed
@@ -614,7 +882,7 @@ impl View for TextEditor {
                 EventResult::Consumed
             }
             ViewEvent::Backspace if self.interaction.is_focused() => {
-                let changed = self.interaction.edit(|inner| {
+                let changed = self.interaction.edit_with_kind(EditKind::Delete, |inner| {
                     if selection_range(inner).is_some() { return Self::replace_selection(inner, ""); }
                     let previous = previous_boundary(&inner.value, inner.cursor);
                     if previous == inner.cursor { false } else { inner.value.replace_range(previous..inner.cursor, ""); inner.cursor = previous; true }
@@ -623,7 +891,7 @@ impl View for TextEditor {
                 EventResult::Consumed
             }
             ViewEvent::Delete if self.interaction.is_focused() => {
-                let changed = self.interaction.edit(|inner| {
+                let changed = self.interaction.edit_with_kind(EditKind::Delete, |inner| {
                     if selection_range(inner).is_some() { return Self::replace_selection(inner, ""); }
                     let next = next_boundary(&inner.value, inner.cursor);
                     if next == inner.cursor { false } else { inner.value.replace_range(inner.cursor..next, ""); true }
@@ -643,6 +911,14 @@ impl View for TextEditor {
             ViewEvent::KeyPressed { key: Key::ArrowDown, modifiers } if self.interaction.is_focused() => {
                 self.move_vertical(true, modifiers.shift()); self.interaction.reset_caret(); context.request_redraw_in(bounds); EventResult::Consumed
             }
+            ViewEvent::KeyPressed { key: Key::PageUp, modifiers } if self.interaction.is_focused() => {
+                let page = (bounds.size.height / self.event_line_height(context).max(1.0)).floor().max(1.0) as isize;
+                self.move_vertical_by(-page, modifiers.shift()); self.interaction.reset_caret(); context.request_redraw_in(bounds); EventResult::Consumed
+            }
+            ViewEvent::KeyPressed { key: Key::PageDown, modifiers } if self.interaction.is_focused() => {
+                let page = (bounds.size.height / self.event_line_height(context).max(1.0)).floor().max(1.0) as isize;
+                self.move_vertical_by(page, modifiers.shift()); self.interaction.reset_caret(); context.request_redraw_in(bounds); EventResult::Consumed
+            }
             ViewEvent::Home | ViewEvent::SelectHome if self.interaction.is_focused() => {
                 self.move_line_edge(false, matches!(event, ViewEvent::SelectHome)); self.interaction.reset_caret(); context.request_redraw_in(bounds); EventResult::Consumed
             }
@@ -655,6 +931,178 @@ impl View for TextEditor {
             _ => EventResult::Ignored,
         }
     }
+}
+
+#[derive(Clone, Copy)]
+struct EditorScrollbar {
+    track: Rect,
+    thumb: Rect,
+    maximum_offset: f32,
+}
+
+#[derive(Clone, Copy, Default)]
+struct EditorScrollbarGeometry {
+    vertical: Option<EditorScrollbar>,
+    horizontal: Option<EditorScrollbar>,
+}
+
+fn editor_scrollbar_geometry(
+    viewport: Rect,
+    document: Size,
+    offset: Point,
+    tokens: ScrollBarTokens,
+) -> EditorScrollbarGeometry {
+    let vertical_visible = document.height > viewport.size.height;
+    let horizontal_visible = document.width > viewport.size.width;
+    let thickness = tokens.thickness.max(0.0);
+    let inset = tokens.inset.max(0.0);
+    let length_inset = tokens.length_inset.max(0.0);
+    if thickness <= 0.0 {
+        return EditorScrollbarGeometry::default();
+    }
+
+    let vertical = vertical_visible.then(|| {
+        let reserved_bottom = if horizontal_visible { thickness + inset } else { 0.0 };
+        let track_length = (viewport.size.height
+            - inset * 2.0
+            - length_inset * 2.0
+            - reserved_bottom)
+            .max(0.0);
+        let track = Rect::new(
+            viewport.origin.x + viewport.size.width - inset - thickness - tokens.horizontal_offset,
+            viewport.origin.y + inset + length_inset,
+            thickness,
+            track_length,
+        );
+        let thumb_length = scrollbar_thumb_length(
+            track_length,
+            viewport.size.height,
+            document.height,
+            tokens.minimum_thumb_length,
+        );
+        let maximum_offset = (document.height - viewport.size.height).max(0.0);
+        let progress = if maximum_offset > 0.0 {
+            (offset.y / maximum_offset).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let thumb = Rect::new(
+            track.origin.x,
+            track.origin.y + (track_length - thumb_length).max(0.0) * progress,
+            thickness,
+            thumb_length,
+        );
+        EditorScrollbar { track, thumb, maximum_offset }
+    });
+
+    let horizontal = horizontal_visible.then(|| {
+        let reserved_right = if vertical_visible { thickness + inset } else { 0.0 };
+        let track_length = (viewport.size.width - inset * 2.0 - reserved_right).max(0.0);
+        let track = Rect::new(
+            viewport.origin.x + inset,
+            viewport.origin.y + viewport.size.height - inset - thickness,
+            track_length,
+            thickness,
+        );
+        let thumb_length = scrollbar_thumb_length(
+            track_length,
+            viewport.size.width,
+            document.width,
+            tokens.minimum_thumb_length,
+        );
+        let maximum_offset = (document.width - viewport.size.width).max(0.0);
+        let progress = if maximum_offset > 0.0 {
+            (offset.x / maximum_offset).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let thumb = Rect::new(
+            track.origin.x + (track_length - thumb_length).max(0.0) * progress,
+            track.origin.y,
+            thumb_length,
+            thickness,
+        );
+        EditorScrollbar { track, thumb, maximum_offset }
+    });
+
+    EditorScrollbarGeometry { vertical, horizontal }
+}
+
+fn scrollbar_thumb_length(track: f32, viewport: f32, document: f32, minimum: f32) -> f32 {
+    if track <= 0.0 || document <= viewport || document <= 0.0 {
+        return track.max(0.0);
+    }
+    (track * viewport / document).clamp(minimum.max(0.0).min(track), track)
+}
+
+fn scrollbar_offset(
+    pointer: f32,
+    grab: f32,
+    track: Rect,
+    thumb_length: f32,
+    maximum_offset: f32,
+) -> f32 {
+    let track_start = if track.size.width > track.size.height {
+        track.origin.x
+    } else {
+        track.origin.y
+    };
+    let track_length = if track.size.width > track.size.height {
+        track.size.width
+    } else {
+        track.size.height
+    };
+    let travel = (track_length - thumb_length).max(0.0);
+    if travel <= 0.0 || maximum_offset <= 0.0 {
+        return 0.0;
+    }
+    ((pointer - track_start - grab) / travel).clamp(0.0, 1.0) * maximum_offset
+}
+
+fn paint_editor_scrollbars(
+    viewport: Rect,
+    document: Size,
+    offset: Point,
+    tokens: ScrollBarTokens,
+    context: &mut PaintContext<'_>,
+) {
+    let geometry = editor_scrollbar_geometry(viewport, document, offset, tokens);
+    for scrollbar in [geometry.vertical, geometry.horizontal].into_iter().flatten() {
+        context.display_list.push(DrawCommand::FillRoundedRect {
+            rect: scrollbar.track,
+            radius: scrollbar.track.size.width.min(scrollbar.track.size.height) / 2.0,
+            color: tokens.track_color,
+        });
+        context.display_list.push(DrawCommand::FillRoundedRect {
+            rect: scrollbar.thumb,
+            radius: scrollbar.thumb.size.width.min(scrollbar.thumb.size.height) / 2.0,
+            color: tokens.thumb_color,
+        });
+    }
+}
+
+fn refresh_line_width_cache(
+    inner: &mut TextEditorInteractionInner,
+    monospaced: bool,
+    line_height: f32,
+    mut measure: impl FnMut(String) -> f32,
+) {
+    if inner.cached_layout_value == inner.value
+        && inner.cached_layout_monospaced == monospaced
+        && inner.cached_layout_line_height == line_height
+        && !inner.cached_line_widths.is_empty()
+    {
+        return;
+    }
+
+    let value = inner.value.clone();
+    inner.cached_line_widths = line_ranges(&value)
+        .into_iter()
+        .map(|range| measure(value[range].to_owned()))
+        .collect();
+    inner.cached_layout_value = value;
+    inner.cached_layout_monospaced = monospaced;
+    inner.cached_layout_line_height = line_height;
 }
 
 fn normalize_newlines(value: String) -> String {
@@ -718,6 +1166,8 @@ fn caret_state(interaction: &TextEditorInteractionState, now: Instant) -> (bool,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme::Theme;
+    use crate::typography::{TextMeasurer, Typography};
 
     #[test]
     fn line_navigation_uses_character_columns() {
@@ -743,5 +1193,64 @@ mod tests {
     #[test]
     fn normalizes_platform_newlines() {
         assert_eq!(normalize_newlines("a\r\nb\rc".into()), "a\nb\nc");
+    }
+
+    #[test]
+    fn adjacent_typing_is_one_undo_group() {
+        let state = TextEditorInteractionState::new();
+        state.set_value("");
+        assert!(state.edit_with_kind(EditKind::Insert, |inner| {
+            TextEditor::replace_selection(inner, "a")
+        }));
+        assert!(state.edit_with_kind(EditKind::Insert, |inner| {
+            TextEditor::replace_selection(inner, "b")
+        }));
+        assert_eq!(state.value(), "ab");
+        assert!(state.undo());
+        assert_eq!(state.value(), "");
+    }
+
+    #[test]
+    fn editor_scrollbar_reaches_document_end() {
+        let viewport = Rect::new(10.0, 20.0, 200.0, 100.0);
+        let document = Size::new(200.0, 300.0);
+        let tokens = crate::theme::Theme::DEFAULT.scrollbar;
+        let geometry = editor_scrollbar_geometry(
+            viewport,
+            document,
+            Point::new(0.0, 200.0),
+            tokens,
+        );
+        let vertical = geometry.vertical.expect("vertical scrollbar");
+        assert_eq!(vertical.maximum_offset, 200.0);
+        assert_eq!(
+            vertical.thumb.origin.y + vertical.thumb.size.height,
+            vertical.track.origin.y + vertical.track.size.height,
+        );
+    }
+
+    #[test]
+    fn positive_wheel_delta_scrolls_document_forward() {
+        let state = TextEditorInteractionState::new();
+        state.set_value("line\n".repeat(100));
+        let editor = TextEditor::with_interaction(state.clone());
+        let mut measurer = TextMeasurer::new();
+        let mut context = EventContext::new(
+            &Theme::DEFAULT,
+            &Typography::DEFAULT,
+            &mut measurer,
+        );
+        let result = editor.handle_event(
+            Rect::new(0.0, 0.0, 320.0, 200.0),
+            &ViewEvent::Scroll {
+                position: Point::new(40.0, 40.0),
+                delta_x: 0.0,
+                delta_y: 48.0,
+            },
+            &mut context,
+        );
+
+        assert_eq!(result, EventResult::Consumed);
+        assert_eq!(state.inner.borrow().scroll_y, 48.0);
     }
 }
