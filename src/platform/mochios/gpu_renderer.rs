@@ -867,7 +867,7 @@ impl GpuSceneRenderer {
         if rect.size.width <= 0.0 || rect.size.height <= 0.0 {
             return;
         }
-        let (u0, v0, u1, v1) = self.uv_bounds(atlas);
+        let uv = self.uv_center(atlas);
         let p = [
             (rect.origin.x, rect.origin.y),
             (rect.origin.x + rect.size.width, rect.origin.y),
@@ -877,18 +877,8 @@ impl GpuSceneRenderer {
             ),
             (rect.origin.x, rect.origin.y + rect.size.height),
         ];
-        self.push_triangle(
-            [p[0], p[1], p[2]],
-            [[u0, v0], [u1, v0], [u1, v1]],
-            color,
-            viewport,
-        );
-        self.push_triangle(
-            [p[0], p[2], p[3]],
-            [[u0, v0], [u1, v1], [u0, v1]],
-            color,
-            viewport,
-        );
+        self.push_triangle([p[0], p[1], p[2]], [uv; 3], color, viewport);
+        self.push_triangle([p[0], p[2], p[3]], [uv; 3], color, viewport);
     }
 
     fn push_triangle(
