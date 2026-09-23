@@ -36,6 +36,9 @@ struct EditorSnapshot {
 #[derive(Debug)]
 struct TextEditorInteractionInner {
     value: String,
+    revision: u64,
+    line_count: usize,
+    character_count: usize,
     cursor: usize,
     selection_anchor: Option<usize>,
     selecting: bool,
@@ -63,6 +66,9 @@ impl Default for TextEditorInteractionInner {
     fn default() -> Self {
         Self {
             value: String::new(),
+            revision: 0,
+            line_count: 1,
+            character_count: 0,
             cursor: 0,
             selection_anchor: None,
             selecting: false,
@@ -106,6 +112,8 @@ impl TextEditorInteractionState {
         let value = normalize_newlines(value.into());
         let mut inner = self.inner.borrow_mut();
         inner.value = value;
+        inner.revision = inner.revision.wrapping_add(1);
+        update_statistics(&mut inner);
         inner.cursor = inner.value.len();
         inner.selection_anchor = None;
         inner.selecting = false;
@@ -125,12 +133,72 @@ impl TextEditorInteractionState {
         self.inner.borrow().focused
     }
 
+    pub fn revision(&self) -> u64 {
+        self.inner.borrow().revision
+    }
+
+    /// Returns the logical line count and Unicode scalar-value count without
+    /// cloning the document.
+    pub fn statistics(&self) -> (usize, usize) {
+        let inner = self.inner.borrow();
+        (inner.line_count, inner.character_count)
+    }
+
     pub fn can_undo(&self) -> bool {
         !self.inner.borrow().undo.is_empty()
     }
 
     pub fn can_redo(&self) -> bool {
         !self.inner.borrow().redo.is_empty()
+    }
+
+    /// Selects a matching range and returns its one-based index and the total
+    /// number of matches. `from_start` restarts a search after the query has
+    /// changed; subsequent calls continue from the current selection and wrap.
+    pub fn find_match(
+        &self,
+        query: &str,
+        backwards: bool,
+        from_start: bool,
+    ) -> Option<(usize, usize)> {
+        if query.is_empty() {
+            return None;
+        }
+
+        let mut inner = self.inner.borrow_mut();
+        let matches: Vec<Range<usize>> = inner
+            .value
+            .match_indices(query)
+            .map(|(start, value)| start..start + value.len())
+            .collect();
+        if matches.is_empty() {
+            inner.selection_anchor = None;
+            return None;
+        }
+
+        let selected = selection_range(&inner);
+        let index = if from_start {
+            if backwards { matches.len() - 1 } else { 0 }
+        } else if backwards {
+            let before = selected.as_ref().map_or(inner.cursor, |range| range.start);
+            matches
+                .iter()
+                .rposition(|range| range.end <= before)
+                .unwrap_or(matches.len() - 1)
+        } else {
+            let after = selected.as_ref().map_or(inner.cursor, |range| range.end);
+            matches
+                .iter()
+                .position(|range| range.start >= after)
+                .unwrap_or(0)
+        };
+        let range = matches[index].clone();
+        inner.selection_anchor = Some(range.start);
+        inner.cursor = range.end;
+        inner.selecting = false;
+        inner.reveal_caret = true;
+        inner.caret_blink_origin = Some(Instant::now());
+        Some((index + 1, matches.len()))
     }
 
     pub fn perform_undo(&self) -> bool {
@@ -158,6 +226,8 @@ impl TextEditorInteractionState {
 
     fn restore(inner: &mut TextEditorInteractionInner, snapshot: EditorSnapshot) {
         inner.value = snapshot.value;
+        inner.revision = inner.revision.wrapping_add(1);
+        update_statistics(inner);
         inner.cursor = snapshot.cursor.min(inner.value.len());
         inner.selection_anchor = snapshot.selection_anchor;
         inner.selecting = false;
@@ -206,6 +276,8 @@ impl TextEditorInteractionState {
             return false;
         }
         if inner.value != before.value {
+            inner.revision = inner.revision.wrapping_add(1);
+            update_statistics(&mut inner);
             let now = Instant::now();
             let grouped = kind != EditKind::Discrete
                 && inner.last_edit_kind == Some(kind)
@@ -881,6 +953,42 @@ impl View for TextEditor {
                 if self.interaction.redo() { self.synchronize(); context.request_redraw_in(bounds); }
                 EventResult::Consumed
             }
+            ViewEvent::KeyPressed { key: Key::Character(character), modifiers } if self.interaction.is_focused() && modifiers.shortcut() && (*character == 'c' || *character == 'C') => {
+                let selected = {
+                    let inner = self.interaction.inner.borrow();
+                    selection_range(&inner).map(|range| inner.value[range].to_owned())
+                };
+                if let Some(selected) = selected {
+                    let _ = set_system_clipboard_text(&selected);
+                }
+                EventResult::Consumed
+            }
+            ViewEvent::KeyPressed { key: Key::Character(character), modifiers } if self.interaction.is_focused() && modifiers.shortcut() && (*character == 'x' || *character == 'X') => {
+                let selected = {
+                    let inner = self.interaction.inner.borrow();
+                    selection_range(&inner).map(|range| inner.value[range].to_owned())
+                };
+                if let Some(selected) = selected
+                    && set_system_clipboard_text(&selected)
+                    && self.interaction.edit(|inner| Self::replace_selection(inner, ""))
+                {
+                    self.synchronize();
+                    self.interaction.reset_caret();
+                    context.request_redraw_in(bounds);
+                }
+                EventResult::Consumed
+            }
+            ViewEvent::KeyPressed { key: Key::Character(character), modifiers } if self.interaction.is_focused() && modifiers.shortcut() && (*character == 'v' || *character == 'V') => {
+                if let Some(pasted) = system_clipboard_text()
+                    && !pasted.is_empty()
+                    && self.interaction.edit(|inner| Self::replace_selection(inner, &normalize_newlines(pasted)))
+                {
+                    self.synchronize();
+                    self.interaction.reset_caret();
+                    context.request_redraw_in(bounds);
+                }
+                EventResult::Consumed
+            }
             ViewEvent::Backspace if self.interaction.is_focused() => {
                 let changed = self.interaction.edit_with_kind(EditKind::Delete, |inner| {
                     if selection_range(inner).is_some() { return Self::replace_selection(inner, ""); }
@@ -1109,6 +1217,31 @@ fn normalize_newlines(value: String) -> String {
     value.replace("\r\n", "\n").replace('\r', "\n")
 }
 
+fn update_statistics(inner: &mut TextEditorInteractionInner) {
+    inner.line_count = inner.value.bytes().filter(|byte| *byte == b'\n').count() + 1;
+    inner.character_count = inner.value.chars().count();
+}
+
+#[cfg(target_os = "mochios")]
+fn set_system_clipboard_text(value: &str) -> bool {
+    mochi_user_platform::workspace::set_clipboard_text(value).is_ok()
+}
+
+#[cfg(not(target_os = "mochios"))]
+fn set_system_clipboard_text(_value: &str) -> bool {
+    false
+}
+
+#[cfg(target_os = "mochios")]
+fn system_clipboard_text() -> Option<String> {
+    mochi_user_platform::workspace::clipboard_text().ok().flatten()
+}
+
+#[cfg(not(target_os = "mochios"))]
+fn system_clipboard_text() -> Option<String> {
+    None
+}
+
 fn line_ranges(value: &str) -> Vec<Range<usize>> {
     let mut ranges = Vec::new();
     let mut start = 0;
@@ -1208,6 +1341,25 @@ mod tests {
         assert_eq!(state.value(), "ab");
         assert!(state.undo());
         assert_eq!(state.value(), "");
+    }
+
+    #[test]
+    fn statistics_track_unicode_edits() {
+        let state = TextEditorInteractionState::new();
+        state.set_value("mochi\n餅");
+        assert_eq!(state.statistics(), (2, 7));
+        assert!(state.edit(|inner| TextEditor::replace_selection(inner, "!")));
+        assert_eq!(state.statistics(), (2, 8));
+    }
+
+    #[test]
+    fn find_wraps_and_selects_each_match() {
+        let state = TextEditorInteractionState::new();
+        state.set_value("one two one");
+        assert_eq!(state.find_match("one", false, true), Some((1, 2)));
+        assert_eq!(state.find_match("one", false, false), Some((2, 2)));
+        assert_eq!(state.find_match("one", false, false), Some((1, 2)));
+        assert_eq!(state.find_match("missing", false, true), None);
     }
 
     #[test]

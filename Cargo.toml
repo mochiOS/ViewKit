@@ -68,6 +68,7 @@ wgpu = {
 }
 
 [target.'cfg(target_os = "mochios")'.dependencies]
+mochi-user-platform = { version = "0.1.0", git = "https://github.com/mochiOS/syscalls", package = "mochi-user-platform", default-features = false, features = ["std"] }
 mochi-user-syscall = { version = "0.1.0", git = "https://github.com/mochiOS/syscalls", package = "mochi-user-syscall" }
 mochios-viewkit-gpu-protocol = { version = "0.1.0", git = "https://github.com/mochiOS/syscalls", package = "mochios-viewkit-gpu-protocol" }
 
