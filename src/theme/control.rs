@@ -56,9 +56,9 @@ impl ButtonTokens {
     pub const fn from_colors(colors: ColorTokens, dark: bool) -> Self {
         let transparent = Color::TRANSPARENT;
         let primary_rest = if dark {
-            Color::from_rgb_hex(0xf3f4f5)
+            Color::from_rgb_hex(0x3970DD)
         } else {
-            Color::from_rgb_hex(0x17181a)
+            Color::from_rgb_hex(0x3970DD)
         };
         let primary_hover = if dark {
             Color::from_rgb_hex(0xffffff)
@@ -127,7 +127,7 @@ impl ButtonTokens {
                 colors.destructive,
                 Color::WHITE,
             ),
-            horizontal_padding: 12.0,
+            horizontal_padding: 18.0,
             height: 32.0,
             radius: CornerRadius::Medium,
             stroke_width: FigmaTokens::SHAPE.stroke_default,

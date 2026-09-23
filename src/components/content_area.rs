@@ -104,7 +104,7 @@ mod tests {
     }
 
     #[test]
-    fn content_insets_match_the_chat_screen() {
+    fn content_uses_standard_page_insets() {
         let recorded = Rc::new(Cell::new(None));
         let view = ContentArea::new(Recorder(recorded.clone()));
         let mut display_list = DisplayList::new();

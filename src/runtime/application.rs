@@ -9,12 +9,16 @@ use crate::accessibility::AccessibilityNode;
 use crate::app::{App, ViewContext};
 use crate::appearance::AppearanceSettings;
 use crate::draw_command::{DisplayList, DrawCommand};
-use crate::event::{EventContext, EventDispatcher, RedrawRequest};
-use crate::geometry::Rect;
-use crate::platform::{PlatformApplication, PlatformEvent, PlatformWindow, WindowConfig};
+use crate::components::{BorderStyle, Rectangle, RectangleColor, Text};
+use crate::event::{ContextMenuRequest, EventContext, EventDispatcher, RedrawRequest};
+use crate::geometry::{Point, Rect};
+use crate::platform::{
+    ButtonState, Key, PlatformApplication, PlatformEvent, PlatformWindow, PointerButton,
+    WindowConfig,
+};
 use crate::renderer::Viewport;
 use crate::state::take_state_changed;
-use crate::theme::Theme;
+use crate::theme::{ShadowStyle, Theme};
 use crate::typography::TextMeasurer;
 use crate::view::{PaintContext, RedrawSchedule, View};
 
@@ -55,6 +59,12 @@ where
     event_dispatcher: EventDispatcher,
     redraw_schedule: RedrawSchedule,
     pending_redraw: RedrawRequest,
+    fallback_context_menu: Option<FallbackContextMenu>,
+}
+
+struct FallbackContextMenu {
+    request: ContextMenuRequest,
+    pointer: Option<Point>,
 }
 
 impl<A> ApplicationRuntime<A>
@@ -81,6 +91,7 @@ where
             event_dispatcher: EventDispatcher::new(),
             redraw_schedule: RedrawSchedule::new(),
             pending_redraw: RedrawRequest::None,
+            fallback_context_menu: None,
         }
     }
 
@@ -123,7 +134,7 @@ where
         handled
     }
 
-    fn handle_event(&mut self, event: PlatformEvent, window: &dyn PlatformWindow) {
+    fn handle_event(&mut self, mut event: PlatformEvent, window: &dyn PlatformWindow) {
         match &event {
             PlatformEvent::Resumed { viewport }
             | PlatformEvent::Resized { viewport }
@@ -142,6 +153,52 @@ where
         let viewport = window.viewport();
 
         self.ensure_root(viewport);
+
+        if let Some(menu) = self.fallback_context_menu.as_mut() {
+            match event.clone() {
+                PlatformEvent::PointerMoved { x, y } => {
+                    menu.pointer = Some(Point::new(x, y));
+                    self.pending_redraw = RedrawRequest::Full;
+                    window.request_redraw();
+                    return;
+                }
+                PlatformEvent::PointerButton {
+                    button: PointerButton::Primary,
+                    state: ButtonState::Pressed,
+                } => return,
+                PlatformEvent::PointerButton {
+                    button: PointerButton::Primary,
+                    state: ButtonState::Released,
+                } => {
+                    let request_id = menu.request.request_id;
+                    let command_id = menu.pointer.and_then(|position| {
+                        fallback_menu_command_at(
+                            &menu.request,
+                            position,
+                            viewport.logical_bounds(),
+                            &self.theme,
+                        )
+                    });
+                    self.fallback_context_menu = None;
+                    event = PlatformEvent::ContextMenuResult {
+                        request_id,
+                        command_id,
+                    };
+                }
+                PlatformEvent::KeyPressed {
+                    key: Key::Escape, ..
+                }
+                | PlatformEvent::Focused(false) => {
+                    let request_id = menu.request.request_id;
+                    self.fallback_context_menu = None;
+                    event = PlatformEvent::ContextMenuResult {
+                        request_id,
+                        command_id: None,
+                    };
+                }
+                _ => return,
+            }
+        }
 
         let (redraw_request, cursor_icon, context_menu_request) = {
             let root = self
@@ -169,7 +226,14 @@ where
             window.set_cursor(cursor_icon);
         }
         if let Some(request) = context_menu_request {
-            let _ = window.show_context_menu(&request);
+            if !window.show_context_menu(&request) {
+                self.fallback_context_menu = Some(FallbackContextMenu {
+                    request,
+                    pointer: self.event_dispatcher.pointer_position(),
+                });
+                self.pending_redraw = RedrawRequest::Full;
+                window.request_redraw();
+            }
         }
 
         let state_changed = take_state_changed();
@@ -226,6 +290,13 @@ where
             .expect("root view must exist after ensure_root");
 
         root.paint(viewport_bounds, &mut context);
+        if let Some(menu) = &self.fallback_context_menu {
+            paint_fallback_context_menu(
+                menu,
+                viewport_bounds,
+                &mut context,
+            );
+        }
         drop(context);
         self.event_dispatcher
             .set_accessibility_nodes(&self.accessibility_nodes);
@@ -264,6 +335,142 @@ where
 
     fn exit_requested(&self) -> bool {
         exit_requested()
+    }
+}
+
+fn fallback_menu_bounds(request: &ContextMenuRequest, viewport: Rect, theme: &Theme) -> Rect {
+    let inset = theme.spacing.extra_small;
+    let height = request.items.iter().fold(inset * 2.0, |height, item| {
+        height
+            + if item.separator {
+                theme.spacing.small
+            } else {
+                theme.layout.compact_control_height
+            }
+    });
+    let width = theme.layout.popover_width.min(viewport.size.width);
+    let preferred_x = request.position.x;
+    let preferred_y = request.position.y;
+    let x = preferred_x.clamp(
+        viewport.origin.x,
+        (viewport.origin.x + viewport.size.width - width).max(viewport.origin.x),
+    );
+    let below_y = preferred_y;
+    let above_y = preferred_y - height;
+    let y = if below_y + height <= viewport.origin.y + viewport.size.height {
+        below_y
+    } else {
+        above_y.max(viewport.origin.y)
+    };
+    Rect::new(x, y, width, height.min(viewport.size.height))
+}
+
+fn fallback_menu_rows(
+    request: &ContextMenuRequest,
+    viewport: Rect,
+    theme: &Theme,
+) -> Vec<(usize, Rect)> {
+    let menu = fallback_menu_bounds(request, viewport, theme);
+    let inset = theme.spacing.extra_small;
+    let mut y = menu.origin.y + inset;
+    request
+        .items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| {
+            let height = if item.separator {
+                theme.spacing.small
+            } else {
+                theme.layout.compact_control_height
+            };
+            let row = Rect::new(
+                menu.origin.x + inset,
+                y,
+                (menu.size.width - inset * 2.0).max(0.0),
+                height,
+            );
+            y += height;
+            (index, row)
+        })
+        .collect()
+}
+
+fn fallback_menu_command_at(
+    request: &ContextMenuRequest,
+    position: Point,
+    viewport: Rect,
+    theme: &Theme,
+) -> Option<u32> {
+    fallback_menu_rows(request, viewport, theme)
+        .into_iter()
+        .find_map(|(index, bounds)| {
+            let item = request.items.get(index)?;
+            (bounds.contains(position) && item.enabled && !item.separator)
+                .then_some(item.command_id)
+        })
+}
+
+fn paint_fallback_context_menu(
+    menu: &FallbackContextMenu,
+    viewport: Rect,
+    context: &mut PaintContext<'_>,
+) {
+    let bounds = fallback_menu_bounds(&menu.request, viewport, context.theme);
+    Rectangle::new()
+        .color(RectangleColor::Custom(context.theme.card.background))
+        .radius(context.theme.menu.surface_radius)
+        .shadow(ShadowStyle::Card)
+        .border(BorderStyle::custom(
+            context.theme.card.border,
+            context.theme.menu.surface_stroke_width,
+        ))
+        .paint(bounds, context);
+
+    for (index, row) in fallback_menu_rows(&menu.request, viewport, context.theme) {
+        let Some(item) = menu.request.items.get(index) else {
+            continue;
+        };
+        if item.separator {
+            Rectangle::new()
+                .color(RectangleColor::Custom(context.theme.colors.border))
+                .paint(
+                    Rect::new(
+                        row.origin.x,
+                        row.origin.y + row.size.height * 0.5,
+                        row.size.width,
+                        context.theme.divider.thickness,
+                    ),
+                    context,
+                );
+            continue;
+        }
+
+        let hovered = menu.pointer.is_some_and(|position| row.contains(position));
+        let background = if item.checked {
+            context.theme.colors.accent_soft
+        } else if hovered && item.enabled {
+            context.theme.menu.item_hovered_background
+        } else {
+            context.theme.menu.item_background
+        };
+        Rectangle::new()
+            .color(RectangleColor::Custom(background))
+            .radius(context.theme.menu.item_radius)
+            .paint(row, context);
+        let foreground = if item.enabled {
+            context.theme.menu.foreground
+        } else {
+            context.theme.menu.disabled_foreground
+        };
+        Text::label(item.label.clone()).color(foreground).paint(
+            Rect::new(
+                row.origin.x + context.theme.menu.item_horizontal_padding,
+                row.origin.y,
+                (row.size.width - context.theme.menu.item_horizontal_padding * 2.0).max(0.0),
+                row.size.height,
+            ),
+            context,
+        );
     }
 }
 
@@ -405,6 +612,57 @@ mod tests {
         assert!(exit_requested());
         reset_exit_request();
         assert!(!exit_requested());
+    }
+
+    #[test]
+    fn fallback_menu_clamps_to_the_window_and_ignores_disabled_items() {
+        let request = ContextMenuRequest {
+            request_id: 7,
+            position: Point::new(90.0, 90.0),
+            items: vec![
+                crate::event::ContextMenuItem {
+                    command_id: 1,
+                    label: String::from("Enabled"),
+                    enabled: true,
+                    checked: false,
+                    destructive: false,
+                    separator: false,
+                },
+                crate::event::ContextMenuItem {
+                    command_id: 2,
+                    label: String::from("Disabled"),
+                    enabled: false,
+                    checked: false,
+                    destructive: false,
+                    separator: false,
+                },
+            ],
+        };
+        let viewport = Rect::new(0.0, 0.0, 200.0, 120.0);
+        let bounds = fallback_menu_bounds(&request, viewport, &Theme::LIGHT);
+        assert!(bounds.origin.x >= viewport.origin.x);
+        assert!(bounds.origin.y >= viewport.origin.y);
+        assert!(bounds.origin.x + bounds.size.width <= viewport.size.width);
+        assert!(bounds.origin.y + bounds.size.height <= viewport.size.height);
+        let rows = fallback_menu_rows(&request, viewport, &Theme::LIGHT);
+        assert_eq!(
+            fallback_menu_command_at(
+                &request,
+                Point::new(rows[0].1.origin.x + 1.0, rows[0].1.origin.y + 1.0),
+                viewport,
+                &Theme::LIGHT,
+            ),
+            Some(1)
+        );
+        assert_eq!(
+            fallback_menu_command_at(
+                &request,
+                Point::new(rows[1].1.origin.x + 1.0, rows[1].1.origin.y + 1.0),
+                viewport,
+                &Theme::LIGHT,
+            ),
+            None
+        );
     }
 
     #[test]

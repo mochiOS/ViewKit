@@ -74,13 +74,18 @@ impl LayoutTokens {
         content_max_width: FigmaTokens::LAYOUT.content_max_width,
         form_width: FigmaTokens::LAYOUT.form_width,
         section_gap: FigmaTokens::LAYOUT.section_gap,
-        standard_window_width: FigmaTokens::LAYOUT.sidebar_width + FigmaTokens::LAYOUT.content_max_width + FigmaTokens::LAYOUT.page_margin * 2.0,
-        standard_window_height: FigmaTokens::LAYOUT.content_max_width + FigmaTokens::LAYOUT.toolbar_height,
-        compact_window_width: FigmaTokens::LAYOUT.content_max_width + FigmaTokens::LAYOUT.page_margin * 2.0,
+        standard_window_width: FigmaTokens::LAYOUT.sidebar_width
+            + FigmaTokens::LAYOUT.content_max_width
+            + FigmaTokens::LAYOUT.page_margin * 2.0,
+        standard_window_height: FigmaTokens::LAYOUT.content_max_width
+            + FigmaTokens::LAYOUT.toolbar_height,
+        compact_window_width: FigmaTokens::LAYOUT.content_max_width
+            + FigmaTokens::LAYOUT.page_margin * 2.0,
         compact_window_height: FigmaTokens::LAYOUT.form_width + FigmaTokens::LAYOUT.toolbar_height,
         status_bar_height: FigmaTokens::SPACING.space_32,
         form_control_width: FigmaTokens::LAYOUT.sidebar_width + FigmaTokens::SPACING.space_24,
-        compact_form_control_width: FigmaTokens::LAYOUT.sidebar_width - FigmaTokens::SPACING.space_48,
+        compact_form_control_width: FigmaTokens::LAYOUT.sidebar_width
+            - FigmaTokens::SPACING.space_48,
         settings_row_height: FigmaTokens::LAYOUT.toolbar_height,
         settings_description_row_height: FigmaTokens::SPACING.space_64,
         toolbar_navigation_width: FigmaTokens::LAYOUT.toolbar_height * 3.0,
@@ -118,7 +123,7 @@ impl LayoutTokens {
         range_track_height: FigmaTokens::SPACING.space_4,
         message_max_width: FigmaTokens::LAYOUT.form_width - FigmaTokens::SPACING.space_24 * 5.0,
         control_thumb_height: FigmaTokens::SHAPE.radius_xlarge,
-        control_thumb_aspect_ratio: 1.1,
+        control_thumb_aspect_ratio: 1.5,
         control_pressed_thumb_aspect_ratio: 1.2,
         range_hit_padding: FigmaTokens::SPACING.space_8,
         switch_track_width: FigmaTokens::SPACING.space_40,

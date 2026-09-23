@@ -1,6 +1,6 @@
 //! 単一行のテキストフィールド
 
-use super::{BorderStyle, Rectangle, RectangleColor, Text};
+use super::{BorderStyle, Icon, Rectangle, RectangleColor, SymbolName, Text};
 use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
@@ -494,6 +494,7 @@ pub struct TextField {
 
     size: TextFieldSize,
     radius: CornerRadius,
+    leading_symbol: Option<SymbolName>,
 
     enabled: bool,
     invalid: bool,
@@ -515,6 +516,7 @@ impl TextField {
             placeholder: String::new(),
             size: TextFieldSize::Medium,
             radius: CornerRadius::Small,
+            leading_symbol: None,
 
             enabled: true,
             invalid: false,
@@ -532,6 +534,7 @@ impl TextField {
             placeholder: String::new(),
             size: TextFieldSize::Medium,
             radius: CornerRadius::Small,
+            leading_symbol: None,
 
             enabled: true,
             invalid: false,
@@ -559,6 +562,14 @@ impl TextField {
 
     pub fn radius(mut self, radius: CornerRadius) -> Self {
         self.radius = radius;
+        self
+    }
+
+    /// Adds a leading glyph sourced from VK Symbols. The text, selection and
+    /// caret are inset automatically; applications must not draw replacement
+    /// SVG artwork over a text field.
+    pub fn leading_symbol(mut self, symbol: SymbolName) -> Self {
+        self.leading_symbol = Some(symbol);
         self
     }
 
@@ -668,7 +679,9 @@ impl TextField {
             return 0;
         }
 
-        let text_origin_x = bounds.origin.x + self.size.horizontal_padding(context.theme);
+        let text_origin_x = bounds.origin.x
+            + self.size.horizontal_padding(context.theme)
+            + self.leading_inset(context.theme);
 
         let target_x = (pointer_x - text_origin_x + scroll_offset_x).max(0.0);
 
@@ -697,6 +710,16 @@ impl TextField {
     }
 }
 
+impl TextField {
+    fn leading_inset(&self, theme: &crate::theme::Theme) -> f32 {
+        if self.leading_symbol.is_some() {
+            theme.layout.compact_icon_size + theme.spacing.small
+        } else {
+            0.0
+        }
+    }
+}
+
 impl View for TextField {
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
         let display_text = self.display_text();
@@ -705,7 +728,9 @@ impl View for TextField {
         let measured_text =
             text.measure_unbounded_with_typography(context.text_measurer, context.typography);
 
-        let width = (measured_text.width + self.size.horizontal_padding(context.theme) * 2.0)
+        let width = (measured_text.width
+            + self.size.horizontal_padding(context.theme) * 2.0
+            + self.leading_inset(context.theme))
             .max(context.theme.text_field.min_width);
 
         constraints.constrain(Size::new(width, self.size.height(context.theme)))
@@ -787,14 +812,31 @@ impl View for TextField {
         };
 
         let horizontal_padding = self.size.horizontal_padding(context.theme);
+        let leading_inset = self.leading_inset(context.theme);
+
+        if let Some(symbol) = self.leading_symbol {
+            let icon_size = context.theme.layout.compact_icon_size;
+            Icon::new(symbol)
+                .size(icon_size)
+                .color(context.theme.colors.text_secondary)
+                .paint(
+                    Rect::new(
+                        bounds.origin.x + horizontal_padding,
+                        bounds.origin.y + (bounds.size.height - icon_size).max(0.0) / 2.0,
+                        icon_size,
+                        icon_size,
+                    ),
+                    context,
+                );
+        }
 
         let text_style = self.size.text_style(context.typography);
         let line_height = text_style.line_height;
 
         let text_bounds = Rect::new(
-            bounds.origin.x + horizontal_padding,
+            bounds.origin.x + horizontal_padding + leading_inset,
             bounds.origin.y + (bounds.size.height - line_height).max(0.0) / 2.0,
-            (bounds.size.width - horizontal_padding * 2.0).max(0.0),
+            (bounds.size.width - horizontal_padding * 2.0 - leading_inset).max(0.0),
             line_height.min(bounds.size.height),
         );
 
