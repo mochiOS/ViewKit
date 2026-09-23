@@ -41,11 +41,6 @@ winit = {
         "rwh_06",
     ],
 }
-softbuffer = {
-    version = "0.4.8",
-    default-features = false,
-    features = ["wayland", "wayland-dlopen", "x11", "x11-dlopen"],
-}
 bytemuck = { version = "1.22.0", features = ["derive"] }
 pollster = "1.0.1"
 raw-window-handle = "0.6.2"
@@ -54,6 +49,7 @@ wgpu = {
     default-features = false,
     features = ["vulkan", "gles", "wgsl"],
 }
+mochios-viewkit-gpu-protocol = { version = "0.1.0", git = "https://github.com/mochiOS/syscalls", package = "mochios-viewkit-gpu-protocol" }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winit = {

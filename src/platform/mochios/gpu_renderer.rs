@@ -51,7 +51,7 @@ struct GlyphAtlasEntry {
     top: i32,
 }
 
-pub(super) struct GpuSceneRenderer {
+pub(crate) struct GpuSceneRenderer {
     vertices: Vec<Vertex>,
     atlas: Vec<u8>,
     atlas_x: u32,
@@ -69,7 +69,7 @@ pub(super) struct GpuSceneRenderer {
 }
 
 impl GpuSceneRenderer {
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             vertices: Vec::new(),
             atlas: Vec::new(),
@@ -88,7 +88,7 @@ impl GpuSceneRenderer {
         }
     }
 
-    pub(super) fn render(
+    pub(crate) fn render(
         &mut self,
         viewport: Viewport,
         dirty_bounds: Rect,

@@ -5,12 +5,10 @@ use super::super::{
     PointerButton, WindowConfig,
 };
 
-use super::{GpuRenderer, SoftwareRenderer};
+use super::GpuRenderer;
 use crate::draw_command::DisplayList;
 use crate::geometry::Size;
 use crate::renderer::{Renderer, Viewport};
-
-use softbuffer::Context;
 
 use crate::platform::CursorIcon;
 use std::rc::Rc;
@@ -19,7 +17,7 @@ use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::error::{EventLoopError, OsError};
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, OwnedDisplayHandle};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key as WinitKey, NamedKey};
 use winit::window::CursorIcon as WinitCursorIcon;
 use winit::window::{Fullscreen, Window, WindowId};
@@ -37,14 +35,8 @@ pub enum LinuxBackendError {
     #[error("Failed to create the window: {0}")]
     Window(#[from] OsError),
 
-    #[error("The renderer failed: {0}")]
-    Renderer(#[from] super::SoftwareRendererError),
-
     #[error("The GPU renderer failed: {0}")]
     GpuRenderer(#[from] super::GpuRendererError),
-
-    #[error("Failed to initialize softbuffer: {0}")]
-    SoftBuffer(#[from] softbuffer::SoftBufferError),
 }
 
 struct WinitWindow<'a> {
@@ -89,9 +81,8 @@ pub struct LinuxBackend<A> {
     application: A,
     config: WindowConfig,
 
-    context: Option<Context<OwnedDisplayHandle>>,
     window: Option<Rc<Window>>,
-    renderer: Option<LinuxRenderer>,
+    renderer: Option<GpuRenderer>,
 
     modifiers: KeyModifiers,
 
@@ -108,7 +99,6 @@ where
             application,
             config,
 
-            context: None,
             window: None,
             renderer: None,
 
@@ -123,8 +113,6 @@ where
         let event_loop = EventLoop::new()?;
 
         event_loop.set_control_flow(ControlFlow::Wait);
-
-        self.context = Some(Context::new(event_loop.owned_display_handle())?);
 
         let result = event_loop.run_app(&mut self);
 
@@ -161,7 +149,7 @@ where
         };
 
         if let Err(error) = renderer.resize(viewport) {
-            self.runtime_error = Some(error);
+            self.runtime_error = Some(error.into());
 
             event_loop.exit();
 
@@ -189,7 +177,7 @@ where
         };
 
         if let Err(error) = renderer.render(&display_list, dirty_bounds) {
-            self.runtime_error = Some(error);
+            self.runtime_error = Some(error.into());
 
             event_loop.exit();
         }
@@ -240,14 +228,7 @@ where
 
         let viewport = viewport_from_window(window.as_ref());
 
-        let Some(context) = self.context.as_ref() else {
-            event_loop.exit();
-
-            return;
-        };
-
-        let renderer = match LinuxRenderer::new(
-            context,
+        let renderer = match GpuRenderer::new(
             window.clone(),
             viewport,
             event_loop.owned_display_handle(),
@@ -255,7 +236,7 @@ where
             Ok(renderer) => renderer,
 
             Err(error) => {
-                self.runtime_error = Some(error);
+                self.runtime_error = Some(error.into());
 
                 event_loop.exit();
 
@@ -487,87 +468,6 @@ where
             event_loop.set_control_flow(ControlFlow::Wait);
         } else {
             event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
-        }
-    }
-}
-
-enum LinuxRenderer {
-    Gpu {
-        gpu: Box<GpuRenderer>,
-        fallback: Box<SoftwareRenderer>,
-    },
-    Software(Box<SoftwareRenderer>),
-}
-
-impl LinuxRenderer {
-    fn new(
-        context: &Context<OwnedDisplayHandle>,
-        window: Rc<Window>,
-        viewport: Viewport,
-        display: OwnedDisplayHandle,
-    ) -> Result<Self, LinuxBackendError> {
-        let fallback = SoftwareRenderer::new(context, window.clone(), viewport)?;
-
-        // The current GPU path can present a fully rasterized frame, but it
-        // does not yet preserve ViewKit's dirty-region semantics for every
-        // display-list command. Keep the correct software renderer as the
-        // Linux default until the GPU renderer owns the complete pipeline.
-        if std::env::var_os("VIEWKIT_LINUX_ENABLE_GPU").is_none()
-            || std::env::var_os("VIEWKIT_DISABLE_GPU").is_some()
-        {
-            if std::env::var_os("VIEWKIT_RENDERER_DIAGNOSTICS").is_some() {
-                eprintln!("[ViewKit] Linux renderer: software (stable default)");
-            }
-            return Ok(Self::Software(Box::new(fallback)));
-        }
-
-        match GpuRenderer::new(window, viewport, display) {
-            Ok(gpu) => Ok(Self::Gpu {
-                gpu: Box::new(gpu),
-                fallback: Box::new(fallback),
-            }),
-            Err(error) => {
-                if std::env::var_os("VIEWKIT_RENDERER_DIAGNOSTICS").is_some() {
-                    eprintln!(
-                        "[ViewKit] GPU initialization failed; using software renderer: {error}"
-                    );
-                }
-                Ok(Self::Software(Box::new(fallback)))
-            }
-        }
-    }
-
-    fn resize(&mut self, viewport: Viewport) -> Result<(), LinuxBackendError> {
-        match self {
-            Self::Gpu { gpu, fallback } => {
-                gpu.resize(viewport)?;
-                fallback.resize(viewport)?;
-            }
-            Self::Software(renderer) => renderer.resize(viewport)?,
-        }
-
-        Ok(())
-    }
-
-    fn render(
-        &mut self,
-        display_list: &DisplayList,
-        dirty_bounds: crate::geometry::Rect,
-    ) -> Result<(), LinuxBackendError> {
-        match self {
-            Self::Gpu { gpu, fallback } => match gpu.render(display_list, dirty_bounds) {
-                Ok(()) => Ok(()),
-                Err(super::GpuRendererError::UnsupportedCommand) => {
-                    let pixels = fallback.rasterize_rgba(display_list, dirty_bounds)?;
-                    gpu.present_rgba8(&pixels)?;
-                    Ok(())
-                }
-                Err(error) => Err(error.into()),
-            },
-            Self::Software(renderer) => {
-                renderer.render(display_list, dirty_bounds)?;
-                Ok(())
-            }
         }
     }
 }
