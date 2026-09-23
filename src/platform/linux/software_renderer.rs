@@ -114,6 +114,7 @@ pub struct SoftwareRenderer {
     swash_cache: SwashCache,
     text_layout_cache: HashMap<TextLayoutKey, Buffer>,
     present_pixels: Vec<u32>,
+    suppress_present: bool,
 }
 
 impl SoftwareRenderer {
@@ -132,11 +133,31 @@ impl SoftwareRenderer {
             swash_cache: SwashCache::new(),
             text_layout_cache: HashMap::new(),
             present_pixels: Vec::new(),
+            suppress_present: false,
         };
 
         renderer.resize_surface(viewport)?;
 
         Ok(renderer)
+    }
+
+    /// Rasterizes a complete display list without presenting it through
+    /// softbuffer. Desktop GPU backends use this for commands which do not yet
+    /// have a native GPU primitive, then upload the resulting premultiplied
+    /// RGBA frame to their swapchain.
+    pub fn rasterize_rgba(
+        &mut self,
+        display_list: &DisplayList,
+        dirty_bounds: Rect,
+    ) -> Result<&[u8], SoftwareRendererError> {
+        self.suppress_present = true;
+        let result = <Self as Renderer>::render(self, display_list, dirty_bounds);
+        self.suppress_present = false;
+        result?;
+        Ok(self
+            .pixmap
+            .as_ref()
+            .map_or(&[], |pixmap| pixmap.data()))
     }
 
     fn resize_surface(&mut self, viewport: Viewport) -> Result<(), SoftwareRendererError> {
@@ -453,13 +474,15 @@ impl Renderer for SoftwareRenderer {
             });
         }
 
-        copy_pixmap_to_surface(
-            pixmap,
-            &mut self.present_pixels,
-            &mut self.surface,
-            dirty_bounds,
-            scale,
-        )?;
+        if !self.suppress_present {
+            copy_pixmap_to_surface(
+                pixmap,
+                &mut self.present_pixels,
+                &mut self.surface,
+                dirty_bounds,
+                scale,
+            )?;
+        }
 
         Ok(())
     }

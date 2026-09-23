@@ -5,7 +5,7 @@ use super::super::{
     PointerButton, WindowConfig,
 };
 
-use super::SoftwareRenderer;
+use super::{GpuRenderer, SoftwareRenderer};
 use crate::draw_command::DisplayList;
 use crate::geometry::Size;
 use crate::renderer::{Renderer, Viewport};
@@ -39,6 +39,9 @@ pub enum LinuxBackendError {
 
     #[error("The renderer failed: {0}")]
     Renderer(#[from] super::SoftwareRendererError),
+
+    #[error("The GPU renderer failed: {0}")]
+    GpuRenderer(#[from] super::GpuRendererError),
 
     #[error("Failed to initialize softbuffer: {0}")]
     SoftBuffer(#[from] softbuffer::SoftBufferError),
@@ -88,7 +91,7 @@ pub struct LinuxBackend<A> {
 
     context: Option<Context<OwnedDisplayHandle>>,
     window: Option<Rc<Window>>,
-    renderer: Option<SoftwareRenderer>,
+    renderer: Option<LinuxRenderer>,
 
     modifiers: KeyModifiers,
 
@@ -158,7 +161,7 @@ where
         };
 
         if let Err(error) = renderer.resize(viewport) {
-            self.runtime_error = Some(LinuxBackendError::Renderer(error));
+            self.runtime_error = Some(error);
 
             event_loop.exit();
 
@@ -186,7 +189,7 @@ where
         };
 
         if let Err(error) = renderer.render(&display_list, dirty_bounds) {
-            self.runtime_error = Some(LinuxBackendError::Renderer(error));
+            self.runtime_error = Some(error);
 
             event_loop.exit();
         }
@@ -243,11 +246,16 @@ where
             return;
         };
 
-        let renderer = match SoftwareRenderer::new(context, window.clone(), viewport) {
+        let renderer = match LinuxRenderer::new(
+            context,
+            window.clone(),
+            viewport,
+            event_loop.owned_display_handle(),
+        ) {
             Ok(renderer) => renderer,
 
             Err(error) => {
-                self.runtime_error = Some(LinuxBackendError::Renderer(error));
+                self.runtime_error = Some(error);
 
                 event_loop.exit();
 
@@ -479,6 +487,87 @@ where
             event_loop.set_control_flow(ControlFlow::Wait);
         } else {
             event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
+        }
+    }
+}
+
+enum LinuxRenderer {
+    Gpu {
+        gpu: Box<GpuRenderer>,
+        fallback: Box<SoftwareRenderer>,
+    },
+    Software(Box<SoftwareRenderer>),
+}
+
+impl LinuxRenderer {
+    fn new(
+        context: &Context<OwnedDisplayHandle>,
+        window: Rc<Window>,
+        viewport: Viewport,
+        display: OwnedDisplayHandle,
+    ) -> Result<Self, LinuxBackendError> {
+        let fallback = SoftwareRenderer::new(context, window.clone(), viewport)?;
+
+        // The current GPU path can present a fully rasterized frame, but it
+        // does not yet preserve ViewKit's dirty-region semantics for every
+        // display-list command. Keep the correct software renderer as the
+        // Linux default until the GPU renderer owns the complete pipeline.
+        if std::env::var_os("VIEWKIT_LINUX_ENABLE_GPU").is_none()
+            || std::env::var_os("VIEWKIT_DISABLE_GPU").is_some()
+        {
+            if std::env::var_os("VIEWKIT_RENDERER_DIAGNOSTICS").is_some() {
+                eprintln!("[ViewKit] Linux renderer: software (stable default)");
+            }
+            return Ok(Self::Software(Box::new(fallback)));
+        }
+
+        match GpuRenderer::new(window, viewport, display) {
+            Ok(gpu) => Ok(Self::Gpu {
+                gpu: Box::new(gpu),
+                fallback: Box::new(fallback),
+            }),
+            Err(error) => {
+                if std::env::var_os("VIEWKIT_RENDERER_DIAGNOSTICS").is_some() {
+                    eprintln!(
+                        "[ViewKit] GPU initialization failed; using software renderer: {error}"
+                    );
+                }
+                Ok(Self::Software(Box::new(fallback)))
+            }
+        }
+    }
+
+    fn resize(&mut self, viewport: Viewport) -> Result<(), LinuxBackendError> {
+        match self {
+            Self::Gpu { gpu, fallback } => {
+                gpu.resize(viewport)?;
+                fallback.resize(viewport)?;
+            }
+            Self::Software(renderer) => renderer.resize(viewport)?,
+        }
+
+        Ok(())
+    }
+
+    fn render(
+        &mut self,
+        display_list: &DisplayList,
+        dirty_bounds: crate::geometry::Rect,
+    ) -> Result<(), LinuxBackendError> {
+        match self {
+            Self::Gpu { gpu, fallback } => match gpu.render(display_list, dirty_bounds) {
+                Ok(()) => Ok(()),
+                Err(super::GpuRendererError::UnsupportedCommand) => {
+                    let pixels = fallback.rasterize_rgba(display_list, dirty_bounds)?;
+                    gpu.present_rgba8(&pixels)?;
+                    Ok(())
+                }
+                Err(error) => Err(error.into()),
+            },
+            Self::Software(renderer) => {
+                renderer.render(display_list, dirty_bounds)?;
+                Ok(())
+            }
         }
     }
 }

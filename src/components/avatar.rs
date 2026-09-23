@@ -36,7 +36,6 @@ pub struct Avatar {
     background: Option<Color>,
     foreground: Option<Color>,
     accessibility_label: Option<String>,
-    accessibility_hidden: bool,
 }
 
 impl Avatar {
@@ -47,7 +46,6 @@ impl Avatar {
             background: None,
             foreground: None,
             accessibility_label: None,
-            accessibility_hidden: false,
         }
     }
 
@@ -71,10 +69,6 @@ impl Avatar {
         self
     }
 
-    pub fn accessibility_hidden(mut self, hidden: bool) -> Self {
-        self.accessibility_hidden = hidden;
-        self
-    }
 }
 
 impl View for Avatar {
@@ -88,14 +82,12 @@ impl View for Avatar {
             return;
         }
 
-        if !self.accessibility_hidden {
-            let mut node = AccessibilityNode::new(AccessibilityRole::Image, bounds);
-            node.label = self
-                .accessibility_label
-                .clone()
-                .or_else(|| Some(self.initials.clone()));
-            context.record_accessibility(node);
-        }
+        let mut node = AccessibilityNode::new(AccessibilityRole::Image, bounds);
+        node.label = self
+            .accessibility_label
+            .clone()
+            .or_else(|| Some(self.initials.clone()));
+        context.record_accessibility(node);
 
         Ellipse::new()
             .color(EllipseColor::Custom(

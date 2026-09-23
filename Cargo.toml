@@ -46,6 +46,14 @@ softbuffer = {
     default-features = false,
     features = ["wayland", "wayland-dlopen", "x11", "x11-dlopen"],
 }
+bytemuck = { version = "1.22.0", features = ["derive"] }
+pollster = "1.0.1"
+raw-window-handle = "0.6.2"
+wgpu = {
+    version = "30.0.1",
+    default-features = false,
+    features = ["vulkan", "gles", "wgsl"],
+}
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winit = {
