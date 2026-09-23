@@ -154,6 +154,8 @@ pub struct TextFieldTokens {
     pub selection: Color,
     pub caret: Color,
     pub horizontal_padding: f32,
+    /// Optical correction applied after geometric vertical centering.
+    pub text_offset_y: f32,
     pub min_width: f32,
     pub radius: CornerRadius,
     pub stroke_width: f32,
@@ -178,6 +180,7 @@ impl TextFieldTokens {
             selection: colors.accent_soft,
             caret: colors.accent,
             horizontal_padding: FigmaTokens::SPACING.space_12,
+            text_offset_y: -1.0,
             min_width: 100.0,
             radius: CornerRadius::Small,
             stroke_width: FigmaTokens::SHAPE.stroke_default,

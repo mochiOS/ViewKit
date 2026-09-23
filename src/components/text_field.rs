@@ -835,7 +835,9 @@ impl View for TextField {
 
         let text_bounds = Rect::new(
             bounds.origin.x + horizontal_padding + leading_inset,
-            bounds.origin.y + (bounds.size.height - line_height).max(0.0) / 2.0,
+            bounds.origin.y
+                + (bounds.size.height - line_height).max(0.0) / 2.0
+                + context.theme.text_field.text_offset_y,
             (bounds.size.width - horizontal_padding * 2.0 - leading_inset).max(0.0),
             line_height.min(bounds.size.height),
         );
