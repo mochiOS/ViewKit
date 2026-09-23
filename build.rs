@@ -113,7 +113,7 @@ fn generate_symbols(symbol_dir: &Path, out_dir: &Path) {
     for (variant, name, replacement) in [
         ("Plus", "plus", Some("plus")),
         ("Minus", "minus", Some("minus")),
-        ("Check", "check", None),
+        ("Check", "check", Some("checkmark")),
         ("X", "x", Some("x")),
         ("Settings", "settings", None),
         ("ArrowUp", "arrow.top", Some("arrow.top")),
