@@ -16,7 +16,10 @@ struct VertexOutput {
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
-    output.position = vec4<f32>(input.position, 1.0);
+    // The mochiOS scene protocol uses a top-left origin. WGPU clip-space uses
+    // positive Y at the top of the render target, so invert the protocol Y
+    // coordinate when presenting the same scene on desktop Linux.
+    output.position = vec4<f32>(input.position.x, -input.position.y, input.position.z, 1.0);
     output.uv = input.uv;
     output.color = input.color;
     return output;

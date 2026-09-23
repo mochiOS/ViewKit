@@ -20,7 +20,8 @@ use std::time::Instant;
 struct SwitchMetrics {
     track_width: f32,
     track_height: f32,
-    knob_size: f32,
+    knob_width: f32,
+    knob_height: f32,
     pressed_knob_width: f32,
     knob_inset: f32,
     drag_threshold: f32,
@@ -28,13 +29,23 @@ struct SwitchMetrics {
 }
 
 impl SwitchMetrics {
-    fn from_theme(theme: &Theme) -> Self {
+    fn from_theme(theme: &Theme, thumb_width: Option<f32>, thumb_height: Option<f32>) -> Self {
         let layout = theme.layout;
+        let maximum_width = (layout.switch_track_width - layout.switch_knob_inset * 2.0).max(1.0);
+        let maximum_height =
+            (layout.switch_track_height - layout.switch_knob_inset * 2.0).max(1.0);
+        let default_width = (layout.switch_knob_size + layout.switch_knob_inset).min(maximum_width);
+        let knob_width = valid_thumb_dimension(thumb_width, default_width).min(maximum_width);
+        let knob_height =
+            valid_thumb_dimension(thumb_height, layout.switch_knob_size).min(maximum_height);
+        let pressed_growth =
+            (layout.switch_pressed_knob_width - layout.switch_knob_size).max(0.0);
         Self {
             track_width: layout.switch_track_width,
             track_height: layout.switch_track_height,
-            knob_size: layout.switch_knob_size,
-            pressed_knob_width: layout.switch_pressed_knob_width,
+            knob_width,
+            knob_height,
+            pressed_knob_width: (knob_width + pressed_growth).min(maximum_width),
             knob_inset: layout.switch_knob_inset,
             drag_threshold: layout.switch_drag_threshold,
             hit_padding: layout.switch_hit_padding,
@@ -89,6 +100,8 @@ pub struct Switch {
     interaction: ButtonInteractionState,
     knob_width_animation: Arc<Mutex<KnobWidthAnimationState>>,
     drag: SwitchDragState,
+    thumb_width: Option<f32>,
+    thumb_height: Option<f32>,
 }
 
 impl Switch {
@@ -100,6 +113,8 @@ impl Switch {
             interaction: ButtonInteractionState::new(),
             knob_width_animation: Arc::new(Mutex::new(KnobWidthAnimationState::default())),
             drag: SwitchDragState::default(),
+            thumb_width: None,
+            thumb_height: None,
         }
     }
 
@@ -113,6 +128,23 @@ impl Switch {
         self
     }
 
+    /// Sets the visible thumb dimensions independently from the switch track.
+    pub fn thumb_size(mut self, width: f32, height: f32) -> Self {
+        self.thumb_width = Some(width);
+        self.thumb_height = Some(height);
+        self
+    }
+
+    pub fn thumb_width(mut self, width: f32) -> Self {
+        self.thumb_width = Some(width);
+        self
+    }
+
+    pub fn thumb_height(mut self, height: f32) -> Self {
+        self.thumb_height = Some(height);
+        self
+    }
+
     pub fn is_checked(&self) -> bool {
         self.checked.get()
     }
@@ -122,7 +154,7 @@ impl Switch {
     }
 
     fn button(&self, theme: &Theme) -> Button {
-        let metrics = SwitchMetrics::from_theme(theme);
+        let metrics = SwitchMetrics::from_theme(theme, self.thumb_width, self.thumb_height);
         let mut content = HStack::new()
             .alignment(StackAlignment::Center)
             .gap(StackGap::Small);
@@ -150,6 +182,8 @@ impl Switch {
                 knob_width_animation: self.knob_width_animation.clone(),
                 drag: self.drag.clone(),
                 checked_binding: self.checked.clone(),
+                thumb_width: self.thumb_width,
+                thumb_height: self.thumb_height,
             }
             .frame(metrics.track_width, metrics.track_height)
             .flex_shrink(0.0),
@@ -182,7 +216,8 @@ impl Switch {
             return EventResult::Ignored;
         }
 
-        let metrics = SwitchMetrics::from_theme(context.theme());
+        let metrics =
+            SwitchMetrics::from_theme(context.theme(), self.thumb_width, self.thumb_height);
 
         match event {
             ViewEvent::KeyPressed {
@@ -218,7 +253,7 @@ impl Switch {
 
                 let drag_offset_x = mark_bounds
                     .filter(|mark_bounds| {
-                        knob_bounds_at(*mark_bounds, metrics.knob_size, checked_position, metrics)
+                        knob_bounds_at(*mark_bounds, metrics.knob_width, checked_position, metrics)
                             .expanded(metrics.hit_padding)
                             .contains(*position)
                     })
@@ -226,7 +261,7 @@ impl Switch {
                         position.x
                             - knob_center_x(
                                 mark_bounds,
-                                metrics.knob_size,
+                                metrics.knob_width,
                                 checked_position,
                                 metrics,
                             )
@@ -428,11 +463,14 @@ struct SwitchMark {
     knob_width_animation: Arc<Mutex<KnobWidthAnimationState>>,
     drag: SwitchDragState,
     checked_binding: Binding<bool>,
+    thumb_width: Option<f32>,
+    thumb_height: Option<f32>,
 }
 
 impl View for SwitchMark {
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
-        let metrics = SwitchMetrics::from_theme(context.theme);
+        let metrics =
+            SwitchMetrics::from_theme(context.theme, self.thumb_width, self.thumb_height);
         constraints.constrain(Size::new(metrics.track_width, metrics.track_height))
     }
 
@@ -445,7 +483,8 @@ impl View for SwitchMark {
 
         let now = Instant::now();
         let motion = context.theme.motion.toggle;
-        let metrics = SwitchMetrics::from_theme(context.theme);
+        let metrics =
+            SwitchMetrics::from_theme(context.theme, self.thumb_width, self.thumb_height);
 
         let (position, position_redraw) = self.visual_position(now, motion);
 
@@ -467,9 +506,9 @@ impl View for SwitchMark {
         let knob_right = bounds.origin.x + bounds.size.width - metrics.knob_inset - knob_width;
 
         let knob_x = interpolate(knob_left, knob_right, position);
-        let knob_y = bounds.origin.y + (bounds.size.height - metrics.knob_size) / 2.0;
+        let knob_y = bounds.origin.y + (bounds.size.height - metrics.knob_height) / 2.0;
 
-        let knob_bounds = Rect::new(knob_x, knob_y, knob_width, metrics.knob_size);
+        let knob_bounds = Rect::new(knob_x, knob_y, knob_width, metrics.knob_height);
 
         let knob_color = if self.enabled {
             context.theme.switch.knob
@@ -653,7 +692,7 @@ fn knob_width_for_pressed(pressed: bool, metrics: SwitchMetrics) -> f32 {
     if pressed {
         metrics.pressed_knob_width
     } else {
-        metrics.knob_size
+        metrics.knob_width
     }
 }
 
@@ -670,10 +709,16 @@ fn knob_bounds_at(bounds: Rect, knob_width: f32, progress: f32, metrics: SwitchM
 
     Rect::new(
         center_x - knob_width / 2.0,
-        bounds.origin.y + (bounds.size.height - metrics.knob_size) / 2.0,
+        bounds.origin.y + (bounds.size.height - metrics.knob_height) / 2.0,
         knob_width,
-        metrics.knob_size,
+        metrics.knob_height,
     )
+}
+
+fn valid_thumb_dimension(value: Option<f32>, fallback: f32) -> f32 {
+    value
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .unwrap_or(fallback)
 }
 
 fn drag_progress_from_pointer(
@@ -695,4 +740,35 @@ fn drag_progress_from_pointer(
     }
 
     ((pointer_x - drag_offset_x - left) / width).clamp(0.0, 1.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SwitchMetrics;
+    use crate::theme::Theme;
+
+    #[test]
+    fn default_thumb_is_slightly_wider_than_tall() {
+        let metrics = SwitchMetrics::from_theme(&Theme::LIGHT, None, None);
+        assert!(metrics.knob_width > metrics.knob_height);
+    }
+
+    #[test]
+    fn thumb_width_and_height_are_independent_and_clamped_to_track() {
+        let metrics = SwitchMetrics::from_theme(&Theme::LIGHT, Some(30.0), Some(14.0));
+        assert_eq!(metrics.knob_width, 30.0);
+        assert_eq!(metrics.knob_height, 14.0);
+
+        let clamped = SwitchMetrics::from_theme(&Theme::LIGHT, Some(1_000.0), Some(1_000.0));
+        assert_eq!(
+            clamped.knob_width,
+            Theme::LIGHT.layout.switch_track_width
+                - Theme::LIGHT.layout.switch_knob_inset * 2.0
+        );
+        assert_eq!(
+            clamped.knob_height,
+            Theme::LIGHT.layout.switch_track_height
+                - Theme::LIGHT.layout.switch_knob_inset * 2.0
+        );
+    }
 }
