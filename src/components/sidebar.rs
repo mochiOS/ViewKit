@@ -9,8 +9,8 @@ use crate::theme::{Color, CornerRadius, ShadowStyle, Theme};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 use super::{
-    Button, ButtonInteractionState, ButtonStyle, HStack, Icon, Rectangle, RectangleColor,
-    SymbolName, Text, VStack, ZStackAlignment,
+    Avatar, AvatarSize, Button, ButtonInteractionState, ButtonStyle, HStack, Icon, Rectangle,
+    RectangleColor, SymbolName, Text, VStack, ZStackAlignment,
 };
 
 type Callback = Rc<RefCell<Box<dyn FnMut()>>>;
@@ -21,6 +21,7 @@ type Callback = Rc<RefCell<Box<dyn FnMut()>>>;
 pub struct SidebarItem {
     label: String,
     symbol: Option<SymbolName>,
+    avatar: Option<String>,
     selected: bool,
     interaction: ButtonInteractionState,
     on_select: Option<Callback>,
@@ -31,6 +32,7 @@ impl SidebarItem {
         Self {
             label: label.into(),
             symbol: None,
+            avatar: None,
             selected: false,
             interaction: ButtonInteractionState::new(),
             on_select: None,
@@ -39,6 +41,14 @@ impl SidebarItem {
 
     pub fn symbol(mut self, symbol: SymbolName) -> Self {
         self.symbol = Some(symbol);
+        self.avatar = None;
+        self
+    }
+
+    /// Uses ViewKit's standard account avatar as the leading navigation icon.
+    pub fn avatar(mut self, initials: impl Into<String>) -> Self {
+        self.avatar = Some(initials.into());
+        self.symbol = None;
         self
     }
 
@@ -72,7 +82,13 @@ impl SidebarItem {
         let mut content = HStack::new()
             .alignment(StackAlignment::Center)
             .gap(StackGap::Small);
-        if let Some(symbol) = self.symbol {
+        if let Some(initials) = &self.avatar {
+            content = content.child(
+                Avatar::new(initials.clone())
+                    .size(AvatarSize::Small)
+                    .accessibility_hidden(true),
+            );
+        } else if let Some(symbol) = self.symbol {
             content = content.child(
                 Icon::new(symbol)
                     .size(theme.layout.compact_icon_size)
