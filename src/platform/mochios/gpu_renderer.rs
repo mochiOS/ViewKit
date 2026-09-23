@@ -646,8 +646,9 @@ impl GpuSceneRenderer {
         if command.bounds.intersection(self.current_clip()).is_none() {
             return Ok(());
         }
-        let width = (command.bounds.size.width * scale).ceil().max(1.0) as u32;
-        let height = (command.bounds.size.height * scale).ceil().max(1.0) as u32;
+        let output_bounds = pixel_aligned_rect(scale_rect(command.bounds, scale));
+        let width = output_bounds.size.width as u32;
+        let height = output_bounds.size.height as u32;
         let atlas = if let Some(entry) = self.svg_raster_cache.iter().find(|entry| {
             entry.svg == command.svg
                 && entry.width == width
@@ -671,7 +672,8 @@ impl GpuSceneRenderer {
             resvg::render(command.svg.tree(), transform, &mut pixmap.as_mut());
             if let Some(tint) = command.tint {
                 for pixel in pixmap.data_mut().chunks_exact_mut(4) {
-                    let alpha = ((u16::from(pixel[3]) * u16::from(tint.alpha) + 127) / 255) as u8;
+                    let alpha =
+                        ((u16::from(pixel[3]) * u16::from(tint.alpha) + 127) / 255) as u8;
                     pixel[0] = ((u16::from(tint.red) * u16::from(alpha) + 127) / 255) as u8;
                     pixel[1] = ((u16::from(tint.green) * u16::from(alpha) + 127) / 255) as u8;
                     pixel[2] = ((u16::from(tint.blue) * u16::from(alpha) + 127) / 255) as u8;
@@ -696,12 +698,7 @@ impl GpuSceneRenderer {
             });
             atlas
         };
-        self.textured_quad(
-            scale_rect(command.bounds, scale),
-            atlas,
-            command.opacity,
-            viewport,
-        );
+        self.textured_quad(output_bounds, atlas, command.opacity, viewport);
         Ok(())
     }
 
@@ -1140,6 +1137,14 @@ fn scale_rect(rect: Rect, scale: f32) -> Rect {
         rect.size.width * scale,
         rect.size.height * scale,
     )
+}
+
+fn pixel_aligned_rect(rect: Rect) -> Rect {
+    let left = rect.origin.x.round();
+    let top = rect.origin.y.round();
+    let right = (rect.origin.x + rect.size.width).round().max(left + 1.0);
+    let bottom = (rect.origin.y + rect.size.height).round().max(top + 1.0);
+    Rect::new(left, top, right - left, bottom - top)
 }
 
 fn inset_rect(rect: Rect, inset: f32) -> Rect {

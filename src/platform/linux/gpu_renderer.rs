@@ -91,11 +91,15 @@ impl GpuRenderer {
                 ..Default::default()
             }))?;
         let capabilities = surface.get_capabilities(&adapter);
+        // Scene colors and atlas texels are both encoded as UNORM bytes by the
+        // mochiOS GPU scene protocol. An sRGB atlas would decode only texels,
+        // making a tinted SVG visibly darker than an adjacent solid fill made
+        // from the exact same theme color.
         let format = capabilities
             .formats
             .iter()
             .copied()
-            .find(wgpu::TextureFormat::is_srgb)
+            .find(|format| !format.is_srgb())
             .or_else(|| capabilities.formats.first().copied())
             .ok_or(GpuRendererError::SurfaceFormatUnavailable)?;
         let present_mode = capabilities
@@ -213,7 +217,7 @@ impl GpuRenderer {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Bgra8UnormSrgb,
+            format: wgpu::TextureFormat::Bgra8Unorm,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
