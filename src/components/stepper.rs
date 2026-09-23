@@ -4,11 +4,14 @@ use crate::geometry::{Rect, Size};
 use crate::layout::{StackAlignment, StackDistribution, StackGap, ViewExt};
 use crate::platform::Key;
 use crate::state::Binding;
-use crate::theme::{Color, ShadowStyle, Theme};
+use crate::theme::{ShadowStyle, Theme};
 use crate::typography::TextAlignment;
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
-use super::{Button, ButtonInteractionState, ButtonStyle, HStack, Padding, Text, ZStackAlignment};
+use super::{
+    Button, ButtonInteractionState, ButtonStyle, HStack, Icon, Padding, SymbolName, Text,
+    ZStackAlignment,
+};
 
 pub struct Stepper {
     value: Binding<i32>,
@@ -79,7 +82,15 @@ impl Stepper {
                         .alignment(StackAlignment::Center)
                         .distribution(StackDistribution::SpaceBetween)
                         .gap(StackGap::Small)
-                        .child(label("−", foreground, theme.layout.stepper_icon_size))
+                        .child(
+                            Icon::new(SymbolName::Minus)
+                                .size(theme.layout.stepper_icon_size)
+                                .color(foreground)
+                                .frame(
+                                    theme.layout.stepper_icon_size,
+                                    theme.layout.stepper_icon_size,
+                                ),
+                        )
                         .child(
                             Text::label(self.value.get().to_string())
                                 .accessibility_hidden(true)
@@ -88,7 +99,15 @@ impl Stepper {
                                 .layout()
                                 .flex_grow(1.0),
                         )
-                        .child(label("+", foreground, theme.layout.stepper_icon_size)),
+                        .child(
+                            Icon::new(SymbolName::Plus)
+                                .size(theme.layout.stepper_icon_size)
+                                .color(foreground)
+                                .frame(
+                                    theme.layout.stepper_icon_size,
+                                    theme.layout.stepper_icon_size,
+                                ),
+                        ),
                 ),
             )
     }
@@ -178,12 +197,4 @@ impl View for Stepper {
 
         result
     }
-}
-
-fn label(text: &'static str, color: Color, size: f32) -> crate::layout::StackChild {
-    Text::label(text)
-        .accessibility_hidden(true)
-        .alignment(TextAlignment::Center)
-        .color(color)
-        .frame(size, size)
 }

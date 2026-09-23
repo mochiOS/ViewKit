@@ -111,17 +111,17 @@ fn generate_symbols(symbol_dir: &Path, out_dir: &Path) {
     // Keep source compatibility while applications migrate from IconName. Entries
     // without an SVG remain invisible until the corresponding VK Symbol is added.
     for (variant, name, replacement) in [
-        ("Plus", "plus", None),
-        ("Minus", "minus", None),
+        ("Plus", "plus", Some("plus")),
+        ("Minus", "minus", Some("minus")),
         ("Check", "check", None),
-        ("X", "x", None),
+        ("X", "x", Some("x")),
         ("Settings", "settings", None),
         ("ArrowUp", "arrow.top", Some("arrow.top")),
         ("House", "home", Some("home")),
         ("AppWindow", "app.window", None),
-        ("Download", "download", None),
-        ("HardDrive", "hard.drive", None),
-        ("FolderOpen", "folder.open", None),
+        ("Download", "download", Some("download")),
+        ("HardDrive", "hard.drive", Some("internaldrive")),
+        ("FolderOpen", "folder.open", Some("folder.fill")),
         ("FolderPlus", "folder.plus", None),
         ("FileText", "file.text", None),
         ("FileImage", "file.image", None),
