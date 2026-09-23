@@ -253,6 +253,16 @@ impl GpuSceneRenderer {
     }
 
     fn atlas_capacity_error(&mut self) -> MochiOsBackendError {
+        #[cfg(target_os = "linux")]
+        eprintln!(
+            "[ViewKit] GPU atlas exhausted: cursor=({}, {}), row_height={}, glyphs={}, images={}, svgs={}",
+            self.atlas_x,
+            self.atlas_y,
+            self.atlas_row_height,
+            self.glyph_atlas_cache.len(),
+            self.image_raster_cache.len(),
+            self.svg_raster_cache.len()
+        );
         self.atlas_full = true;
         MochiOsBackendError::InvalidWindowSize
     }
@@ -294,7 +304,14 @@ impl GpuSceneRenderer {
             atlas_data_y,
             atlas_data_height,
         )
-        .map_err(|_| MochiOsBackendError::InvalidWindowSize)?;
+        .map_err(|error| {
+            #[cfg(target_os = "linux")]
+            eprintln!(
+                "[ViewKit] GPU scene encoding failed: {error:?}; viewport={}x{}, vertices={vertex_count}",
+                viewport.physical_width, viewport.physical_height
+            );
+            MochiOsBackendError::InvalidWindowSize
+        })?;
         let mut offset = HEADER_LEN;
         for vertex in &self.vertices {
             for value in vertex
@@ -777,6 +794,12 @@ impl GpuSceneRenderer {
                 else {
                     continue;
                 };
+                // Whitespace and other non-marking glyphs legitimately have
+                // no bitmap. They still participate in shaping, but there is
+                // nothing to upload or draw for them.
+                if image.placement.width == 0 || image.placement.height == 0 {
+                    continue;
+                }
                 let atlas = self.pack_glyph(image, text_color)?;
                 let entry = GlyphAtlasEntry {
                     atlas,
@@ -933,6 +956,11 @@ impl GpuSceneRenderer {
             || width > ATLAS_WIDTH
             || height > ATLAS_HEIGHT
         {
+            #[cfg(target_os = "linux")]
+            eprintln!(
+                "[ViewKit] invalid GPU atlas image: {width}x{height}, bytes={}, atlas={}x{}",
+                bgra.len(), ATLAS_WIDTH, ATLAS_HEIGHT
+            );
             return Err(MochiOsBackendError::InvalidWindowSize);
         }
         if self.atlas_x + width > ATLAS_WIDTH {
@@ -970,6 +998,11 @@ impl GpuSceneRenderer {
         let width = image.placement.width;
         let height = image.placement.height;
         if width == 0 || height == 0 || width > ATLAS_WIDTH || height > ATLAS_HEIGHT {
+            #[cfg(target_os = "linux")]
+            eprintln!(
+                "[ViewKit] invalid GPU glyph: {width}x{height}, bytes={}, atlas={}x{}",
+                image.data.len(), ATLAS_WIDTH, ATLAS_HEIGHT
+            );
             return Err(MochiOsBackendError::InvalidWindowSize);
         }
         if self.atlas_x + width > ATLAS_WIDTH {
