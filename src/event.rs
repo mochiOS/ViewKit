@@ -290,6 +290,7 @@ pub struct EventDispatcher {
     focused_bounds: Option<Rect>,
     focus_scopes: Vec<FocusScopeState>,
     pending_focus_request: Option<Option<Rect>>,
+    window_focused: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -367,6 +368,12 @@ impl EventDispatcher {
                 .map(|node| node.bounds),
         );
 
+        if !self.window_focused {
+            self.focused_bounds = None;
+            self.pending_focus_request = None;
+            return;
+        }
+
         let focus_is_valid = self
             .focused_bounds
             .is_some_and(|focused| self.focus_order.contains(&focused));
@@ -405,6 +412,24 @@ impl EventDispatcher {
         context: &mut EventContext<'_>,
     ) -> EventResult {
         let mut result = EventResult::Ignored;
+
+        if let PlatformEvent::Focused(focused) = event {
+            self.window_focused = *focused;
+            if *focused {
+                let focus_is_valid = self
+                    .focused_bounds
+                    .is_some_and(|bounds| self.focus_order.contains(&bounds));
+                if !focus_is_valid {
+                    let target = self.focus_order.first().copied();
+                    self.focused_bounds = target;
+                    self.pending_focus_request = Some(target);
+                }
+            } else {
+                self.pointer_position = None;
+                self.focused_bounds = None;
+                self.pending_focus_request = None;
+            }
+        }
 
         if let Some(target) = self.pending_focus_request.take() {
             result = result.merge(root.handle_event(
@@ -538,11 +563,6 @@ impl EventDispatcher {
             }
 
             PlatformEvent::Focused(focused) => {
-                if !focused {
-                    self.pointer_position = None;
-                    self.focused_bounds = None;
-                }
-
                 Some(ViewEvent::FocusChanged { focused: *focused })
             }
 
@@ -590,6 +610,7 @@ mod tests {
         editor.focusable = true;
 
         let mut dispatcher = EventDispatcher::new();
+        dispatcher.window_focused = true;
         dispatcher.set_accessibility_nodes(&[editor]);
 
         assert_eq!(dispatcher.focused_bounds, Some(bounds));
@@ -603,10 +624,24 @@ mod tests {
         editor.focusable = true;
 
         let mut dispatcher = EventDispatcher::new();
+        dispatcher.window_focused = true;
         dispatcher.set_accessibility_nodes(&[]);
         assert_eq!(dispatcher.pending_focus_request, None);
 
         dispatcher.set_accessibility_nodes(&[editor]);
         assert_eq!(dispatcher.pending_focus_request, Some(Some(bounds)));
+    }
+
+    #[test]
+    fn unfocused_window_does_not_focus_its_first_control() {
+        let bounds = Rect::new(8.0, 8.0, 120.0, 32.0);
+        let mut button = AccessibilityNode::new(AccessibilityRole::Button, bounds);
+        button.focusable = true;
+
+        let mut dispatcher = EventDispatcher::new();
+        dispatcher.set_accessibility_nodes(&[button]);
+
+        assert_eq!(dispatcher.focused_bounds, None);
+        assert_eq!(dispatcher.pending_focus_request, None);
     }
 }
