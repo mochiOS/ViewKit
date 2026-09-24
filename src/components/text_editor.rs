@@ -1028,23 +1028,45 @@ impl View for TextEditor {
             ViewEvent::PointerFocusRequested { position } => {
                 let focused = bounds.contains(*position) && self.enabled;
                 let mut inner = self.interaction.inner.borrow_mut();
+                let changed = inner.focused != focused;
                 inner.focused = focused;
                 if !focused {
                     inner.selecting = false;
                     inner.caret_blink_origin = None;
                 }
+                drop(inner);
+                if changed {
+                    context.request_redraw_in(bounds);
+                }
                 EventResult::Ignored
             }
             ViewEvent::KeyboardFocusRequested { bounds: target } => {
                 let focused = target.is_some_and(|target| target == bounds) && self.enabled;
-                self.interaction.inner.borrow_mut().focused = focused;
+                let mut inner = self.interaction.inner.borrow_mut();
+                let changed = inner.focused != focused;
+                inner.focused = focused;
+                if focused {
+                    inner.caret_blink_origin = Some(Instant::now());
+                } else {
+                    inner.selecting = false;
+                    inner.caret_blink_origin = None;
+                }
+                drop(inner);
+                if changed {
+                    context.request_redraw_in(bounds);
+                }
                 EventResult::Ignored
             }
             ViewEvent::FocusChanged { focused: false } => {
                 let mut inner = self.interaction.inner.borrow_mut();
+                let changed = inner.focused || inner.selecting;
                 inner.focused = false;
                 inner.selecting = false;
                 inner.caret_blink_origin = None;
+                drop(inner);
+                if changed {
+                    context.request_redraw_in(bounds);
+                }
                 EventResult::Ignored
             }
             ViewEvent::Scroll {
@@ -1805,5 +1827,25 @@ mod tests {
 
         assert_eq!(result, EventResult::Consumed);
         assert_eq!(state.inner.borrow().scroll_y, 48.0);
+    }
+
+    #[test]
+    fn losing_window_focus_clears_the_caret_and_requests_repaint() {
+        let state = TextEditorInteractionState::new();
+        state.focus();
+        let editor = TextEditor::with_interaction(state.clone());
+        let bounds = Rect::new(0.0, 0.0, 320.0, 200.0);
+        let mut measurer = TextMeasurer::new();
+        let mut context = EventContext::new(&Theme::DEFAULT, &Typography::DEFAULT, &mut measurer);
+
+        let result = editor.handle_event(
+            bounds,
+            &ViewEvent::FocusChanged { focused: false },
+            &mut context,
+        );
+
+        assert_eq!(result, EventResult::Ignored);
+        assert!(!state.is_focused());
+        assert_eq!(context.redraw_request(), crate::event::RedrawRequest::Region(bounds));
     }
 }
