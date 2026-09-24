@@ -143,7 +143,12 @@ where
                 return;
             }
 
-            PlatformEvent::RedrawRequested | PlatformEvent::CloseRequested => {
+            PlatformEvent::CloseRequested => {
+                request_exit();
+                return;
+            }
+
+            PlatformEvent::RedrawRequested => {
                 return;
             }
 
@@ -588,6 +593,7 @@ mod tests {
     use super::*;
     use crate::app::WindowOptions;
     use crate::geometry::Size;
+    use crate::platform::PlatformWindow;
     use crate::state::State;
     use crate::view::{Constraints, MeasureContext};
     use std::rc::Rc;
@@ -612,6 +618,22 @@ mod tests {
         assert!(exit_requested());
         reset_exit_request();
         assert!(!exit_requested());
+    }
+
+    #[test]
+    fn platform_close_requests_exit_from_the_common_runtime() {
+        reset_exit_request();
+        let app = PaintMutationApp {
+            state: State::new(false),
+            builds: Rc::new(Cell::new(0)),
+        };
+        let mut runtime = ApplicationRuntime::new(app);
+        let window = TestWindow;
+
+        runtime.handle_event(PlatformEvent::CloseRequested, &window);
+
+        assert!(runtime.exit_requested());
+        reset_exit_request();
     }
 
     #[test]
@@ -689,6 +711,18 @@ mod tests {
     struct PaintMutationApp {
         state: State<bool>,
         builds: Rc<Cell<usize>>,
+    }
+
+    struct TestWindow;
+
+    impl PlatformWindow for TestWindow {
+        fn request_redraw(&self) {}
+
+        fn set_title(&self, _title: &str) {}
+
+        fn viewport(&self) -> Viewport {
+            Viewport::new(Size::new(100.0, 100.0), 100, 100, 1.0)
+        }
     }
 
     impl App for PaintMutationApp {

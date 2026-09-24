@@ -367,12 +367,15 @@ impl EventDispatcher {
                 .map(|node| node.bounds),
         );
 
-        if self
+        let focus_is_valid = self
             .focused_bounds
-            .is_some_and(|focused| !self.focus_order.contains(&focused))
-        {
-            self.focused_bounds = self.focus_order.first().copied();
-            self.pending_focus_request = Some(self.focused_bounds);
+            .is_some_and(|focused| self.focus_order.contains(&focused));
+        if !focus_is_valid {
+            let target = self.focus_order.first().copied();
+            if self.focused_bounds != target {
+                self.focused_bounds = target;
+                self.pending_focus_request = Some(target);
+            }
         }
     }
 
@@ -571,5 +574,39 @@ impl EventDispatcher {
             | PlatformEvent::RedrawRequested
             | PlatformEvent::CloseRequested => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EventDispatcher;
+    use crate::accessibility::{AccessibilityNode, AccessibilityRole};
+    use crate::geometry::Rect;
+
+    #[test]
+    fn first_focusable_node_becomes_the_initial_keyboard_focus() {
+        let bounds = Rect::new(12.0, 24.0, 320.0, 200.0);
+        let mut editor = AccessibilityNode::new(AccessibilityRole::TextField, bounds);
+        editor.focusable = true;
+
+        let mut dispatcher = EventDispatcher::new();
+        dispatcher.set_accessibility_nodes(&[editor]);
+
+        assert_eq!(dispatcher.focused_bounds, Some(bounds));
+        assert_eq!(dispatcher.pending_focus_request, Some(Some(bounds)));
+    }
+
+    #[test]
+    fn initial_focus_waits_until_a_focusable_node_is_painted() {
+        let bounds = Rect::new(0.0, 0.0, 240.0, 160.0);
+        let mut editor = AccessibilityNode::new(AccessibilityRole::TextField, bounds);
+        editor.focusable = true;
+
+        let mut dispatcher = EventDispatcher::new();
+        dispatcher.set_accessibility_nodes(&[]);
+        assert_eq!(dispatcher.pending_focus_request, None);
+
+        dispatcher.set_accessibility_nodes(&[editor]);
+        assert_eq!(dispatcher.pending_focus_request, Some(Some(bounds)));
     }
 }
