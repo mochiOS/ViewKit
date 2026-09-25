@@ -271,6 +271,14 @@ pub trait App: Sized + 'static {
         false
     }
 
+    /// ウィンドウを閉じる要求を受け入れるか返します。
+    ///
+    /// 未保存のDocumentなどがあるアプリケーションは`false`を返し、確認UIを
+    /// 表示できます。デフォルトは従来どおり直ちに終了します。
+    fn close_requested(&mut self) -> bool {
+        true
+    }
+
     /// Called after the persisted system appearance has changed.
     fn appearance_changed(&mut self) {}
 }

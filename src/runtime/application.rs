@@ -55,6 +55,7 @@ where
     text_measurer: TextMeasurer,
     accessibility_nodes: Vec<AccessibilityNode>,
     appearance: AppearanceSettings,
+    window_title: String,
 
     event_dispatcher: EventDispatcher,
     redraw_schedule: RedrawSchedule,
@@ -73,6 +74,7 @@ where
 {
     pub(crate) fn new(app: A) -> Self {
         reset_exit_request();
+        let window_title = app.window().title().to_owned();
         let appearance = AppearanceSettings::load();
         let theme = appearance.theme();
         Theme::set_current(theme);
@@ -87,6 +89,7 @@ where
             text_measurer,
             accessibility_nodes: Vec::new(),
             appearance,
+            window_title,
 
             event_dispatcher: EventDispatcher::new(),
             redraw_schedule: RedrawSchedule::new(),
@@ -144,7 +147,12 @@ where
             }
 
             PlatformEvent::CloseRequested => {
-                request_exit();
+                if self.app.close_requested() {
+                    request_exit();
+                } else {
+                    self.pending_redraw = RedrawRequest::Full;
+                    window.request_redraw();
+                }
                 return;
             }
 
@@ -252,6 +260,12 @@ where
 
         if state_changed || redraw_request.is_requested() {
             window.request_redraw();
+        }
+
+        let window_title = self.app.window().title().to_owned();
+        if window_title != self.window_title {
+            window.set_title(&window_title);
+            self.window_title = window_title;
         }
     }
 
@@ -637,6 +651,23 @@ mod tests {
     }
 
     #[test]
+    fn application_can_defer_a_platform_close_request() {
+        reset_exit_request();
+        let requested = Rc::new(Cell::new(false));
+        let app = DeferredCloseApp {
+            requested: Rc::clone(&requested),
+        };
+        let mut runtime = ApplicationRuntime::new(app);
+        let window = TestWindow;
+
+        runtime.handle_event(PlatformEvent::CloseRequested, &window);
+
+        assert!(requested.get());
+        assert!(!runtime.exit_requested());
+        reset_exit_request();
+    }
+
+    #[test]
     fn fallback_menu_clamps_to_the_window_and_ignores_disabled_items() {
         let request = ContextMenuRequest {
             request_id: 7,
@@ -713,6 +744,10 @@ mod tests {
         builds: Rc<Cell<usize>>,
     }
 
+    struct DeferredCloseApp {
+        requested: Rc<Cell<bool>>,
+    }
+
     struct TestWindow;
 
     impl PlatformWindow for TestWindow {
@@ -744,6 +779,27 @@ mod tests {
             PaintMutationView {
                 state: self.state.clone(),
             }
+        }
+    }
+
+    impl App for DeferredCloseApp {
+        type Body = PaintMutationView;
+
+        fn new() -> Self {
+            Self {
+                requested: Rc::new(Cell::new(false)),
+            }
+        }
+
+        fn body(&self, _context: &ViewContext) -> Self::Body {
+            PaintMutationView {
+                state: State::new(true),
+            }
+        }
+
+        fn close_requested(&mut self) -> bool {
+            self.requested.set(true);
+            false
         }
     }
 
