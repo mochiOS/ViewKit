@@ -44,6 +44,28 @@ use crate::renderer::Viewport;
 use crate::theme::Theme;
 use crate::view::View;
 
+/// Stable identity for a window owned by a running application.
+///
+/// The initial compatibility window always uses [`WindowId::PRIMARY`]. New
+/// windows receive their own IDs from the application runtime.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(transparent)]
+pub struct WindowId(u64);
+
+impl WindowId {
+    pub const PRIMARY: Self = Self(1);
+
+    #[must_use]
+    pub const fn from_raw(raw: u64) -> Option<Self> {
+        if raw == 0 { None } else { Some(Self(raw)) }
+    }
+
+    #[must_use]
+    pub const fn raw(self) -> u64 {
+        self.0
+    }
+}
+
 /// アプリケーションウィンドウの初期設定
 ///
 /// ウィンドウのタイトル、初期サイズ、サイズ変更の可否を指定します。
@@ -55,6 +77,7 @@ pub struct WindowOptions {
     pub(crate) resizable: bool,
     pub(crate) fullscreen: bool,
     pub(crate) secure_overlay: bool,
+    pub(crate) system_modal: bool,
 }
 
 impl WindowOptions {
@@ -70,6 +93,7 @@ impl WindowOptions {
             resizable: true,
             fullscreen: false,
             secure_overlay: false,
+            system_modal: false,
         }
     }
 
@@ -99,6 +123,9 @@ impl WindowOptions {
     #[must_use]
     pub fn fullscreen(mut self, fullscreen: bool) -> Self {
         self.fullscreen = fullscreen;
+        if fullscreen {
+            self.system_modal = false;
+        }
         self
     }
 
@@ -110,6 +137,20 @@ impl WindowOptions {
         self.secure_overlay = secure_overlay;
         if secure_overlay {
             self.fullscreen = true;
+            self.system_modal = false;
+        }
+        self
+    }
+
+    /// mochiOSのシステムモーダルウィンドウとして表示します。
+    ///
+    /// システム所有のパネル向けで、`window.overlay` capabilityが必要です。
+    #[must_use]
+    pub fn system_modal(mut self, system_modal: bool) -> Self {
+        self.system_modal = system_modal;
+        if system_modal {
+            self.secure_overlay = false;
+            self.fullscreen = false;
         }
         self
     }
@@ -143,6 +184,11 @@ impl WindowOptions {
     #[must_use]
     pub const fn is_secure_overlay(&self) -> bool {
         self.secure_overlay
+    }
+
+    #[must_use]
+    pub const fn is_system_modal(&self) -> bool {
+        self.system_modal
     }
 }
 
@@ -263,8 +309,22 @@ pub trait App: Sized + 'static {
         WindowOptions::default()
     }
 
+    /// Returns the configuration for a specific application window.
+    ///
+    /// Existing single-window apps can continue implementing [`Self::window`].
+    fn window_for(&self, _window: WindowId) -> WindowOptions {
+        self.window()
+    }
+
     /// 現在のアプリケーション状態からルートViewを構築します。
     fn body(&self, context: &ViewContext) -> Self::Body;
+
+    /// Builds the view hierarchy for a specific application window.
+    ///
+    /// Existing single-window apps can continue implementing [`Self::body`].
+    fn body_for(&self, _window: WindowId, context: &ViewContext) -> Self::Body {
+        self.body(context)
+    }
 
     /// Platform固有の補助messageを処理します。
     fn handle_platform_message(&mut self, _message: &[u8]) -> bool {
@@ -274,11 +334,43 @@ pub trait App: Sized + 'static {
     /// ウィンドウを閉じる要求を受け入れるか返します。
     ///
     /// 未保存のDocumentなどがあるアプリケーションは`false`を返し、確認UIを
-    /// 表示できます。デフォルトは従来どおり直ちに終了します。
+    /// 表示できます。デフォルトは従来どおりWindowを閉じます。
     fn close_requested(&mut self) -> bool {
         true
     }
 
+    /// Asks whether a specific application window may close.
+    ///
+    /// Returning `false` keeps that window alive, allowing a document or
+    /// controller to present an asynchronous save confirmation.
+    fn close_requested_for_window(&mut self, _window: WindowId) -> bool {
+        self.close_requested()
+    }
+
+    /// Called when the user activates a running application with no windows.
+    fn reopened(&mut self) {}
+
     /// Called after the persisted system appearance has changed.
     fn appearance_changed(&mut self) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::WindowOptions;
+
+    #[test]
+    fn exclusive_system_window_roles_follow_the_last_builder_call() {
+        let modal = WindowOptions::default()
+            .secure_overlay(true)
+            .system_modal(true);
+        assert!(modal.is_system_modal());
+        assert!(!modal.is_secure_overlay());
+        assert!(!modal.is_fullscreen());
+
+        let fullscreen = WindowOptions::default()
+            .system_modal(true)
+            .fullscreen(true);
+        assert!(fullscreen.is_fullscreen());
+        assert!(!fullscreen.is_system_modal());
+    }
 }

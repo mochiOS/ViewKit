@@ -1,9 +1,13 @@
 //! 単一行のテキストフィールド
 
 use super::{BorderStyle, Icon, Rectangle, RectangleColor, SymbolName, Text};
+use crate::command::{CommandStatus, standard as commands};
 use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
+use crate::platform::clipboard::{
+    set_text as set_system_clipboard_text, text as system_clipboard_text,
+};
 use crate::platform::{Key, PointerButton};
 use crate::state::Binding;
 use crate::theme::{Color, CornerRadius, ShadowStyle};
@@ -731,7 +735,7 @@ impl View for TextField {
         let width = (measured_text.width
             + self.size.horizontal_padding(context.theme) * 2.0
             + self.leading_inset(context.theme))
-            .max(context.theme.text_field.min_width);
+        .max(context.theme.text_field.min_width);
 
         constraints.constrain(Size::new(width, self.size.height(context.theme)))
     }
@@ -756,6 +760,29 @@ impl View for TextField {
                 selection_range(&inner),
             )
         };
+
+        let has_selection = selection.is_some();
+        context.record_command_status(CommandStatus::new(
+            commands::COPY,
+            bounds,
+            focused && has_selection && !self.secure,
+        ));
+        context.record_command_status(CommandStatus::new(
+            commands::CUT,
+            bounds,
+            focused && has_selection && !self.secure,
+        ));
+        context.record_command_status(CommandStatus::new(commands::PASTE, bounds, focused));
+        context.record_command_status(CommandStatus::new(
+            commands::DELETE,
+            bounds,
+            focused && (has_selection || cursor < value.len()),
+        ));
+        context.record_command_status(CommandStatus::new(
+            commands::SELECT_ALL,
+            bounds,
+            focused && !value.is_empty(),
+        ));
 
         let mut accessibility = AccessibilityNode::new(AccessibilityRole::TextField, bounds);
         if !self.placeholder.is_empty() {
@@ -1333,6 +1360,76 @@ impl View for TextField {
 
                 context.request_redraw_in(bounds.expanded(16.0));
 
+                EventResult::Consumed
+            }
+
+            ViewEvent::Command { command, .. }
+                if self.interaction.is_focused() && *command == commands::COPY =>
+            {
+                if !self.secure {
+                    let selected = {
+                        let inner = self.interaction.inner.borrow();
+                        selection_range(&inner).map(|range| inner.value[range].to_owned())
+                    };
+                    if let Some(selected) = selected {
+                        let _ = set_system_clipboard_text(&selected);
+                    }
+                }
+                EventResult::Consumed
+            }
+
+            ViewEvent::Command { command, .. }
+                if self.interaction.is_focused() && *command == commands::CUT =>
+            {
+                if !self.secure {
+                    let selected = {
+                        let inner = self.interaction.inner.borrow();
+                        selection_range(&inner).map(|range| inner.value[range].to_owned())
+                    };
+                    if let Some(selected) = selected
+                        && set_system_clipboard_text(&selected)
+                    {
+                        let changed = delete_selection(&mut self.interaction.inner.borrow_mut());
+                        if changed {
+                            self.synchronize_binding();
+                            self.interaction.reset_caret_blink();
+                            context.request_redraw_in(bounds.expanded(16.0));
+                        }
+                    }
+                }
+                EventResult::Consumed
+            }
+
+            ViewEvent::Command { command, .. }
+                if self.interaction.is_focused() && *command == commands::PASTE =>
+            {
+                if let Some(text) = system_clipboard_text()
+                    && self.interaction.insert_text(&text)
+                {
+                    self.synchronize_binding();
+                    self.interaction.reset_caret_blink();
+                    context.request_redraw_in(bounds.expanded(16.0));
+                }
+                EventResult::Consumed
+            }
+
+            ViewEvent::Command { command, .. }
+                if self.interaction.is_focused() && *command == commands::DELETE =>
+            {
+                if self.interaction.delete_forward() {
+                    self.synchronize_binding();
+                    self.interaction.reset_caret_blink();
+                    context.request_redraw_in(bounds.expanded(16.0));
+                }
+                EventResult::Consumed
+            }
+
+            ViewEvent::Command { command, .. }
+                if self.interaction.is_focused() && *command == commands::SELECT_ALL =>
+            {
+                self.interaction.select_all();
+                self.interaction.reset_caret_blink();
+                context.request_redraw_in(bounds.expanded(16.0));
                 EventResult::Consumed
             }
 

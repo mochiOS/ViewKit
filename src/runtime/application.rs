@@ -2,19 +2,22 @@
 
 //! ViewKitアプリケーションとプラットフォームバックエンドをガッッッッタイ！します
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use crate::accessibility::AccessibilityNode;
-use crate::app::{App, ViewContext};
+use crate::app::{App, ViewContext, WindowId};
 use crate::appearance::AppearanceSettings;
-use crate::draw_command::{DisplayList, DrawCommand};
+use crate::command::CommandStatus;
 use crate::components::{BorderStyle, Rectangle, RectangleColor, Text};
+use crate::draw_command::{DisplayList, DrawCommand};
 use crate::event::{ContextMenuRequest, EventContext, EventDispatcher, RedrawRequest};
 use crate::geometry::{Point, Rect};
 use crate::platform::{
-    ButtonState, Key, PlatformApplication, PlatformEvent, PlatformWindow, PointerButton,
-    WindowConfig,
+    ButtonState, Key, PlatformApplication, PlatformEvent, PlatformWindow, PlatformWindowCommand,
+    PointerButton, WindowConfig,
 };
 use crate::renderer::Viewport;
 use crate::state::take_state_changed;
@@ -24,6 +27,18 @@ use crate::view::{PaintContext, RedrawSchedule, View};
 
 thread_local! {
     static EXIT_REQUESTED: Cell<bool> = const { Cell::new(false) };
+    static WINDOW_REQUESTS: RefCell<Vec<WindowRequest>> = const { RefCell::new(Vec::new()) };
+    static KEY_WINDOW: Cell<Option<WindowId>> = const { Cell::new(None) };
+    static MAIN_WINDOW: Cell<Option<WindowId>> = const { Cell::new(None) };
+}
+
+static NEXT_WINDOW_ID: AtomicU64 = AtomicU64::new(WindowId::PRIMARY.raw() + 1);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WindowRequest {
+    Open(WindowId),
+    Close(WindowId),
+    RequestClose(WindowId),
 }
 
 /// 現在のViewKitアプリケーションへ正常終了を要求します。
@@ -34,12 +49,56 @@ pub fn request_exit() {
     EXIT_REQUESTED.with(|requested| requested.set(true));
 }
 
+/// Requests a new application window and returns its stable identity.
+///
+/// The application's [`App::window_for`] and [`App::body_for`] hooks provide
+/// the configuration and content when the platform creates the window.
+pub fn request_new_window() -> WindowId {
+    let raw = NEXT_WINDOW_ID.fetch_add(1, Ordering::Relaxed).max(2);
+    let id = WindowId::from_raw(raw).expect("allocated window IDs are non-zero");
+    WINDOW_REQUESTS.with(|requests| requests.borrow_mut().push(WindowRequest::Open(id)));
+    id
+}
+
+/// Requests that a specific application window close.
+pub fn request_close_window(window: WindowId) {
+    WINDOW_REQUESTS.with(|requests| {
+        requests.borrow_mut().push(WindowRequest::RequestClose(window));
+    });
+}
+
+/// Closes a window after the application has already approved the operation.
+/// Most callers should use [`request_close_window`].
+pub fn close_window(window: WindowId) {
+    WINDOW_REQUESTS.with(|requests| requests.borrow_mut().push(WindowRequest::Close(window)));
+}
+
+/// Requests that the current key window close.
+pub fn request_close_key_window() {
+    if let Some(window) = key_window().or_else(main_window) {
+        request_close_window(window);
+    }
+}
+
+/// Returns the window currently receiving keyboard input.
+pub fn key_window() -> Option<WindowId> {
+    KEY_WINDOW.with(Cell::get)
+}
+
+/// Returns the application's main document window.
+pub fn main_window() -> Option<WindowId> {
+    MAIN_WINDOW.with(Cell::get)
+}
+
 fn exit_requested() -> bool {
     EXIT_REQUESTED.with(Cell::get)
 }
 
 fn reset_exit_request() {
     EXIT_REQUESTED.with(|requested| requested.set(false));
+    WINDOW_REQUESTS.with(|requests| requests.borrow_mut().clear());
+    KEY_WINDOW.with(|window| window.set(None));
+    MAIN_WINDOW.with(|window| window.set(None));
 }
 
 /// `App`をプラットフォームバックエンド上で実行するランタイムです。
@@ -48,19 +107,42 @@ where
     A: App,
 {
     app: A,
-
-    root: Option<A::Body>,
-    viewport: Option<Viewport>,
     theme: Theme,
+    appearance: AppearanceSettings,
+    windows: BTreeMap<WindowId, WindowRuntime<A::Body>>,
+    pending_window_commands: Vec<PlatformWindowCommand>,
+}
+
+struct WindowRuntime<Body> {
+    root: Option<Body>,
+    viewport: Option<Viewport>,
     text_measurer: TextMeasurer,
     accessibility_nodes: Vec<AccessibilityNode>,
-    appearance: AppearanceSettings,
-    window_title: String,
-
+    command_statuses: Vec<CommandStatus>,
+    title: String,
     event_dispatcher: EventDispatcher,
     redraw_schedule: RedrawSchedule,
     pending_redraw: RedrawRequest,
     fallback_context_menu: Option<FallbackContextMenu>,
+}
+
+impl<Body> WindowRuntime<Body> {
+    fn new(title: String, appearance: &AppearanceSettings) -> Self {
+        let mut text_measurer = TextMeasurer::new();
+        text_measurer.set_font_scale(appearance.font_scale());
+        Self {
+            root: None,
+            viewport: None,
+            text_measurer,
+            accessibility_nodes: Vec::new(),
+            command_statuses: Vec::new(),
+            title,
+            event_dispatcher: EventDispatcher::new(),
+            redraw_schedule: RedrawSchedule::new(),
+            pending_redraw: RedrawRequest::None,
+            fallback_context_menu: None,
+        }
+    }
 }
 
 struct FallbackContextMenu {
@@ -74,50 +156,73 @@ where
 {
     pub(crate) fn new(app: A) -> Self {
         reset_exit_request();
-        let window_title = app.window().title().to_owned();
+        let window_title = app.window_for(WindowId::PRIMARY).title().to_owned();
         let appearance = AppearanceSettings::load();
         let theme = appearance.theme();
         Theme::set_current(theme);
-        let mut text_measurer = TextMeasurer::new();
-        text_measurer.set_font_scale(appearance.font_scale());
+        let mut windows = BTreeMap::new();
+        windows.insert(
+            WindowId::PRIMARY,
+            WindowRuntime::new(window_title, &appearance),
+        );
+        MAIN_WINDOW.with(|window| window.set(Some(WindowId::PRIMARY)));
         Self {
             app,
-
-            root: None,
-            viewport: None,
             theme,
-            text_measurer,
-            accessibility_nodes: Vec::new(),
             appearance,
-            window_title,
-
-            event_dispatcher: EventDispatcher::new(),
-            redraw_schedule: RedrawSchedule::new(),
-            pending_redraw: RedrawRequest::None,
-            fallback_context_menu: None,
+            windows,
+            pending_window_commands: Vec::new(),
         }
     }
 
-    fn rebuild_root(&mut self, viewport: Viewport) {
-        self.rebuild_root_with_redraw(viewport, RedrawRequest::Full);
+    fn ensure_window(&mut self, id: WindowId) {
+        if self.windows.contains_key(&id) {
+            return;
+        }
+        let title = self.app.window_for(id).title().to_owned();
+        self.windows
+            .insert(id, WindowRuntime::new(title, &self.appearance));
     }
 
-    fn rebuild_root_with_redraw(&mut self, viewport: Viewport, redraw: RedrawRequest) {
-        let context = ViewContext::new(viewport);
+    fn rebuild_root(&mut self, id: WindowId, viewport: Viewport) {
+        self.rebuild_root_with_redraw(id, viewport, RedrawRequest::Full);
+    }
 
+    fn rebuild_root_with_redraw(
+        &mut self,
+        id: WindowId,
+        viewport: Viewport,
+        redraw: RedrawRequest,
+    ) {
+        let context = ViewContext::new(viewport);
         Theme::set_current(self.theme);
-        self.root = Some(self.app.body(&context));
-        self.viewport = Some(viewport);
-        self.pending_redraw = redraw;
+        let root = self.app.body_for(id, &context);
+        self.ensure_window(id);
+        let state = self.windows.get_mut(&id).expect("window was ensured");
+        state.root = Some(root);
+        state.viewport = Some(viewport);
+        state.pending_redraw = redraw;
 
         let _ = take_state_changed();
     }
 
-    fn ensure_root(&mut self, viewport: Viewport) {
-        let viewport_changed = self.viewport != Some(viewport);
+    fn ensure_root(&mut self, id: WindowId, viewport: Viewport) {
+        self.ensure_window(id);
+        let state = self.windows.get(&id).expect("window was ensured");
+        if state.root.is_none() || state.viewport != Some(viewport) {
+            self.rebuild_root(id, viewport);
+        }
+    }
 
-        if self.root.is_none() || viewport_changed {
-            self.rebuild_root(viewport);
+    fn invalidate_other_windows(&mut self, current: WindowId) {
+        for (&id, state) in &mut self.windows {
+            if id == current {
+                continue;
+            }
+            state.root = None;
+            state.pending_redraw = RedrawRequest::Full;
+            self.pending_window_commands
+                .push(PlatformWindowCommand::Redraw { id });
         }
     }
 }
@@ -126,33 +231,85 @@ impl<A> PlatformApplication for ApplicationRuntime<A>
 where
     A: App,
 {
+    fn reopen(&mut self) {
+        self.app.reopened();
+        if self.windows.is_empty() {
+            self.ensure_window(WindowId::PRIMARY);
+            MAIN_WINDOW.with(|window| window.set(Some(WindowId::PRIMARY)));
+            self.pending_window_commands
+                .push(PlatformWindowCommand::Open {
+                    id: WindowId::PRIMARY,
+                    config: window_config(self.app.window_for(WindowId::PRIMARY)),
+                });
+        }
+    }
+
     fn handle_platform_message(&mut self, message: &[u8]) -> bool {
         let handled = self.app.handle_platform_message(message);
-        if handled
-            && take_state_changed()
-            && let Some(viewport) = self.viewport
-        {
-            self.rebuild_root(viewport);
+        if handled && take_state_changed() {
+            for (&id, state) in &mut self.windows {
+                state.root = None;
+                state.pending_redraw = RedrawRequest::Full;
+                self.pending_window_commands
+                    .push(PlatformWindowCommand::Redraw { id });
+            }
         }
         handled
     }
 
+    fn take_window_commands(&mut self) -> Vec<PlatformWindowCommand> {
+        let requests =
+            WINDOW_REQUESTS.with(|requests| requests.borrow_mut().drain(..).collect::<Vec<_>>());
+        for request in requests {
+            match request {
+                WindowRequest::Open(id) => {
+                    self.ensure_window(id);
+                    self.pending_window_commands
+                        .push(PlatformWindowCommand::Open {
+                            id,
+                            config: window_config(self.app.window_for(id)),
+                        });
+                }
+                WindowRequest::Close(id) => {
+                    self.remove_window(id);
+                    self.pending_window_commands
+                        .push(PlatformWindowCommand::Close { id });
+                }
+                WindowRequest::RequestClose(id) => {
+                    if self.windows.contains_key(&id) {
+                        self.pending_window_commands
+                            .push(PlatformWindowCommand::RequestClose { id });
+                    }
+                }
+            }
+        }
+        std::mem::take(&mut self.pending_window_commands)
+    }
+
     fn handle_event(&mut self, mut event: PlatformEvent, window: &dyn PlatformWindow) {
+        let window_id = window.id();
+        if let PlatformEvent::Focused(focused) = event {
+            if focused {
+                KEY_WINDOW.with(|key| key.set(Some(window_id)));
+                MAIN_WINDOW.with(|main| main.set(Some(window_id)));
+            } else {
+                KEY_WINDOW.with(|key| {
+                    if key.get() == Some(window_id) {
+                        key.set(None);
+                    }
+                });
+            }
+        }
         match &event {
             PlatformEvent::Resumed { viewport }
             | PlatformEvent::Resized { viewport }
             | PlatformEvent::ScaleFactorChanged { viewport } => {
-                self.rebuild_root(*viewport);
+                self.rebuild_root(window_id, *viewport);
                 return;
             }
 
             PlatformEvent::CloseRequested => {
-                if self.app.close_requested() {
-                    request_exit();
-                } else {
-                    self.pending_redraw = RedrawRequest::Full;
-                    window.request_redraw();
-                }
+                let _ = self.should_close_window(window);
                 return;
             }
 
@@ -165,13 +322,17 @@ where
 
         let viewport = window.viewport();
 
-        self.ensure_root(viewport);
+        self.ensure_root(window_id, viewport);
 
-        if let Some(menu) = self.fallback_context_menu.as_mut() {
+        let state = self
+            .windows
+            .get_mut(&window_id)
+            .expect("window was ensured");
+        if let Some(menu) = state.fallback_context_menu.as_mut() {
             match event.clone() {
                 PlatformEvent::PointerMoved { x, y } => {
                     menu.pointer = Some(Point::new(x, y));
-                    self.pending_redraw = RedrawRequest::Full;
+                    state.pending_redraw = RedrawRequest::Full;
                     window.request_redraw();
                     return;
                 }
@@ -192,7 +353,7 @@ where
                             &self.theme,
                         )
                     });
-                    self.fallback_context_menu = None;
+                    state.fallback_context_menu = None;
                     event = PlatformEvent::ContextMenuResult {
                         request_id,
                         command_id,
@@ -203,7 +364,7 @@ where
                 }
                 | PlatformEvent::Focused(false) => {
                     let request_id = menu.request.request_id;
-                    self.fallback_context_menu = None;
+                    state.fallback_context_menu = None;
                     event = PlatformEvent::ContextMenuResult {
                         request_id,
                         command_id: None,
@@ -214,7 +375,7 @@ where
         }
 
         let (redraw_request, cursor_icon, context_menu_request) = {
-            let root = self
+            let root = state
                 .root
                 .as_ref()
                 .expect("root view must exist after ensure_root");
@@ -222,11 +383,32 @@ where
             let mut context = EventContext::new(
                 &self.theme,
                 &self.theme.typography,
-                &mut self.text_measurer,
+                &mut state.text_measurer,
+            );
+            context.set_command_context(
+                &state.command_statuses,
+                state.event_dispatcher.command_target(),
             );
 
-            self.event_dispatcher
+            state
+                .event_dispatcher
                 .dispatch(root, viewport.logical_bounds(), &event, &mut context);
+
+            let mut commands = context.take_command_requests();
+            let mut dispatched = 0usize;
+            while let Some(command) = commands.pop() {
+                if dispatched == 64 {
+                    break;
+                }
+                dispatched += 1;
+                state.event_dispatcher.dispatch_command(
+                    root,
+                    viewport.logical_bounds(),
+                    command,
+                    &mut context,
+                );
+                commands.extend(context.take_command_requests());
+            }
 
             (
                 context.redraw_request(),
@@ -240,11 +422,11 @@ where
         }
         if let Some(request) = context_menu_request {
             if !window.show_context_menu(&request) {
-                self.fallback_context_menu = Some(FallbackContextMenu {
+                state.fallback_context_menu = Some(FallbackContextMenu {
                     request,
-                    pointer: self.event_dispatcher.pointer_position(),
+                    pointer: state.event_dispatcher.pointer_position(),
                 });
-                self.pending_redraw = RedrawRequest::Full;
+                state.pending_redraw = RedrawRequest::Full;
                 window.request_redraw();
             }
         }
@@ -253,33 +435,45 @@ where
         let redraw_request = redraw_after_event(state_changed, redraw_request);
 
         if state_changed {
-            self.rebuild_root_with_redraw(viewport, redraw_request);
+            self.rebuild_root_with_redraw(window_id, viewport, redraw_request);
+            self.invalidate_other_windows(window_id);
         } else {
-            self.pending_redraw = self.pending_redraw.merge(redraw_request);
+            state.pending_redraw = state.pending_redraw.merge(redraw_request);
         }
 
         if state_changed || redraw_request.is_requested() {
             window.request_redraw();
         }
 
-        let window_title = self.app.window().title().to_owned();
-        if window_title != self.window_title {
+        let window_title = self.app.window_for(window.id()).title().to_owned();
+        let state = self
+            .windows
+            .get_mut(&window_id)
+            .expect("window was ensured");
+        if window_title != state.title {
             window.set_title(&window_title);
-            self.window_title = window_title;
+            state.title = window_title;
         }
     }
 
-    fn draw(&mut self, viewport: Viewport, display_list: &mut DisplayList) -> Rect {
-        self.ensure_root(viewport);
+    fn draw(&mut self, window: &dyn PlatformWindow, display_list: &mut DisplayList) -> Rect {
+        let window_id = window.id();
+        let viewport = window.viewport();
+        self.ensure_root(window_id, viewport);
         if take_state_changed() {
-            self.rebuild_root(viewport);
+            self.rebuild_root(window_id, viewport);
+            self.invalidate_other_windows(window_id);
         }
 
+        let state = self
+            .windows
+            .get_mut(&window_id)
+            .expect("window was ensured");
         let viewport_bounds = viewport.logical_bounds();
-        let scheduled_redraw = self.redraw_schedule.take_due(Instant::now());
-        self.pending_redraw = self.pending_redraw.merge(scheduled_redraw);
+        let scheduled_redraw = state.redraw_schedule.take_due(Instant::now());
+        state.pending_redraw = state.pending_redraw.merge(scheduled_redraw);
 
-        let dirty_bounds = match std::mem::take(&mut self.pending_redraw) {
+        let dirty_bounds = match std::mem::take(&mut state.pending_redraw) {
             RedrawRequest::Region(bounds) => bounds
                 .intersection(viewport_bounds)
                 .unwrap_or(viewport_bounds),
@@ -291,44 +485,48 @@ where
             color: self.theme.colors.background,
         });
 
-        self.redraw_schedule.clear();
-        self.accessibility_nodes.clear();
+        state.redraw_schedule.clear();
+        state.accessibility_nodes.clear();
+        state.command_statuses.clear();
 
         let mut context = PaintContext::new(
             display_list,
             &self.theme,
             &self.theme.typography,
-            &mut self.text_measurer,
+            &mut state.text_measurer,
         )
-        .with_redraw_schedule(&mut self.redraw_schedule)
-        .with_accessibility_nodes(&mut self.accessibility_nodes);
+        .with_redraw_schedule(&mut state.redraw_schedule)
+        .with_accessibility_nodes(&mut state.accessibility_nodes)
+        .with_command_statuses(&mut state.command_statuses);
 
-        let root = self
+        let root = state
             .root
             .as_ref()
             .expect("root view must exist after ensure_root");
 
         root.paint(viewport_bounds, &mut context);
-        if let Some(menu) = &self.fallback_context_menu {
-            paint_fallback_context_menu(
-                menu,
-                viewport_bounds,
-                &mut context,
-            );
+        if let Some(menu) = &state.fallback_context_menu {
+            paint_fallback_context_menu(menu, viewport_bounds, &mut context);
         }
         drop(context);
-        self.event_dispatcher
-            .set_accessibility_nodes(&self.accessibility_nodes);
+        state
+            .event_dispatcher
+            .set_accessibility_nodes(&state.accessibility_nodes);
+        window.update_accessibility(&state.accessibility_nodes);
 
         dirty_bounds
     }
 
-    fn next_redraw_at(&self) -> Option<Instant> {
-        self.redraw_schedule.deadline()
+    fn next_redraw_at(&self, window: WindowId) -> Option<Instant> {
+        self.windows
+            .get(&window)
+            .and_then(|state| state.redraw_schedule.deadline())
     }
 
-    fn accessibility_nodes(&self) -> &[AccessibilityNode] {
-        &self.accessibility_nodes
+    fn accessibility_nodes(&self, window: WindowId) -> &[AccessibilityNode] {
+        self.windows
+            .get(&window)
+            .map_or(&[], |state| state.accessibility_nodes.as_slice())
     }
 
     fn reload_appearance(&mut self) -> bool {
@@ -341,10 +539,14 @@ where
         self.appearance = appearance;
         self.theme = theme;
         Theme::set_current(self.theme);
-        self.text_measurer.set_font_scale(font_scale);
         self.app.appearance_changed();
-        self.root = None;
-        self.pending_redraw = RedrawRequest::Full;
+        for (&id, state) in &mut self.windows {
+            state.text_measurer.set_font_scale(font_scale);
+            state.root = None;
+            state.pending_redraw = RedrawRequest::Full;
+            self.pending_window_commands
+                .push(PlatformWindowCommand::Redraw { id });
+        }
         true
     }
 
@@ -354,6 +556,40 @@ where
 
     fn exit_requested(&self) -> bool {
         exit_requested()
+    }
+
+    fn should_close_window(&mut self, window: &dyn PlatformWindow) -> bool {
+        if self.app.close_requested_for_window(window.id()) {
+            self.remove_window(window.id());
+            true
+        } else {
+            self.ensure_window(window.id());
+            self.windows
+                .get_mut(&window.id())
+                .expect("window was ensured")
+                .pending_redraw = RedrawRequest::Full;
+            window.request_redraw();
+            false
+        }
+    }
+}
+
+impl<A> ApplicationRuntime<A>
+where
+    A: App,
+{
+    fn remove_window(&mut self, id: WindowId) {
+        self.windows.remove(&id);
+        KEY_WINDOW.with(|key| {
+            if key.get() == Some(id) {
+                key.set(None);
+            }
+        });
+        MAIN_WINDOW.with(|main| {
+            if main.get() == Some(id) {
+                main.set(self.windows.keys().next_back().copied());
+            }
+        });
     }
 }
 
@@ -510,7 +746,7 @@ where
     A: App,
 {
     let app = A::new();
-    let options = app.window();
+    let options = app.window_for(WindowId::PRIMARY);
 
     let runtime = ApplicationRuntime::new(app);
 
@@ -518,16 +754,7 @@ where
     {
         use crate::platform::linux::LinuxBackend;
 
-        let backend = LinuxBackend::new(
-            runtime,
-            WindowConfig {
-                title: options.title().to_owned(),
-                size: options.initial_size(),
-                resizable: options.is_resizable(),
-                fullscreen: options.is_fullscreen(),
-                secure_overlay: options.is_secure_overlay(),
-            },
-        );
+        let backend = LinuxBackend::new(runtime, window_config(options));
 
         backend.run()?;
 
@@ -538,16 +765,7 @@ where
     {
         use crate::platform::mochios::MochiOsBackend;
 
-        let backend = MochiOsBackend::new(
-            runtime,
-            WindowConfig {
-                title: options.title().to_owned(),
-                size: options.initial_size(),
-                resizable: options.is_resizable(),
-                fullscreen: options.is_fullscreen(),
-                secure_overlay: options.is_secure_overlay(),
-            },
-        );
+        let backend = MochiOsBackend::new(runtime, window_config(options));
 
         backend.run()?;
 
@@ -558,16 +776,7 @@ where
     {
         use crate::platform::windows::WindowsBackend;
 
-        let backend = WindowsBackend::new(
-            runtime,
-            WindowConfig {
-                title: options.title().to_owned(),
-                size: options.initial_size(),
-                resizable: options.is_resizable(),
-                fullscreen: options.is_fullscreen(),
-                secure_overlay: options.is_secure_overlay(),
-            },
-        );
+        let backend = WindowsBackend::new(runtime, window_config(options));
 
         backend.run()?;
 
@@ -580,6 +789,17 @@ where
         let _ = options;
 
         Err(ViewKitError::UnsupportedPlatform)
+    }
+}
+
+fn window_config(options: crate::app::WindowOptions) -> WindowConfig {
+    WindowConfig {
+        title: options.title().to_owned(),
+        size: options.initial_size(),
+        resizable: options.is_resizable(),
+        fullscreen: options.is_fullscreen(),
+        secure_overlay: options.is_secure_overlay(),
+        system_modal: options.is_system_modal(),
     }
 }
 
@@ -635,18 +855,90 @@ mod tests {
     }
 
     #[test]
-    fn platform_close_requests_exit_from_the_common_runtime() {
+    fn accepted_platform_close_is_window_scoped() {
         reset_exit_request();
         let app = PaintMutationApp {
             state: State::new(false),
             builds: Rc::new(Cell::new(0)),
         };
         let mut runtime = ApplicationRuntime::new(app);
-        let window = TestWindow;
+        let window = TestWindow(WindowId::PRIMARY);
 
-        runtime.handle_event(PlatformEvent::CloseRequested, &window);
+        assert!(runtime.should_close_window(&window));
 
-        assert!(runtime.exit_requested());
+        assert!(!runtime.exit_requested());
+        assert!(!runtime.windows.contains_key(&WindowId::PRIMARY));
+        reset_exit_request();
+    }
+
+    #[test]
+    fn focus_tracks_key_and_main_windows_independently() {
+        reset_exit_request();
+        let app = PaintMutationApp {
+            state: State::new(false),
+            builds: Rc::new(Cell::new(0)),
+        };
+        let mut runtime = ApplicationRuntime::new(app);
+        let window = TestWindow(WindowId::PRIMARY);
+
+        assert_eq!(key_window(), None);
+        assert_eq!(main_window(), Some(WindowId::PRIMARY));
+        runtime.handle_event(PlatformEvent::Focused(true), &window);
+        assert_eq!(key_window(), Some(WindowId::PRIMARY));
+        assert_eq!(main_window(), Some(WindowId::PRIMARY));
+        runtime.handle_event(PlatformEvent::Focused(false), &window);
+        assert_eq!(key_window(), None);
+        assert_eq!(main_window(), Some(WindowId::PRIMARY));
+        reset_exit_request();
+    }
+
+    #[test]
+    fn requested_close_waits_for_application_approval() {
+        reset_exit_request();
+        let app = PaintMutationApp {
+            state: State::new(false),
+            builds: Rc::new(Cell::new(0)),
+        };
+        let mut runtime = ApplicationRuntime::new(app);
+
+        request_close_window(WindowId::PRIMARY);
+        let commands = runtime.take_window_commands();
+        assert!(matches!(
+            commands.as_slice(),
+            [PlatformWindowCommand::RequestClose { id }] if *id == WindowId::PRIMARY
+        ));
+        assert!(runtime.windows.contains_key(&WindowId::PRIMARY));
+
+        close_window(WindowId::PRIMARY);
+        let commands = runtime.take_window_commands();
+        assert!(matches!(
+            commands.as_slice(),
+            [PlatformWindowCommand::Close { id }] if *id == WindowId::PRIMARY
+        ));
+        assert!(!runtime.windows.contains_key(&WindowId::PRIMARY));
+        reset_exit_request();
+    }
+
+    #[test]
+    fn external_activation_reopens_the_primary_window() {
+        reset_exit_request();
+        let app = PaintMutationApp {
+            state: State::new(false),
+            builds: Rc::new(Cell::new(0)),
+        };
+        let mut runtime = ApplicationRuntime::new(app);
+        let window = TestWindow(WindowId::PRIMARY);
+        assert!(runtime.should_close_window(&window));
+        assert!(runtime.windows.is_empty());
+
+        runtime.reopen();
+        let commands = runtime.take_window_commands();
+        assert!(matches!(
+            commands.as_slice(),
+            [PlatformWindowCommand::Open { id, .. }] if *id == WindowId::PRIMARY
+        ));
+        assert!(runtime.windows.contains_key(&WindowId::PRIMARY));
+        assert_eq!(main_window(), Some(WindowId::PRIMARY));
         reset_exit_request();
     }
 
@@ -658,12 +950,39 @@ mod tests {
             requested: Rc::clone(&requested),
         };
         let mut runtime = ApplicationRuntime::new(app);
-        let window = TestWindow;
+        let window = TestWindow(WindowId::PRIMARY);
 
-        runtime.handle_event(PlatformEvent::CloseRequested, &window);
+        assert!(!runtime.should_close_window(&window));
 
         assert!(requested.get());
         assert!(!runtime.exit_requested());
+        reset_exit_request();
+    }
+
+    #[test]
+    fn new_windows_receive_independent_runtime_state() {
+        reset_exit_request();
+        let app = PaintMutationApp {
+            state: State::new(false),
+            builds: Rc::new(Cell::new(0)),
+        };
+        let mut runtime = ApplicationRuntime::new(app);
+        let second = request_new_window();
+
+        let commands = runtime.take_window_commands();
+        assert!(matches!(
+            commands.as_slice(),
+            [PlatformWindowCommand::Open { id, .. }] if *id == second
+        ));
+
+        let window = TestWindow(second);
+        let viewport = window.viewport();
+        runtime.handle_event(PlatformEvent::Resumed { viewport }, &window);
+
+        assert!(runtime.windows.contains_key(&WindowId::PRIMARY));
+        assert!(runtime.windows.contains_key(&second));
+        assert!(runtime.windows[&WindowId::PRIMARY].root.is_none());
+        assert!(runtime.windows[&second].root.is_some());
         reset_exit_request();
     }
 
@@ -728,14 +1047,13 @@ mod tests {
             builds: Rc::clone(&builds),
         };
         let mut runtime = ApplicationRuntime::new(app);
-        let viewport = Viewport::new(Size::new(100.0, 100.0), 100, 100, 1.0);
         let mut display_list = DisplayList::default();
 
-        let _ = runtime.draw(viewport, &mut display_list);
+        let _ = runtime.draw(&TestWindow(WindowId::PRIMARY), &mut display_list);
         assert!(state.get());
         assert_eq!(builds.get(), 1);
 
-        let _ = runtime.draw(viewport, &mut display_list);
+        let _ = runtime.draw(&TestWindow(WindowId::PRIMARY), &mut display_list);
         assert_eq!(builds.get(), 2);
     }
 
@@ -748,9 +1066,13 @@ mod tests {
         requested: Rc<Cell<bool>>,
     }
 
-    struct TestWindow;
+    struct TestWindow(WindowId);
 
     impl PlatformWindow for TestWindow {
+        fn id(&self) -> WindowId {
+            self.0
+        }
+
         fn request_redraw(&self) {}
 
         fn set_title(&self, _title: &str) {}

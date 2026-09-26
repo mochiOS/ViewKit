@@ -14,7 +14,6 @@ use crate::platform::linux::LinuxBackend as DesktopBackend;
 #[cfg(target_os = "windows")]
 use crate::platform::windows::WindowsBackend as DesktopBackend;
 use crate::platform::{PlatformApplication, PlatformEvent, PlatformWindow, WindowConfig};
-use crate::renderer::Viewport;
 use crate::theme::{Color, CornerRadius, Theme};
 use crate::typography::{TextAlignment, TextMeasurer, TextRole};
 use crate::view::{PaintContext, RedrawSchedule, View};
@@ -516,7 +515,8 @@ impl PlatformApplication for VkWindowApplication<'_> {
         }
     }
 
-    fn draw(&mut self, viewport: Viewport, display_list: &mut DisplayList) -> Rect {
+    fn draw(&mut self, window: &dyn PlatformWindow, display_list: &mut DisplayList) -> Rect {
+        let viewport = window.viewport();
         let bounds = viewport.logical_bounds();
 
         display_list.push(DrawCommand::Clear {
@@ -545,11 +545,11 @@ impl PlatformApplication for VkWindowApplication<'_> {
         bounds
     }
 
-    fn next_redraw_at(&self) -> Option<Instant> {
+    fn next_redraw_at(&self, _window: crate::app::WindowId) -> Option<Instant> {
         self.redraw_schedule.deadline()
     }
 
-    fn accessibility_nodes(&self) -> &[AccessibilityNode] {
+    fn accessibility_nodes(&self, _window: crate::app::WindowId) -> &[AccessibilityNode] {
         &self.accessibility_nodes
     }
 }
@@ -1415,6 +1415,7 @@ pub extern "C" fn vk_runtime_run_window(
                     resizable: resizable != 0,
                     fullscreen: false,
                     secure_overlay: false,
+                    system_modal: false,
                 },
             );
 

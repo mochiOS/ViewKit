@@ -1,11 +1,13 @@
 //! Viewツリー内部で使用するイベント配送API
 
-use crate::geometry::{Point, Rect};
 use crate::accessibility::AccessibilityNode;
+use crate::command::{CommandId, CommandStatus};
+use crate::geometry::{Point, Rect};
 use crate::platform::{ButtonState, CursorIcon, Key, KeyModifiers, PlatformEvent, PointerButton};
 use crate::theme::Theme;
 use crate::typography::{TextMeasurer, Typography};
 use crate::view::View;
+use std::path::PathBuf;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ContextMenuItem {
@@ -57,6 +59,18 @@ pub enum ViewEvent {
         text: String,
     },
 
+    FileDragEntered {
+        path: PathBuf,
+        position: Option<Point>,
+    },
+
+    FileDragExited,
+
+    FileDropped {
+        path: PathBuf,
+        position: Option<Point>,
+    },
+
     Backspace,
     ArrowLeft,
     ArrowRight,
@@ -86,6 +100,12 @@ pub enum ViewEvent {
         request_id: u64,
         command_id: Option<u32>,
     },
+
+    /// A semantic action routed from the focused view toward its ancestors.
+    Command {
+        command: CommandId,
+        target: Option<Point>,
+    },
 }
 
 impl ViewEvent {
@@ -97,9 +117,16 @@ impl ViewEvent {
             | Self::Scroll { position, .. }
             | Self::PointerFocusRequested { position } => Some(*position),
 
+            Self::Command { target, .. } => *target,
+
+            Self::FileDragEntered { position, .. } | Self::FileDropped { position, .. } => {
+                *position
+            }
+
             Self::PointerLeft
             | Self::KeyPressed { .. }
             | Self::TextInput { .. }
+            | Self::FileDragExited
             | Self::FocusChanged { .. }
             | Self::KeyboardFocusRequested { .. }
             | Self::ContextMenuResult { .. }
@@ -147,6 +174,7 @@ impl ViewEvent {
                 | Self::SelectHome
                 | Self::SelectEnd
                 | Self::SelectAll
+                | Self::FileDragExited
         )
     }
 }
@@ -208,6 +236,9 @@ pub struct EventContext<'a> {
     cursor_icon: Option<CursorIcon>,
     context_menu_request: Option<ContextMenuRequest>,
     keyboard_focus_request: Option<Option<Rect>>,
+    command_requests: Vec<CommandId>,
+    command_statuses: &'a [CommandStatus],
+    command_target: Option<Point>,
 }
 
 impl<'a> EventContext<'a> {
@@ -224,7 +255,29 @@ impl<'a> EventContext<'a> {
             cursor_icon: None,
             context_menu_request: None,
             keyboard_focus_request: None,
+            command_requests: Vec::new(),
+            command_statuses: &[],
+            command_target: None,
         }
+    }
+
+    pub(crate) fn set_command_context(
+        &mut self,
+        command_statuses: &'a [CommandStatus],
+        command_target: Option<Point>,
+    ) {
+        self.command_statuses = command_statuses;
+        self.command_target = command_target;
+    }
+
+    /// Returns the first responder's published state for a command.
+    pub fn command_status(&self, command: CommandId) -> Option<&CommandStatus> {
+        self.command_statuses.iter().find(|status| {
+            status.command == command
+                && self
+                    .command_target
+                    .is_none_or(|target| status.bounds.contains(target))
+        })
     }
 
     pub fn theme(&self) -> &Theme {
@@ -278,6 +331,16 @@ impl<'a> EventContext<'a> {
         self.keyboard_focus_request = Some(None);
     }
 
+    /// Queues a semantic command for responder-chain dispatch after the
+    /// current event finishes propagating.
+    pub fn dispatch_command(&mut self, command: CommandId) {
+        self.command_requests.push(command);
+    }
+
+    pub(crate) fn take_command_requests(&mut self) -> Vec<CommandId> {
+        std::mem::take(&mut self.command_requests)
+    }
+
     fn take_keyboard_focus_request(&mut self) -> Option<Option<Rect>> {
         self.keyboard_focus_request.take()
     }
@@ -308,6 +371,15 @@ impl EventDispatcher {
         self.pointer_position
     }
 
+    pub(crate) fn command_target(&self) -> Option<Point> {
+        self.focused_bounds.map(|focused| {
+            Point::new(
+                focused.origin.x + focused.size.width * 0.5,
+                focused.origin.y + focused.size.height * 0.5,
+            )
+        })
+    }
+
     pub fn set_accessibility_nodes(&mut self, nodes: &[AccessibilityNode]) {
         let scope_entries: Vec<(usize, Rect)> = nodes
             .iter()
@@ -329,10 +401,8 @@ impl EventDispatcher {
             }
         }
 
-        for (scope_position, (scope_index, bounds)) in scope_entries
-            .iter()
-            .enumerate()
-            .skip(common_scope_count)
+        for (scope_position, (scope_index, bounds)) in
+            scope_entries.iter().enumerate().skip(common_scope_count)
         {
             let next_scope_index = scope_entries
                 .get(scope_position + 1)
@@ -392,9 +462,11 @@ impl EventDispatcher {
             return None;
         }
 
-        let current = self
-            .focused_bounds
-            .and_then(|focused| self.focus_order.iter().position(|bounds| *bounds == focused));
+        let current = self.focused_bounds.and_then(|focused| {
+            self.focus_order
+                .iter()
+                .position(|bounds| *bounds == focused)
+        });
         let index = match (current, backwards) {
             (Some(0), true) | (None, true) => count - 1,
             (Some(index), true) => index - 1,
@@ -515,6 +587,19 @@ impl EventDispatcher {
         result
     }
 
+    /// Routes a command through the branch containing keyboard focus. Views
+    /// on that branch receive it from the deepest descendant back outward.
+    pub fn dispatch_command(
+        &mut self,
+        root: &dyn View,
+        bounds: Rect,
+        command: CommandId,
+        context: &mut EventContext<'_>,
+    ) -> EventResult {
+        let target = self.command_target();
+        root.handle_event(bounds, &ViewEvent::Command { command, target }, context)
+    }
+
     fn convert_event(&mut self, event: &PlatformEvent) -> Option<ViewEvent> {
         match event {
             PlatformEvent::PointerMoved { x, y } => {
@@ -562,9 +647,7 @@ impl EventDispatcher {
                 })
             }
 
-            PlatformEvent::Focused(focused) => {
-                Some(ViewEvent::FocusChanged { focused: *focused })
-            }
+            PlatformEvent::Focused(focused) => Some(ViewEvent::FocusChanged { focused: *focused }),
 
             PlatformEvent::ContextMenuResult {
                 request_id,
@@ -575,6 +658,15 @@ impl EventDispatcher {
             }),
 
             PlatformEvent::TextInput { text } => Some(ViewEvent::TextInput { text: text.clone() }),
+            PlatformEvent::FileHovered { path } => Some(ViewEvent::FileDragEntered {
+                path: path.clone(),
+                position: self.pointer_position,
+            }),
+            PlatformEvent::FileHoverCancelled => Some(ViewEvent::FileDragExited),
+            PlatformEvent::FileDropped { path } => Some(ViewEvent::FileDropped {
+                path: path.clone(),
+                position: self.pointer_position,
+            }),
             PlatformEvent::Backspace => Some(ViewEvent::Backspace),
             PlatformEvent::Delete => Some(ViewEvent::Delete),
             PlatformEvent::ArrowLeft => Some(ViewEvent::ArrowLeft),
@@ -601,7 +693,10 @@ impl EventDispatcher {
 mod tests {
     use super::EventDispatcher;
     use crate::accessibility::{AccessibilityNode, AccessibilityRole};
+    use crate::command::{CommandStatus, standard as commands};
     use crate::geometry::Rect;
+    use crate::theme::Theme;
+    use crate::typography::TextMeasurer;
 
     #[test]
     fn first_focusable_node_becomes_the_initial_keyboard_focus() {
@@ -615,6 +710,22 @@ mod tests {
 
         assert_eq!(dispatcher.focused_bounds, Some(bounds));
         assert_eq!(dispatcher.pending_focus_request, Some(Some(bounds)));
+    }
+
+    #[test]
+    fn command_validation_prefers_the_focused_descendant() {
+        let outer = Rect::new(0.0, 0.0, 400.0, 300.0);
+        let focused = Rect::new(20.0, 30.0, 100.0, 40.0);
+        let statuses = [
+            CommandStatus::new(commands::SAVE, focused, false),
+            CommandStatus::new(commands::SAVE, outer, true),
+        ];
+        let theme = Theme::LIGHT;
+        let mut measurer = TextMeasurer::new();
+        let mut context = super::EventContext::new(&theme, &theme.typography, &mut measurer);
+        context.set_command_context(&statuses, Some(crate::geometry::Point::new(50.0, 50.0)));
+
+        assert_eq!(context.command_status(commands::SAVE), Some(&statuses[0]));
     }
 
     #[test]

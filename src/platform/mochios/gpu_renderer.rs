@@ -672,8 +672,7 @@ impl GpuSceneRenderer {
             resvg::render(command.svg.tree(), transform, &mut pixmap.as_mut());
             if let Some(tint) = command.tint {
                 for pixel in pixmap.data_mut().chunks_exact_mut(4) {
-                    let alpha =
-                        ((u16::from(pixel[3]) * u16::from(tint.alpha) + 127) / 255) as u8;
+                    let alpha = ((u16::from(pixel[3]) * u16::from(tint.alpha) + 127) / 255) as u8;
                     pixel[0] = ((u16::from(tint.red) * u16::from(alpha) + 127) / 255) as u8;
                     pixel[1] = ((u16::from(tint.green) * u16::from(alpha) + 127) / 255) as u8;
                     pixel[2] = ((u16::from(tint.blue) * u16::from(alpha) + 127) / 255) as u8;
@@ -906,11 +905,11 @@ impl GpuSceneRenderer {
         let Some(clip) = self.clips.last() else {
             return;
         };
-        if clip
-            .shapes
-            .iter()
-            .all(|shape| triangle.iter().all(|vertex| shape.contains(vertex.position)))
-        {
+        if clip.shapes.iter().all(|shape| {
+            triangle
+                .iter()
+                .all(|vertex| shape.contains(vertex.position))
+        }) {
             for vertex in triangle {
                 self.push_clipped_vertex(vertex, viewport);
             }
@@ -956,7 +955,9 @@ impl GpuSceneRenderer {
             #[cfg(target_os = "linux")]
             eprintln!(
                 "[ViewKit] invalid GPU atlas image: {width}x{height}, bytes={}, atlas={}x{}",
-                bgra.len(), ATLAS_WIDTH, ATLAS_HEIGHT
+                bgra.len(),
+                ATLAS_WIDTH,
+                ATLAS_HEIGHT
             );
             return Err(MochiOsBackendError::InvalidWindowSize);
         }
@@ -998,7 +999,9 @@ impl GpuSceneRenderer {
             #[cfg(target_os = "linux")]
             eprintln!(
                 "[ViewKit] invalid GPU glyph: {width}x{height}, bytes={}, atlas={}x{}",
-                image.data.len(), ATLAS_WIDTH, ATLAS_HEIGHT
+                image.data.len(),
+                ATLAS_WIDTH,
+                ATLAS_HEIGHT
             );
             return Err(MochiOsBackendError::InvalidWindowSize);
         }

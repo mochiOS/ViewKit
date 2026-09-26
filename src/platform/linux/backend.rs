@@ -2,15 +2,17 @@
 
 use super::super::{
     ButtonState, Key, KeyModifiers, PlatformApplication, PlatformEvent, PlatformWindow,
-    PointerButton, WindowConfig,
+    PlatformWindowCommand, PointerButton, WindowConfig,
 };
 
 use super::GpuRenderer;
+use crate::app::WindowId as ViewKitWindowId;
 use crate::draw_command::DisplayList;
 use crate::geometry::Size;
 use crate::renderer::{Renderer, Viewport};
 
 use crate::platform::CursorIcon;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Instant;
 use winit::application::ApplicationHandler;
@@ -40,10 +42,15 @@ pub enum LinuxBackendError {
 }
 
 struct WinitWindow<'a> {
+    id: ViewKitWindowId,
     inner: &'a Window,
 }
 
 impl PlatformWindow for WinitWindow<'_> {
+    fn id(&self) -> ViewKitWindowId {
+        self.id
+    }
+
     fn request_redraw(&self) {
         self.inner.request_redraw();
     }
@@ -80,13 +87,17 @@ impl PlatformWindow for WinitWindow<'_> {
 pub struct LinuxBackend<A> {
     application: A,
     config: WindowConfig,
-
-    window: Option<Rc<Window>>,
-    renderer: Option<GpuRenderer>,
-
-    modifiers: KeyModifiers,
+    windows: HashMap<WindowId, LinuxWindowState>,
+    ids: HashMap<ViewKitWindowId, WindowId>,
 
     runtime_error: Option<LinuxBackendError>,
+}
+
+struct LinuxWindowState {
+    id: ViewKitWindowId,
+    window: Rc<Window>,
+    renderer: GpuRenderer,
+    modifiers: KeyModifiers,
     pending_pointer_move: Option<(f32, f32)>,
 }
 
@@ -98,14 +109,9 @@ where
         Self {
             application,
             config,
-
-            window: None,
-            renderer: None,
-
-            modifiers: KeyModifiers::default(),
-
+            windows: HashMap::new(),
+            ids: HashMap::new(),
             runtime_error: None,
-            pending_pointer_move: None,
         }
     }
 
@@ -125,70 +131,145 @@ where
         Ok(())
     }
 
-    fn emit(&mut self, event: PlatformEvent) {
-        let Some(window) = self.window.as_ref() else {
+    fn emit(&mut self, window_id: WindowId, event: PlatformEvent) {
+        let Some(state) = self.windows.get(&window_id) else {
             return;
         };
-
+        let window = Rc::clone(&state.window);
         let platform_window = WinitWindow {
+            id: state.id,
             inner: window.as_ref(),
         };
-
         self.application.handle_event(event, &platform_window);
     }
 
-    fn request_redraw(&self) {
-        if let Some(window) = self.window.as_ref() {
-            window.request_redraw();
+    fn request_redraw(&self, id: ViewKitWindowId) {
+        if let Some(window_id) = self.ids.get(&id)
+            && let Some(state) = self.windows.get(window_id)
+        {
+            state.window.request_redraw();
         }
     }
 
-    fn resize_renderer(&mut self, event_loop: &ActiveEventLoop, viewport: Viewport) -> bool {
-        let Some(renderer) = self.renderer.as_mut() else {
-            return true;
-        };
-
-        if let Err(error) = renderer.resize(viewport) {
+    fn resize_renderer(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        id: WindowId,
+        viewport: Viewport,
+    ) -> bool {
+        if let Some(state) = self.windows.get_mut(&id)
+            && let Err(error) = state.renderer.resize(viewport)
+        {
             self.runtime_error = Some(error.into());
-
             event_loop.exit();
-
             return false;
         }
-
         true
     }
 
-    fn render(&mut self, event_loop: &ActiveEventLoop) {
-        let Some(window) = self.window.as_ref() else {
+    fn render(&mut self, event_loop: &ActiveEventLoop, window_id: WindowId) {
+        let Some(state) = self.windows.get(&window_id) else {
             return;
         };
-
-        let viewport = viewport_from_window(window.as_ref());
-
+        let id = state.id;
+        let window = Rc::clone(&state.window);
         let mut display_list = DisplayList::new();
-
-        let dirty_bounds = self.application.draw(viewport, &mut display_list);
-
-        window.pre_present_notify();
-
-        let Some(renderer) = self.renderer.as_mut() else {
-            return;
+        let platform_window = WinitWindow {
+            id,
+            inner: window.as_ref(),
         };
-
-        if let Err(error) = renderer.render(&display_list, dirty_bounds) {
+        let dirty_bounds = self.application.draw(&platform_window, &mut display_list);
+        window.pre_present_notify();
+        if let Some(state) = self.windows.get_mut(&window_id)
+            && let Err(error) = state.renderer.render(&display_list, dirty_bounds)
+        {
             self.runtime_error = Some(error.into());
-
             event_loop.exit();
         }
     }
 
-    fn flush_pending_pointer_move(&mut self) {
-        let Some((x, y)) = self.pending_pointer_move.take() else {
+    fn flush_pending_pointer_move(&mut self, window_id: WindowId) {
+        let Some((x, y)) = self
+            .windows
+            .get_mut(&window_id)
+            .and_then(|state| state.pending_pointer_move.take())
+        else {
             return;
         };
+        self.emit(window_id, PlatformEvent::PointerMoved { x, y });
+    }
 
-        self.emit(PlatformEvent::PointerMoved { x, y });
+    fn create_window(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        id: ViewKitWindowId,
+        config: WindowConfig,
+    ) -> Result<(), LinuxBackendError> {
+        if self.ids.contains_key(&id) {
+            return Ok(());
+        }
+        let attributes = Window::default_attributes()
+            .with_title(config.title)
+            .with_inner_size(LogicalSize::new(
+                config.size.width as f64,
+                config.size.height as f64,
+            ))
+            .with_resizable(config.resizable)
+            .with_fullscreen(config.fullscreen.then_some(Fullscreen::Borderless(None)));
+        let window = Rc::new(event_loop.create_window(attributes)?);
+        let viewport = viewport_from_window(window.as_ref());
+        let renderer =
+            GpuRenderer::new(window.clone(), viewport, event_loop.owned_display_handle())?;
+        let window_id = window.id();
+        self.ids.insert(id, window_id);
+        self.windows.insert(
+            window_id,
+            LinuxWindowState {
+                id,
+                window,
+                renderer,
+                modifiers: KeyModifiers::default(),
+                pending_pointer_move: None,
+            },
+        );
+        self.emit(window_id, PlatformEvent::Resumed { viewport });
+        self.request_redraw(id);
+        Ok(())
+    }
+
+    fn process_window_commands(&mut self, event_loop: &ActiveEventLoop) {
+        for command in self.application.take_window_commands() {
+            match command {
+                PlatformWindowCommand::Open { id, config } => {
+                    if let Err(error) = self.create_window(event_loop, id, config) {
+                        self.runtime_error = Some(error);
+                        event_loop.exit();
+                        return;
+                    }
+                }
+                PlatformWindowCommand::Close { id } => {
+                    if let Some(window_id) = self.ids.remove(&id) {
+                        self.windows.remove(&window_id);
+                    }
+                }
+                PlatformWindowCommand::RequestClose { id } => {
+                    if let Some(window_id) = self.ids.get(&id).copied()
+                        && let Some(state) = self.windows.get(&window_id)
+                    {
+                        let window = Rc::clone(&state.window);
+                        let platform_window = WinitWindow {
+                            id,
+                            inner: window.as_ref(),
+                        };
+                        if self.application.should_close_window(&platform_window) {
+                            self.windows.remove(&window_id);
+                            self.ids.remove(&id);
+                        }
+                    }
+                }
+                PlatformWindowCommand::Redraw { id } => self.request_redraw(id),
+            }
+        }
     }
 }
 
@@ -197,60 +278,15 @@ where
     A: PlatformApplication,
 {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.window.is_some() || self.runtime_error.is_some() {
+        if !self.windows.is_empty() || self.runtime_error.is_some() {
             return;
         }
-
-        let attributes = Window::default_attributes()
-            .with_title(self.config.title.clone())
-            .with_inner_size(LogicalSize::new(
-                self.config.size.width as f64,
-                self.config.size.height as f64,
-            ))
-            .with_resizable(self.config.resizable)
-            .with_fullscreen(
-                self.config
-                    .fullscreen
-                    .then_some(Fullscreen::Borderless(None)),
-            );
-
-        let window = match event_loop.create_window(attributes) {
-            Ok(window) => Rc::new(window),
-
-            Err(error) => {
-                self.runtime_error = Some(LinuxBackendError::Window(error));
-
-                event_loop.exit();
-
-                return;
-            }
-        };
-
-        let viewport = viewport_from_window(window.as_ref());
-
-        let renderer = match GpuRenderer::new(
-            window.clone(),
-            viewport,
-            event_loop.owned_display_handle(),
-        ) {
-            Ok(renderer) => renderer,
-
-            Err(error) => {
-                self.runtime_error = Some(error.into());
-
-                event_loop.exit();
-
-                return;
-            }
-        };
-
-        self.window = Some(window);
-
-        self.renderer = Some(renderer);
-
-        self.emit(PlatformEvent::Resumed { viewport });
-
-        self.request_redraw();
+        if let Err(error) =
+            self.create_window(event_loop, ViewKitWindowId::PRIMARY, self.config.clone())
+        {
+            self.runtime_error = Some(error);
+            event_loop.exit();
+        }
     }
 
     fn window_event(
@@ -259,77 +295,70 @@ where
         window_id: WindowId,
         event: WindowEvent,
     ) {
-        let Some(current_window_id) = self.window.as_ref().map(|window| window.id()) else {
+        let Some(state) = self.windows.get(&window_id) else {
             return;
         };
-
-        if current_window_id != window_id {
-            return;
-        }
+        let id = state.id;
+        let window = Rc::clone(&state.window);
 
         match event {
             WindowEvent::CloseRequested => {
-                self.emit(PlatformEvent::CloseRequested);
-
-                event_loop.exit();
+                let platform_window = WinitWindow {
+                    id,
+                    inner: window.as_ref(),
+                };
+                if self.application.should_close_window(&platform_window) {
+                    self.windows.remove(&window_id);
+                    self.ids.remove(&id);
+                    if self.windows.is_empty() {
+                        event_loop.exit();
+                    }
+                }
             }
 
             WindowEvent::Resized(size) => {
-                let scale_factor = self
-                    .window
-                    .as_ref()
-                    .map(|window| window.scale_factor())
-                    .unwrap_or(1.0);
-
+                let scale_factor = window.scale_factor();
                 let viewport = viewport_from_physical(size, scale_factor);
-
-                if !self.resize_renderer(event_loop, viewport) {
+                if !self.resize_renderer(event_loop, window_id, viewport) {
                     return;
                 }
-
-                self.emit(PlatformEvent::Resized { viewport });
-
-                self.request_redraw();
+                self.emit(window_id, PlatformEvent::Resized { viewport });
+                self.request_redraw(id);
             }
 
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                let Some(size) = self.window.as_ref().map(|window| window.inner_size()) else {
-                    return;
-                };
-
+                let size = window.inner_size();
                 let viewport = viewport_from_physical(size, scale_factor);
-
-                if !self.resize_renderer(event_loop, viewport) {
+                if !self.resize_renderer(event_loop, window_id, viewport) {
                     return;
                 }
-
-                self.emit(PlatformEvent::ScaleFactorChanged { viewport });
-
-                self.request_redraw();
+                self.emit(window_id, PlatformEvent::ScaleFactorChanged { viewport });
+                self.request_redraw(id);
             }
 
             WindowEvent::Focused(focused) => {
                 if !focused {
-                    self.modifiers = KeyModifiers::default();
+                    if let Some(state) = self.windows.get_mut(&window_id) {
+                        state.modifiers = KeyModifiers::default();
+                    }
                 }
-
-                self.emit(PlatformEvent::Focused(focused));
+                self.emit(window_id, PlatformEvent::Focused(focused));
             }
 
             WindowEvent::CursorMoved { position, .. } => {
-                let scale_factor = self
-                    .window
-                    .as_ref()
-                    .map(|window| window.scale_factor())
-                    .unwrap_or(1.0);
-
-                self.pending_pointer_move =
-                    Some(physical_position_to_logical(position, scale_factor));
+                if let Some(state) = self.windows.get_mut(&window_id) {
+                    state.pending_pointer_move = Some(physical_position_to_logical(
+                        position,
+                        window.scale_factor(),
+                    ));
+                }
             }
 
             WindowEvent::CursorLeft { .. } => {
-                self.pending_pointer_move = None;
-                self.emit(PlatformEvent::PointerLeft);
+                if let Some(state) = self.windows.get_mut(&window_id) {
+                    state.pending_pointer_move = None;
+                }
+                self.emit(window_id, PlatformEvent::PointerLeft);
             }
 
             WindowEvent::ModifiersChanged(modifiers) => {
@@ -348,34 +377,45 @@ where
                 if state.super_key() {
                     bits |= KeyModifiers::SUPER;
                 }
-                self.modifiers = KeyModifiers::from_bits(bits);
+                if let Some(state) = self.windows.get_mut(&window_id) {
+                    state.modifiers = KeyModifiers::from_bits(bits);
+                }
             }
 
             WindowEvent::MouseInput { state, button, .. } => {
-                self.flush_pending_pointer_move();
-                self.emit(PlatformEvent::PointerButton {
-                    button: convert_mouse_button(button),
-                    state: convert_button_state(state),
-                });
+                self.flush_pending_pointer_move(window_id);
+                self.emit(
+                    window_id,
+                    PlatformEvent::PointerButton {
+                        button: convert_mouse_button(button),
+                        state: convert_button_state(state),
+                    },
+                );
             }
 
             WindowEvent::MouseWheel { delta, .. } => {
-                self.flush_pending_pointer_move();
-                let scale_factor = self
-                    .window
-                    .as_ref()
-                    .map(|window| window.scale_factor())
-                    .unwrap_or(1.0);
+                self.flush_pending_pointer_move(window_id);
+                let (delta_x, delta_y) = scroll_delta_to_logical(delta, window.scale_factor());
+                self.emit(window_id, PlatformEvent::Scroll { delta_x, delta_y });
+            }
 
-                let (delta_x, delta_y) = scroll_delta_to_logical(delta, scale_factor);
+            WindowEvent::HoveredFile(path) => {
+                self.flush_pending_pointer_move(window_id);
+                self.emit(window_id, PlatformEvent::FileHovered { path });
+            }
 
-                self.emit(PlatformEvent::Scroll { delta_x, delta_y });
+            WindowEvent::HoveredFileCancelled => {
+                self.emit(window_id, PlatformEvent::FileHoverCancelled);
+            }
+
+            WindowEvent::DroppedFile(path) => {
+                self.flush_pending_pointer_move(window_id);
+                self.emit(window_id, PlatformEvent::FileDropped { path });
             }
 
             WindowEvent::RedrawRequested => {
-                self.emit(PlatformEvent::RedrawRequested);
-
-                self.render(event_loop);
+                self.emit(window_id, PlatformEvent::RedrawRequested);
+                self.render(event_loop, window_id);
             }
 
             WindowEvent::KeyboardInput { event, .. } => {
@@ -383,38 +423,38 @@ where
                     return;
                 }
 
+                let modifiers = self
+                    .windows
+                    .get(&window_id)
+                    .map_or(KeyModifiers::default(), |state| state.modifiers);
                 if let Some(key) = convert_key(&event.logical_key) {
-                    self.emit(PlatformEvent::KeyPressed {
-                        key,
-                        modifiers: self.modifiers,
-                    });
+                    self.emit(window_id, PlatformEvent::KeyPressed { key, modifiers });
                 }
 
                 let platform_event = match &event.logical_key {
                     WinitKey::Character(character)
-                        if self.modifiers.shortcut()
-                            && character.as_str().eq_ignore_ascii_case("a") =>
+                        if modifiers.shortcut() && character.as_str().eq_ignore_ascii_case("a") =>
                     {
                         Some(PlatformEvent::SelectAll)
                     }
                     WinitKey::Named(NamedKey::Backspace) => Some(PlatformEvent::Backspace),
                     WinitKey::Named(NamedKey::Delete) => Some(PlatformEvent::Delete),
-                    WinitKey::Named(NamedKey::ArrowLeft) => Some(if self.modifiers.shift() {
+                    WinitKey::Named(NamedKey::ArrowLeft) => Some(if modifiers.shift() {
                         PlatformEvent::SelectLeft
                     } else {
                         PlatformEvent::ArrowLeft
                     }),
-                    WinitKey::Named(NamedKey::ArrowRight) => Some(if self.modifiers.shift() {
+                    WinitKey::Named(NamedKey::ArrowRight) => Some(if modifiers.shift() {
                         PlatformEvent::SelectRight
                     } else {
                         PlatformEvent::ArrowRight
                     }),
-                    WinitKey::Named(NamedKey::Home) => Some(if self.modifiers.shift() {
+                    WinitKey::Named(NamedKey::Home) => Some(if modifiers.shift() {
                         PlatformEvent::SelectHome
                     } else {
                         PlatformEvent::Home
                     }),
-                    WinitKey::Named(NamedKey::End) => Some(if self.modifiers.shift() {
+                    WinitKey::Named(NamedKey::End) => Some(if modifiers.shift() {
                         PlatformEvent::SelectEnd
                     } else {
                         PlatformEvent::End
@@ -424,11 +464,11 @@ where
                 };
 
                 if let Some(platform_event) = platform_event {
-                    self.emit(platform_event);
+                    self.emit(window_id, platform_event);
                     return;
                 }
 
-                if self.modifiers.shortcut() || self.modifiers.alt() {
+                if modifiers.shortcut() || modifiers.alt() {
                     return;
                 }
 
@@ -445,7 +485,7 @@ where
                     return;
                 }
 
-                self.emit(PlatformEvent::TextInput { text });
+                self.emit(window_id, PlatformEvent::TextInput { text });
             }
 
             _ => {}
@@ -453,18 +493,31 @@ where
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        self.flush_pending_pointer_move();
+        let window_ids = self.windows.keys().copied().collect::<Vec<_>>();
+        for window_id in window_ids {
+            self.flush_pending_pointer_move(window_id);
+        }
+        self.process_window_commands(event_loop);
         if self.application.exit_requested() {
             event_loop.exit();
             return;
         }
-        let Some(deadline) = self.application.next_redraw_at() else {
+        let next = self
+            .ids
+            .keys()
+            .filter_map(|id| {
+                self.application
+                    .next_redraw_at(*id)
+                    .map(|deadline| (*id, deadline))
+            })
+            .min_by_key(|(_, deadline)| *deadline);
+        let Some((id, deadline)) = next else {
             event_loop.set_control_flow(ControlFlow::Wait);
             return;
         };
 
         if deadline <= Instant::now() {
-            self.request_redraw();
+            self.request_redraw(id);
             event_loop.set_control_flow(ControlFlow::Wait);
         } else {
             event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));

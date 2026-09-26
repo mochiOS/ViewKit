@@ -1,6 +1,7 @@
 mod event;
 mod font;
 mod window;
+pub(crate) mod clipboard;
 
 #[cfg(target_os = "linux")]
 pub mod linux;
@@ -16,4 +17,6 @@ pub mod macos;
 
 pub use event::{ButtonState, Key, KeyModifiers, PlatformEvent, PointerButton};
 pub(crate) use font::{DEFAULT_MONOSPACE_FONT_FAMILY, DEFAULT_UI_FONT_FAMILY, load_platform_fonts};
-pub use window::{CursorIcon, PlatformApplication, PlatformWindow, WindowConfig};
+pub use window::{
+    CursorIcon, PlatformApplication, PlatformWindow, PlatformWindowCommand, WindowConfig,
+};

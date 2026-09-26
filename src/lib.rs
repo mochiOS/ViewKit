@@ -3,6 +3,7 @@ pub mod animation;
 pub mod app;
 pub mod appearance;
 pub mod components;
+pub mod command;
 pub mod draw_command;
 pub mod edge_insets;
 pub mod event;
@@ -24,4 +25,7 @@ pub mod theme;
 pub mod typography;
 pub mod view;
 
-pub use runtime::{ViewKitError, request_exit, run};
+pub use runtime::{
+    ViewKitError, close_window, key_window, main_window, request_close_key_window,
+    request_close_window, request_exit, request_new_window, run,
+};

@@ -696,7 +696,7 @@ impl MenuTokens {
     pub const fn from_colors(colors: ColorTokens) -> Self {
         Self {
             item_background: Color::TRANSPARENT,
-            item_hovered_background: colors.accent_soft,
+            item_hovered_background: colors.surface_subtle,
             danger_hovered_background: colors.destructive_soft,
             foreground: colors.text_primary,
             secondary_foreground: colors.text_tertiary,

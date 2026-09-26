@@ -1,6 +1,7 @@
 use super::*;
 
 pub(super) struct MochiOsWindow {
+    id: crate::app::WindowId,
     viewport: Cell<Viewport>,
     redraw_requested: Cell<bool>,
     compositor: u64,
@@ -8,8 +9,14 @@ pub(super) struct MochiOsWindow {
 }
 
 impl MochiOsWindow {
-    pub(super) fn new(viewport: Viewport, compositor: u64, surface: u64) -> Self {
+    pub(super) fn new(
+        id: crate::app::WindowId,
+        viewport: Viewport,
+        compositor: u64,
+        surface: u64,
+    ) -> Self {
         Self {
+            id,
             viewport: Cell::new(viewport),
             redraw_requested: Cell::new(false),
             compositor,
@@ -33,10 +40,7 @@ impl MochiOsWindow {
         self.viewport.set(viewport);
     }
 
-    pub(super) fn set_compositor_title(
-        &self,
-        title: &str,
-    ) -> Result<(), MochiOsBackendError> {
+    pub(super) fn set_compositor_title(&self, title: &str) -> Result<(), MochiOsBackendError> {
         let mut title_len = title.len().min(MAX_WINDOW_TITLE_BYTES);
         while !title.is_char_boundary(title_len) {
             title_len -= 1;
@@ -60,6 +64,10 @@ impl MochiOsWindow {
 }
 
 impl PlatformWindow for MochiOsWindow {
+    fn id(&self) -> crate::app::WindowId {
+        self.id
+    }
+
     fn request_redraw(&self) {
         self.redraw_requested.set(true);
     }

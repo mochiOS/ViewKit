@@ -1,6 +1,7 @@
 //! プラットフォームから通知されるイベントを定義
 
 use crate::renderer::Viewport;
+use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PointerButton {
@@ -103,6 +104,13 @@ pub enum PlatformEvent {
     },
     TextInput {
         text: String,
+    },
+    FileHovered {
+        path: PathBuf,
+    },
+    FileHoverCancelled,
+    FileDropped {
+        path: PathBuf,
     },
 
     Backspace,

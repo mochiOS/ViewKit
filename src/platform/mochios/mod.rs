@@ -20,11 +20,13 @@ use crate::geometry::{Rect, Size};
 use crate::image::ImageData;
 use crate::platform::{
     ButtonState, CursorIcon, Key, KeyModifiers, PlatformApplication, PlatformEvent, PlatformWindow,
-    PointerButton, WindowConfig,
+    PlatformWindowCommand, PointerButton, WindowConfig,
 };
 use crate::renderer::Viewport;
 use crate::svg::SvgData;
 use crate::theme::Color;
+
+const OP_ACTIVATE_SURFACE: u32 = 11;
 
 mod buffer;
 mod connection;
@@ -67,6 +69,7 @@ const ROLE_TOPLEVEL: u32 = 1;
 const ROLE_BACKGROUND: u32 = 3;
 const ROLE_PANEL: u32 = 4;
 const ROLE_SECURE_OVERLAY: u32 = 5;
+const ROLE_SYSTEM_MODAL: u32 = 6;
 const PIXEL_FORMAT_XRGB8888: u32 = 1;
 const PIXEL_FORMAT_ARGB8888_PREMULTIPLIED: u32 = 2;
 const PIXEL_FORMAT_GPU_SCENE: u32 = 3;
@@ -88,6 +91,39 @@ const EVENT_CONFIGURE: u32 = 11;
 const EVENT_POINTER_SCROLL: u32 = 12;
 const EVENT_CONTEXT_MENU_RESULT: u32 = 13;
 const EVENT_APPEARANCE_CHANGED: u32 = 14;
+
+fn surface_token_from_event(event: &[u8], len: usize) -> Option<u64> {
+    if len < 24 || event.len() < len {
+        return None;
+    }
+    let kind = u32::from_le_bytes(event.get(0..4)?.try_into().ok()?);
+    let offset = if kind == EVENT_CONTEXT_MENU_RESULT {
+        if len < 32 {
+            return None;
+        }
+        24
+    } else if matches!(
+        kind,
+        EVENT_POINTER_ENTER
+            | EVENT_POINTER_LEAVE
+            | EVENT_POINTER_MOTION
+            | EVENT_POINTER_BUTTON
+            | EVENT_KEY
+            | EVENT_CLOSE_REQUESTED
+            | EVENT_FOCUS_GAINED
+            | EVENT_FOCUS_LOST
+            | EVENT_FRAME_DONE
+            | EVENT_CONFIGURE
+            | EVENT_POINTER_SCROLL
+            | EVENT_APPEARANCE_CHANGED
+    ) {
+        16
+    } else {
+        return None;
+    };
+    let token = u64::from_le_bytes(event.get(offset..offset + 8)?.try_into().ok()?);
+    (token != 0).then_some(token)
+}
 const INPUT_SUBSCRIBE_OPCODE: u32 = 0x5355_4253;
 const INPUT_EVENT_SIZE: usize = 32;
 const INPUT_EVENT_KIND_POINTER_MOVE: u16 = 2;
@@ -261,10 +297,21 @@ where
 {
     app: A,
     config: WindowConfig,
-    pressed_buttons: Vec<u16>,
     font_system: Option<FontSystem>,
     swash_cache: SwashCache,
     text_layout_cache: HashMap<TextLayoutKey, Buffer>,
+    metrics: BackendMetrics,
+}
+
+struct MochiWindowState {
+    config: WindowConfig,
+    event_endpoint: u64,
+    surface: CompositorSurface,
+    window: MochiOsWindow,
+    shared_buffer: SharedBuffer,
+    gpu_enabled: bool,
+    pixel_format: u32,
+    pressed_buttons: Vec<u16>,
     pixmap: Option<Pixmap>,
     clip_masks: Vec<Mask>,
     gpu_renderer: GpuSceneRenderer,
@@ -277,8 +324,7 @@ where
     clear_color: Color,
     pending_pointer_motion: PendingPointerMotion,
     pending_resize: Option<(u32, u32)>,
-    close_requested: bool,
-    metrics: BackendMetrics,
+    close_accepted: bool,
 }
 
 #[derive(Default)]
@@ -312,352 +358,486 @@ where
         Self {
             app,
             config,
-            pressed_buttons: Vec::new(),
             font_system: None,
             swash_cache: SwashCache::new(),
             text_layout_cache: HashMap::new(),
+            metrics: BackendMetrics::default(),
+        }
+    }
+
+    fn create_window_state(
+        &mut self,
+        compositor: u64,
+        event_endpoint: u64,
+        id: crate::app::WindowId,
+        config: WindowConfig,
+    ) -> Result<MochiWindowState, MochiOsBackendError> {
+        if config.secure_overlay {
+            require_window_secure_overlay_capability()?;
+        } else if config.fullscreen || config.system_modal {
+            require_window_overlay_capability()?;
+        }
+        let requested_size = if config.fullscreen {
+            display_surface_size().unwrap_or(config.size)
+        } else {
+            config.size
+        };
+        let (width, height) = checked_surface_size(requested_size)?;
+        let viewport = scaled_viewport(width, height, self.app.interface_scale_factor());
+        let role = if config.secure_overlay {
+            ROLE_SECURE_OVERLAY
+        } else if config.system_modal {
+            ROLE_SYSTEM_MODAL
+        } else if config.fullscreen {
+            ROLE_PANEL
+        } else {
+            ROLE_TOPLEVEL
+        };
+        let pixel_format = if config.fullscreen {
+            PIXEL_FORMAT_ARGB8888_PREMULTIPLIED
+        } else {
+            PIXEL_FORMAT_XRGB8888
+        };
+        let surface = CompositorSurface::create(compositor, event_endpoint, role, width, height)
+            .map_err(|error| error.at("surface creation"))?;
+        let window = MochiOsWindow::new(id, viewport, compositor, surface.token());
+        if role == ROLE_TOPLEVEL {
+            window
+                .set_compositor_title(&config.title)
+                .map_err(|error| error.at("window title configuration"))?;
+        }
+        let gpu_enabled = renderer_caps(compositor) & RENDERER_CAP_GPU_SCENE != 0;
+        let shared_buffer = if gpu_enabled {
+            SharedBuffer::new_gpu_scene(width as usize, height as usize)
+                .map_err(|error| error.at("GPU shared buffer allocation"))?
+        } else {
+            SharedBuffer::new(width as usize, height as usize)
+                .map_err(|error| error.at("pixel shared buffer allocation"))?
+        };
+        let pointer_x = (viewport.logical_size.width / 2.0).max(0.0);
+        let pointer_y = (viewport.logical_size.height / 2.0).max(0.0);
+        let mut cursor_image = None;
+        if config.fullscreen {
+            cursor_image = load_cursor_image();
+            if let Some(image) = cursor_image.as_ref() {
+                set_cursor_image(compositor, image)?;
+                set_cursor_position(
+                    compositor,
+                    pointer_x * viewport.scale_factor as f32,
+                    pointer_y * viewport.scale_factor as f32,
+                    true,
+                )?;
+            }
+        }
+        let state = MochiWindowState {
+            config,
+            event_endpoint,
+            surface,
+            window,
+            shared_buffer,
+            gpu_enabled,
+            pixel_format,
+            pressed_buttons: Vec::new(),
             pixmap: None,
             clip_masks: Vec::new(),
             gpu_renderer: GpuSceneRenderer::new(),
             gpu_scene: Vec::new(),
             direct_input: false,
-            pointer_x: 0.0,
-            pointer_y: 0.0,
-            cursor_image: None,
+            pointer_x,
+            pointer_y,
+            cursor_image,
             cursor_dirty: None,
             clear_color: Color::BLACK,
             pending_pointer_motion: PendingPointerMotion::default(),
             pending_resize: None,
-            close_requested: false,
-            metrics: BackendMetrics::default(),
-        }
+            close_accepted: false,
+        };
+        self.log_backend_started(&state, (width, height));
+        self.app
+            .handle_event(PlatformEvent::Resumed { viewport }, &state.window);
+        state.window.request_redraw();
+        Ok(state)
     }
 
     pub fn run(mut self) -> Result<(), MochiOsBackendError> {
         let compositor = find_compositor()?;
-        let event_endpoint = create_event_endpoint()?;
-        if self.config.secure_overlay {
-            require_window_secure_overlay_capability()?;
-        } else if self.config.fullscreen {
-            require_window_overlay_capability()?;
-        }
-        let requested_size = if self.config.fullscreen {
-            display_surface_size().unwrap_or_else(|| self.config.size)
-        } else {
-            self.config.size
-        };
-        let size = checked_surface_size(requested_size)?;
-        let viewport = scaled_viewport(size.0, size.1, self.app.interface_scale_factor());
-        let role = if self.config.secure_overlay {
-            ROLE_SECURE_OVERLAY
-        } else if self.config.fullscreen {
-            ROLE_PANEL
-        } else {
-            ROLE_TOPLEVEL
-        };
-        let pixel_format = if self.config.fullscreen {
-            PIXEL_FORMAT_ARGB8888_PREMULTIPLIED
-        } else {
-            PIXEL_FORMAT_XRGB8888
-        };
-        let surface = CompositorSurface::create(compositor, event_endpoint, role, size.0, size.1)
-            .map_err(|error| error.at("surface creation"))?;
-        let token = surface.token();
-        let window = MochiOsWindow::new(viewport, compositor, token);
-        if role == ROLE_TOPLEVEL {
-            window
-                .set_compositor_title(&self.config.title)
-                .map_err(|error| error.at("window title configuration"))?;
-        }
-        let mut gpu_enabled = renderer_caps(compositor) & RENDERER_CAP_GPU_SCENE != 0;
-        let mut shared_buffer = if gpu_enabled {
-            SharedBuffer::new_gpu_scene(size.0 as usize, size.1 as usize)
-                .map_err(|error| error.at("GPU shared buffer allocation"))?
-        } else {
-            SharedBuffer::new(size.0 as usize, size.1 as usize)
-                .map_err(|error| error.at("pixel shared buffer allocation"))?
-        };
-        self.pointer_x = (viewport.logical_size.width / 2.0).max(0.0);
-        self.pointer_y = (viewport.logical_size.height / 2.0).max(0.0);
-        self.direct_input = false;
-        if self.config.fullscreen {
-            let cursor_image = load_cursor_image();
-            if let Some(image) = cursor_image.as_ref() {
-                set_cursor_image(compositor, image)?;
-                set_cursor_position(
-                    compositor,
-                    self.pointer_x * viewport.scale_factor as f32,
-                    self.pointer_y * viewport.scale_factor as f32,
-                    true,
-                )?;
-            }
-            self.cursor_image = cursor_image;
-        }
-        self.log_backend_started(size);
-
-        self.app
-            .handle_event(PlatformEvent::Resumed { viewport }, &window);
-        window.request_redraw();
+        let application_endpoint = create_event_endpoint()?;
+        let _ = mochi_user_platform::workspace::register_application(application_endpoint);
+        let mut state = self.create_window_state(
+            compositor,
+            application_endpoint,
+            crate::app::WindowId::PRIMARY,
+            self.config.clone(),
+        )?;
+        let mut windows = vec![state];
 
         let mut display_list = DisplayList::new();
         'event_loop: loop {
             let mut handled_work = false;
-
-            while let Some((len, event)) = try_recv_event()? {
-                self.handle_or_queue_event_message(len, event, &window)?;
-                handled_work = true;
-            }
-            if self.close_requested || self.app.exit_requested() {
-                break 'event_loop Ok(());
-            }
-            if let Some((width, height)) = self.pending_resize.take() {
-                let viewport = scaled_viewport(width, height, self.app.interface_scale_factor());
-                window.set_viewport(viewport);
-                shared_buffer = if gpu_enabled {
-                    SharedBuffer::new_gpu_scene(width as usize, height as usize)?
-                } else {
-                    SharedBuffer::new(width as usize, height as usize)?
-                };
-                self.pixmap = None;
-                self.clip_masks.clear();
-                self.app
-                    .handle_event(PlatformEvent::Resized { viewport }, &window);
-                window.request_redraw();
-                handled_work = true;
-            }
-            if self.flush_pending_pointer_motion(&window) {
-                handled_work = true;
-            }
-
-            let redraw_due = self
-                .app
-                .next_redraw_at()
-                .is_some_and(|deadline| deadline <= Instant::now());
-
-            let redraw_requested = window.take_redraw_requested();
-            if redraw_requested || redraw_due {
-                let cursor_position_dirty =
-                    self.cursor_dirty.is_some() && self.cursor_image.is_some();
-                if self.font_system.is_none() {
-                    self.font_system = Some(create_font_system());
-                }
-                display_list.clear();
-                let frame_start = perf_counter();
-                let frame_tick_start = perf_tick();
-                let draw_start = perf_counter();
-                let mut dirty_bounds = self.app.draw(window.viewport(), &mut display_list);
-                let draw_cycles = perf_counter_elapsed(draw_start);
-                self.metrics.draw_cycles = self.metrics.draw_cycles.saturating_add(draw_cycles);
-                if let Some(cursor_rect) = self.current_cursor_rect(window.viewport()) {
-                    dirty_bounds = dirty_bounds.union(cursor_rect);
-                }
-                self.cursor_dirty = None;
-                let render_start = perf_counter();
-                let mut gpu_scene = None;
-                if gpu_enabled {
-                    match self.gpu_renderer.render(
-                        window.viewport(),
-                        dirty_bounds,
-                        &display_list,
-                        self.font_system
-                            .as_mut()
-                            .ok_or(MochiOsBackendError::InvalidWindowSize)?,
-                        &mut self.swash_cache,
-                        &mut self.text_layout_cache,
-                        self.config.fullscreen,
-                        &mut self.gpu_scene,
-                    ) {
-                        Ok(()) => gpu_scene = Some(self.gpu_scene.as_slice()),
-                        Err(_) => {
-                            gpu_enabled = false;
-                            shared_buffer = SharedBuffer::new(
-                                window.width() as usize,
-                                window.height() as usize,
-                            )?;
+            for command in self.app.take_window_commands() {
+                match command {
+                    PlatformWindowCommand::Open { id, config } => {
+                        if !windows.iter().any(|state| state.window.id() == id) {
+                            windows.push(self.create_window_state(
+                                compositor,
+                                application_endpoint,
+                                id,
+                                config,
+                            )?);
+                        }
+                    }
+                    PlatformWindowCommand::Close { id } => {
+                        windows.retain(|state| state.window.id() != id);
+                    }
+                    PlatformWindowCommand::RequestClose { id } => {
+                        if let Some(index) =
+                            windows.iter().position(|state| state.window.id() == id)
+                        {
+                            let mut state = windows.remove(index);
+                            if !self.app.should_close_window(&state.window) {
+                                state.close_accepted = false;
+                                windows.insert(index, state);
+                            }
+                        }
+                    }
+                    PlatformWindowCommand::Redraw { id } => {
+                        if let Some(state) = windows.iter().find(|state| state.window.id() == id) {
+                            state.window.request_redraw();
                         }
                     }
                 }
-                let clear_color = if gpu_scene.is_some() {
-                    Color::TRANSPARENT
-                } else {
-                    render_display_list(
-                        window.viewport(),
-                        dirty_bounds,
-                        &display_list,
-                        self.font_system
-                            .as_mut()
-                            .ok_or(MochiOsBackendError::InvalidWindowSize)?,
-                        &mut self.swash_cache,
-                        &mut self.text_layout_cache,
-                        &mut self.pixmap,
-                        &mut self.clip_masks,
-                        self.config.fullscreen,
-                    )?
-                };
-                let render_cycles = perf_counter_elapsed(render_start);
-                self.metrics.render_cycles =
-                    self.metrics.render_cycles.saturating_add(render_cycles);
-                self.clear_color = clear_color;
-                let attach_start = perf_counter();
-                if let Some(scene) = gpu_scene.as_deref() {
-                    attach_gpu_scene(
-                        compositor,
-                        token,
-                        window.width() as usize,
-                        window.height() as usize,
-                        scene,
-                        &mut shared_buffer,
-                    )
-                    .map_err(|error| error.at("GPU scene attach"))?;
-                } else {
-                    let pixmap = self
-                        .pixmap
-                        .as_ref()
-                        .ok_or(MochiOsBackendError::InvalidWindowSize)?;
-                    attach_buffer(
-                        compositor,
-                        token,
-                        window.width() as usize,
-                        window.height() as usize,
-                        pixmap,
-                        clear_color,
-                        &mut shared_buffer,
-                        window.viewport(),
-                        dirty_bounds,
-                        pixel_format,
-                    )
-                    .map_err(|error| error.at("pixel buffer attach"))?;
-                }
-                let attach_cycles = perf_counter_elapsed(attach_start);
-                self.metrics.attach_cycles =
-                    self.metrics.attach_cycles.saturating_add(attach_cycles);
-                let commit_start = perf_counter();
-                damage_token_request(compositor, token, window.viewport(), dirty_bounds)
-                    .map_err(|error| error.at("surface damage"))?;
-                simple_token_request(compositor, OP_COMMIT, token)
-                    .map_err(|error| error.at("surface commit"))?;
-                if cursor_position_dirty {
-                    let scale = window.viewport().scale_factor as f32;
-                    set_cursor_position(
-                        compositor,
-                        self.pointer_x * scale,
-                        self.pointer_y * scale,
-                        true,
-                    )?;
-                }
-                let commit_cycles = perf_counter_elapsed(commit_start);
-                self.metrics.commit_cycles =
-                    self.metrics.commit_cycles.saturating_add(commit_cycles);
-                self.metrics.full_frames = self.metrics.full_frames.saturating_add(1);
-                self.report_frame_timing(
-                    "full",
-                    perf_counter_elapsed(frame_start),
-                    perf_tick_elapsed(frame_tick_start),
-                    draw_cycles,
-                    render_cycles,
-                    attach_cycles,
-                    commit_cycles,
-                    dirty_bounds,
-                );
-                self.report_metrics_if_due();
                 handled_work = true;
-            } else if let Some(dirty_bounds) = self.cursor_dirty.take() {
-                if self.cursor_image.is_some() {
+            }
+            if self.app.exit_requested() {
+                break 'event_loop Ok(());
+            }
+            while let Some((len, event)) = try_recv_event()? {
+                if is_application_reopen_message(len, &event) {
+                    if let Some(state) = windows.last() {
+                        let _ = simple_token_request(
+                            compositor,
+                            OP_ACTIVATE_SURFACE,
+                            state.surface.token(),
+                        );
+                    }
+                    self.app.reopen();
+                } else {
+                    self.dispatch_mailbox_message(len, event, &mut windows)?;
+                }
+                handled_work = true;
+            }
+
+            let window_count = windows.len();
+            for _ in 0..window_count {
+                let mut state = windows.remove(0);
+                let token = state.surface.token();
+                if state.close_accepted {
+                    handled_work = true;
+                    continue;
+                }
+                if let Some((width, height)) = state.pending_resize.take() {
+                    let viewport =
+                        scaled_viewport(width, height, self.app.interface_scale_factor());
+                    state.window.set_viewport(viewport);
+                    state.shared_buffer = if state.gpu_enabled {
+                        SharedBuffer::new_gpu_scene(width as usize, height as usize)?
+                    } else {
+                        SharedBuffer::new(width as usize, height as usize)?
+                    };
+                    state.pixmap = None;
+                    state.clip_masks.clear();
+                    self.app
+                        .handle_event(PlatformEvent::Resized { viewport }, &state.window);
+                    state.window.request_redraw();
+                    handled_work = true;
+                }
+                if self.flush_pending_pointer_motion(&mut state) {
+                    handled_work = true;
+                }
+
+                let redraw_due = self
+                    .app
+                    .next_redraw_at(state.window.id())
+                    .is_some_and(|deadline| deadline <= Instant::now());
+
+                let redraw_requested = state.window.take_redraw_requested();
+                if redraw_requested || redraw_due {
+                    let cursor_position_dirty =
+                        state.cursor_dirty.is_some() && state.cursor_image.is_some();
+                    if self.font_system.is_none() {
+                        self.font_system = Some(create_font_system());
+                    }
+                    display_list.clear();
                     let frame_start = perf_counter();
                     let frame_tick_start = perf_tick();
+                    let draw_start = perf_counter();
+                    let mut dirty_bounds = self.app.draw(&state.window, &mut display_list);
+                    let draw_cycles = perf_counter_elapsed(draw_start);
+                    self.metrics.draw_cycles = self.metrics.draw_cycles.saturating_add(draw_cycles);
+                    if let Some(cursor_rect) =
+                        Self::current_cursor_rect(&state, state.window.viewport())
+                    {
+                        dirty_bounds = dirty_bounds.union(cursor_rect);
+                    }
+                    state.cursor_dirty = None;
+                    let render_start = perf_counter();
+                    let mut gpu_scene = None;
+                    if state.gpu_enabled {
+                        match state.gpu_renderer.render(
+                            state.window.viewport(),
+                            dirty_bounds,
+                            &display_list,
+                            self.font_system
+                                .as_mut()
+                                .ok_or(MochiOsBackendError::InvalidWindowSize)?,
+                            &mut self.swash_cache,
+                            &mut self.text_layout_cache,
+                            state.config.fullscreen,
+                            &mut state.gpu_scene,
+                        ) {
+                            Ok(()) => gpu_scene = Some(state.gpu_scene.as_slice()),
+                            Err(_) => {
+                                state.gpu_enabled = false;
+                                state.shared_buffer = SharedBuffer::new(
+                                    state.window.width() as usize,
+                                    state.window.height() as usize,
+                                )?;
+                            }
+                        }
+                    }
+                    let clear_color = if gpu_scene.is_some() {
+                        Color::TRANSPARENT
+                    } else {
+                        render_display_list(
+                            state.window.viewport(),
+                            dirty_bounds,
+                            &display_list,
+                            self.font_system
+                                .as_mut()
+                                .ok_or(MochiOsBackendError::InvalidWindowSize)?,
+                            &mut self.swash_cache,
+                            &mut self.text_layout_cache,
+                            &mut state.pixmap,
+                            &mut state.clip_masks,
+                            state.config.fullscreen,
+                        )?
+                    };
+                    let render_cycles = perf_counter_elapsed(render_start);
+                    self.metrics.render_cycles =
+                        self.metrics.render_cycles.saturating_add(render_cycles);
+                    state.clear_color = clear_color;
+                    let attach_start = perf_counter();
+                    if let Some(scene) = gpu_scene.as_deref() {
+                        attach_gpu_scene(
+                            compositor,
+                            token,
+                            state.window.width() as usize,
+                            state.window.height() as usize,
+                            scene,
+                            &mut state.shared_buffer,
+                        )
+                        .map_err(|error| error.at("GPU scene attach"))?;
+                    } else {
+                        let pixmap = state
+                            .pixmap
+                            .as_ref()
+                            .ok_or(MochiOsBackendError::InvalidWindowSize)?;
+                        attach_buffer(
+                            compositor,
+                            token,
+                            state.window.width() as usize,
+                            state.window.height() as usize,
+                            pixmap,
+                            clear_color,
+                            &mut state.shared_buffer,
+                            state.window.viewport(),
+                            dirty_bounds,
+                            state.pixel_format,
+                        )
+                        .map_err(|error| error.at("pixel buffer attach"))?;
+                    }
+                    let attach_cycles = perf_counter_elapsed(attach_start);
+                    self.metrics.attach_cycles =
+                        self.metrics.attach_cycles.saturating_add(attach_cycles);
                     let commit_start = perf_counter();
-                    let scale = window.viewport().scale_factor as f32;
-                    set_cursor_position(
-                        compositor,
-                        self.pointer_x * scale,
-                        self.pointer_y * scale,
-                        true,
-                    )?;
+                    damage_token_request(compositor, token, state.window.viewport(), dirty_bounds)
+                        .map_err(|error| error.at("surface damage"))?;
+                    simple_token_request(compositor, OP_COMMIT, token)
+                        .map_err(|error| error.at("surface commit"))?;
+                    if cursor_position_dirty {
+                        let scale = state.window.viewport().scale_factor as f32;
+                        set_cursor_position(
+                            compositor,
+                            state.pointer_x * scale,
+                            state.pointer_y * scale,
+                            true,
+                        )?;
+                    }
                     let commit_cycles = perf_counter_elapsed(commit_start);
                     self.metrics.commit_cycles =
                         self.metrics.commit_cycles.saturating_add(commit_cycles);
-                    self.metrics.cursor_frames = self.metrics.cursor_frames.saturating_add(1);
+                    self.metrics.full_frames = self.metrics.full_frames.saturating_add(1);
                     self.report_frame_timing(
-                        "cursor",
+                        "full",
                         perf_counter_elapsed(frame_start),
                         perf_tick_elapsed(frame_tick_start),
-                        0,
-                        0,
-                        0,
+                        draw_cycles,
+                        render_cycles,
+                        attach_cycles,
                         commit_cycles,
                         dirty_bounds,
                     );
                     self.report_metrics_if_due();
                     handled_work = true;
+                } else if let Some(dirty_bounds) = state.cursor_dirty.take() {
+                    if state.cursor_image.is_some() {
+                        let frame_start = perf_counter();
+                        let frame_tick_start = perf_tick();
+                        let commit_start = perf_counter();
+                        let scale = state.window.viewport().scale_factor as f32;
+                        set_cursor_position(
+                            compositor,
+                            state.pointer_x * scale,
+                            state.pointer_y * scale,
+                            true,
+                        )?;
+                        let commit_cycles = perf_counter_elapsed(commit_start);
+                        self.metrics.commit_cycles =
+                            self.metrics.commit_cycles.saturating_add(commit_cycles);
+                        self.metrics.cursor_frames = self.metrics.cursor_frames.saturating_add(1);
+                        self.report_frame_timing(
+                            "cursor",
+                            perf_counter_elapsed(frame_start),
+                            perf_tick_elapsed(frame_tick_start),
+                            0,
+                            0,
+                            0,
+                            commit_cycles,
+                            dirty_bounds,
+                        );
+                        self.report_metrics_if_due();
+                        handled_work = true;
+                    }
                 }
+                windows.push(state);
             }
 
             if !handled_work {
-                if let Some(deadline) = self.app.next_redraw_at() {
-                    if wait_until_deadline(deadline, &window, &mut self)? {
-                        continue;
+                let can_block = windows.is_empty()
+                    || (windows.len() == 1
+                        && self.app.next_redraw_at(windows[0].window.id()).is_none());
+                if can_block {
+                    let endpoint = windows
+                        .first()
+                        .map_or(application_endpoint, |state| state.event_endpoint);
+                    if let Some((len, event)) = read_event_blocking(endpoint)? {
+                        if is_application_reopen_message(len, &event) {
+                            if let Some(state) = windows.last() {
+                                let _ = simple_token_request(
+                                    compositor,
+                                    OP_ACTIVATE_SURFACE,
+                                    state.surface.token(),
+                                );
+                            }
+                            self.app.reopen();
+                        } else {
+                            self.dispatch_mailbox_message(len, event, &mut windows)?;
+                        }
                     }
                 } else {
-                    wait_for_event(event_endpoint, &window, &mut self)?;
+                    let _ = syscall::call0(syscall::SyscallNumber::ThreadYield);
                 }
             }
         }
+    }
+
+    fn dispatch_mailbox_message(
+        &mut self,
+        len: usize,
+        event: [u8; EVENT_BUFFER_SIZE],
+        windows: &mut [MochiWindowState],
+    ) -> Result<(), MochiOsBackendError> {
+        let message_len = len.min(event.len());
+        if self.app.handle_platform_message(&event[..message_len]) {
+            for state in windows {
+                state.window.request_redraw();
+            }
+            return Ok(());
+        }
+
+        let target = surface_token_from_event(&event, message_len)
+            .and_then(|token| {
+                windows
+                    .iter()
+                    .position(|state| state.surface.token() == token)
+            })
+            .or_else(|| (windows.len() == 1).then_some(0))
+            .or_else(|| windows.iter().position(|state| state.config.fullscreen));
+        let Some(target) = target else {
+            return Ok(());
+        };
+        self.handle_or_queue_event_message(len, event, &mut windows[target])?;
+        self.flush_pending_pointer_motion(&mut windows[target]);
+        Ok(())
     }
 
     fn handle_event_message(
         &mut self,
         len: usize,
         event: [u8; 32],
-        window: &MochiOsWindow,
+        state: &mut MochiWindowState,
     ) -> Result<(), MochiOsBackendError> {
-        if self.direct_input && len == INPUT_EVENT_SIZE && self.handle_input_event(event, window) {
+        if state.direct_input && len == INPUT_EVENT_SIZE && self.handle_input_event(event, state) {
             return Ok(());
         }
 
-        self.handle_compositor_event(event, window)
+        self.handle_compositor_event(event, state)
     }
 
     fn handle_or_queue_event_message(
         &mut self,
         len: usize,
         event: [u8; EVENT_BUFFER_SIZE],
-        window: &MochiOsWindow,
+        state: &mut MochiWindowState,
     ) -> Result<(), MochiOsBackendError> {
         let message_len = len.min(event.len());
         if self.app.handle_platform_message(&event[..message_len]) {
-            window.request_redraw();
+            state.window.request_redraw();
             return Ok(());
         }
 
         let mut core_event = [0u8; 32];
         core_event.copy_from_slice(&event[..32]);
-        if len >= 12 && self.queue_compositor_pointer_motion(core_event) {
+        if len >= 12 && Self::queue_compositor_pointer_motion(state, core_event) {
             self.metrics.input_events = self.metrics.input_events.saturating_add(1);
             self.metrics.coalesced_pointer_events =
                 self.metrics.coalesced_pointer_events.saturating_add(1);
             return Ok(());
         }
-        if self.direct_input && len == INPUT_EVENT_SIZE && self.queue_pointer_motion(core_event) {
+        if state.direct_input
+            && len == INPUT_EVENT_SIZE
+            && Self::queue_pointer_motion(state, core_event)
+        {
             self.metrics.input_events = self.metrics.input_events.saturating_add(1);
             self.metrics.coalesced_pointer_events =
                 self.metrics.coalesced_pointer_events.saturating_add(1);
             return Ok(());
         }
 
-        self.flush_pending_pointer_motion(window);
+        self.flush_pending_pointer_motion(state);
         self.metrics.input_events = self.metrics.input_events.saturating_add(1);
-        self.handle_event_message(len, core_event, window)
+        self.handle_event_message(len, core_event, state)
     }
 
-    fn queue_pointer_motion(&mut self, event: [u8; 32]) -> bool {
+    fn queue_pointer_motion(state: &mut MochiWindowState, event: [u8; 32]) -> bool {
         let kind = u16::from_le_bytes([event[0], event[1]]);
         match kind {
             INPUT_EVENT_KIND_POINTER_MOVE => {
                 let dx = i32::from_le_bytes([event[12], event[13], event[14], event[15]]) as f32;
                 let dy = i32::from_le_bytes([event[16], event[17], event[18], event[19]]) as f32;
-                self.pending_pointer_motion.relative_dx += dx;
-                self.pending_pointer_motion.relative_dy += dy;
-                self.pending_pointer_motion.pending = true;
+                state.pending_pointer_motion.relative_dx += dx;
+                state.pending_pointer_motion.relative_dy += dy;
+                state.pending_pointer_motion.pending = true;
                 true
             }
             INPUT_EVENT_KIND_POINTER_ABSOLUTE => {
@@ -665,106 +845,106 @@ where
                     .clamp(0, 32_767) as f32;
                 let raw_y = i32::from_le_bytes([event[16], event[17], event[18], event[19]])
                     .clamp(0, 32_767) as f32;
-                self.pending_pointer_motion.absolute = Some((raw_x, raw_y));
-                self.pending_pointer_motion.relative_dx = 0.0;
-                self.pending_pointer_motion.relative_dy = 0.0;
-                self.pending_pointer_motion.pending = true;
+                state.pending_pointer_motion.absolute = Some((raw_x, raw_y));
+                state.pending_pointer_motion.relative_dx = 0.0;
+                state.pending_pointer_motion.relative_dy = 0.0;
+                state.pending_pointer_motion.pending = true;
                 true
             }
             _ => false,
         }
     }
 
-    fn queue_compositor_pointer_motion(&mut self, event: [u8; 32]) -> bool {
+    fn queue_compositor_pointer_motion(state: &mut MochiWindowState, event: [u8; 32]) -> bool {
         if u32::from_le_bytes([event[0], event[1], event[2], event[3]]) != EVENT_POINTER_MOTION {
             return false;
         }
         let x = i32::from_le_bytes([event[4], event[5], event[6], event[7]]) as f32;
         let y = i32::from_le_bytes([event[8], event[9], event[10], event[11]]) as f32;
-        self.pending_pointer_motion.absolute = None;
-        self.pending_pointer_motion.compositor_position = Some((x, y));
-        self.pending_pointer_motion.relative_dx = 0.0;
-        self.pending_pointer_motion.relative_dy = 0.0;
-        self.pending_pointer_motion.pending = true;
+        state.pending_pointer_motion.absolute = None;
+        state.pending_pointer_motion.compositor_position = Some((x, y));
+        state.pending_pointer_motion.relative_dx = 0.0;
+        state.pending_pointer_motion.relative_dy = 0.0;
+        state.pending_pointer_motion.pending = true;
         true
     }
 
-    fn flush_pending_pointer_motion(&mut self, window: &MochiOsWindow) -> bool {
-        if !self.pending_pointer_motion.pending {
+    fn flush_pending_pointer_motion(&mut self, state: &mut MochiWindowState) -> bool {
+        if !state.pending_pointer_motion.pending {
             return false;
         }
 
-        let bounds = window.viewport().logical_bounds();
-        if let Some((x, y)) = self.pending_pointer_motion.compositor_position.take() {
-            let scale = window.viewport().scale_factor as f32;
-            self.pointer_x = x / scale;
-            self.pointer_y = y / scale;
-        } else if let Some((raw_x, raw_y)) = self.pending_pointer_motion.absolute.take() {
-            self.pointer_x = bounds.origin.x + (raw_x / 32_767.0) * bounds.size.width;
-            self.pointer_y = bounds.origin.y + (raw_y / 32_767.0) * bounds.size.height;
+        let bounds = state.window.viewport().logical_bounds();
+        if let Some((x, y)) = state.pending_pointer_motion.compositor_position.take() {
+            let scale = state.window.viewport().scale_factor as f32;
+            state.pointer_x = x / scale;
+            state.pointer_y = y / scale;
+        } else if let Some((raw_x, raw_y)) = state.pending_pointer_motion.absolute.take() {
+            state.pointer_x = bounds.origin.x + (raw_x / 32_767.0) * bounds.size.width;
+            state.pointer_y = bounds.origin.y + (raw_y / 32_767.0) * bounds.size.height;
         }
         let max_x = (bounds.origin.x + bounds.size.width).max(bounds.origin.x);
         let max_y = (bounds.origin.y + bounds.size.height).max(bounds.origin.y);
-        let scale = window.viewport().scale_factor as f32;
-        self.pointer_x = (self.pointer_x + self.pending_pointer_motion.relative_dx / scale)
+        let scale = state.window.viewport().scale_factor as f32;
+        state.pointer_x = (state.pointer_x + state.pending_pointer_motion.relative_dx / scale)
             .clamp(bounds.origin.x, max_x);
-        self.pointer_y = (self.pointer_y + self.pending_pointer_motion.relative_dy / scale)
+        state.pointer_y = (state.pointer_y + state.pending_pointer_motion.relative_dy / scale)
             .clamp(bounds.origin.y, max_y);
 
-        self.pending_pointer_motion.relative_dx = 0.0;
-        self.pending_pointer_motion.relative_dy = 0.0;
-        self.pending_pointer_motion.pending = false;
+        state.pending_pointer_motion.relative_dx = 0.0;
+        state.pending_pointer_motion.relative_dy = 0.0;
+        state.pending_pointer_motion.pending = false;
 
         self.app.handle_event(
             PlatformEvent::PointerMoved {
-                x: self.pointer_x,
-                y: self.pointer_y,
+                x: state.pointer_x,
+                y: state.pointer_y,
             },
-            window,
+            &state.window,
         );
         true
     }
 
-    fn handle_input_event(&mut self, event: [u8; 32], window: &MochiOsWindow) -> bool {
+    fn handle_input_event(&mut self, event: [u8; 32], state: &mut MochiWindowState) -> bool {
         let kind = u16::from_le_bytes([event[0], event[1]]);
         match kind {
             INPUT_EVENT_KIND_POINTER_MOVE => {
-                let previous = self.current_cursor_rect(window.viewport());
+                let previous = Self::current_cursor_rect(state, state.window.viewport());
                 let dx = i32::from_le_bytes([event[12], event[13], event[14], event[15]]) as f32;
                 let dy = i32::from_le_bytes([event[16], event[17], event[18], event[19]]) as f32;
-                let bounds = window.viewport().logical_bounds();
+                let bounds = state.window.viewport().logical_bounds();
                 let max_x = (bounds.origin.x + bounds.size.width).max(bounds.origin.x);
                 let max_y = (bounds.origin.y + bounds.size.height).max(bounds.origin.y);
-                let scale = window.viewport().scale_factor as f32;
-                self.pointer_x = (self.pointer_x + dx / scale).clamp(bounds.origin.x, max_x);
-                self.pointer_y = (self.pointer_y + dy / scale).clamp(bounds.origin.y, max_y);
+                let scale = state.window.viewport().scale_factor as f32;
+                state.pointer_x = (state.pointer_x + dx / scale).clamp(bounds.origin.x, max_x);
+                state.pointer_y = (state.pointer_y + dy / scale).clamp(bounds.origin.y, max_y);
                 self.app.handle_event(
                     PlatformEvent::PointerMoved {
-                        x: self.pointer_x,
-                        y: self.pointer_y,
+                        x: state.pointer_x,
+                        y: state.pointer_y,
                     },
-                    window,
+                    &state.window,
                 );
-                self.mark_cursor_dirty(window.viewport(), previous);
+                Self::mark_cursor_dirty(state, state.window.viewport(), previous);
                 true
             }
             INPUT_EVENT_KIND_POINTER_ABSOLUTE => {
-                let previous = self.current_cursor_rect(window.viewport());
+                let previous = Self::current_cursor_rect(state, state.window.viewport());
                 let raw_x = i32::from_le_bytes([event[12], event[13], event[14], event[15]])
                     .clamp(0, 32_767) as f32;
                 let raw_y = i32::from_le_bytes([event[16], event[17], event[18], event[19]])
                     .clamp(0, 32_767) as f32;
-                let bounds = window.viewport().logical_bounds();
-                self.pointer_x = bounds.origin.x + (raw_x / 32_767.0) * bounds.size.width;
-                self.pointer_y = bounds.origin.y + (raw_y / 32_767.0) * bounds.size.height;
+                let bounds = state.window.viewport().logical_bounds();
+                state.pointer_x = bounds.origin.x + (raw_x / 32_767.0) * bounds.size.width;
+                state.pointer_y = bounds.origin.y + (raw_y / 32_767.0) * bounds.size.height;
                 self.app.handle_event(
                     PlatformEvent::PointerMoved {
-                        x: self.pointer_x,
-                        y: self.pointer_y,
+                        x: state.pointer_x,
+                        y: state.pointer_y,
                     },
-                    window,
+                    &state.window,
                 );
-                self.mark_cursor_dirty(window.viewport(), previous);
+                Self::mark_cursor_dirty(state, state.window.viewport(), previous);
                 true
             }
             INPUT_EVENT_KIND_POINTER_BUTTON => {
@@ -776,15 +956,20 @@ where
                     3 => PointerButton::Middle,
                     other => PointerButton::Other(other),
                 };
-                let state = if flags & INPUT_FLAG_PRESS != 0 {
+                let button_state = if flags & INPUT_FLAG_PRESS != 0 {
                     ButtonState::Pressed
                 } else if flags & INPUT_FLAG_RELEASE != 0 {
                     ButtonState::Released
                 } else {
                     return true;
                 };
-                self.app
-                    .handle_event(PlatformEvent::PointerButton { button, state }, window);
+                self.app.handle_event(
+                    PlatformEvent::PointerButton {
+                        button,
+                        state: button_state,
+                    },
+                    &state.window,
+                );
                 true
             }
             INPUT_EVENT_KIND_POINTER_WHEEL => {
@@ -793,7 +978,7 @@ where
                 let delta_y =
                     i32::from_le_bytes([event[16], event[17], event[18], event[19]]) as f32;
                 self.app
-                    .handle_event(PlatformEvent::Scroll { delta_x, delta_y }, window);
+                    .handle_event(PlatformEvent::Scroll { delta_x, delta_y }, &state.window);
                 true
             }
             _ => false,
@@ -882,7 +1067,7 @@ where
         perf_log(&line);
     }
 
-    fn log_backend_started(&self, size: (u32, u32)) {
+    fn log_backend_started(&self, state: &MochiWindowState, size: (u32, u32)) {
         if !PERF_LOG_ENABLED {
             return;
         }
@@ -890,46 +1075,46 @@ where
         let _ = write!(
             line,
             "viewkit/mochios perf-start fullscreen={} size={}x{} direct_input={}\n",
-            self.config.fullscreen, size.0, size.1, self.direct_input,
+            state.config.fullscreen, size.0, size.1, state.direct_input,
         );
         perf_log(&line);
     }
 
-    fn current_cursor_rect(&self, viewport: Viewport) -> Option<Rect> {
-        self.cursor_image.as_ref()?;
+    fn current_cursor_rect(state: &MochiWindowState, viewport: Viewport) -> Option<Rect> {
+        state.cursor_image.as_ref()?;
         let bounds = viewport.logical_bounds();
         Some(
             Rect::new(
-                self.pointer_x - CURSOR_HOTSPOT_X,
-                self.pointer_y - CURSOR_HOTSPOT_Y,
+                state.pointer_x - CURSOR_HOTSPOT_X,
+                state.pointer_y - CURSOR_HOTSPOT_Y,
                 CURSOR_WIDTH as f32,
                 CURSOR_HEIGHT as f32,
             )
             .intersection(bounds)
-            .unwrap_or_else(|| Rect::new(self.pointer_x, self.pointer_y, 1.0, 1.0)),
+            .unwrap_or_else(|| Rect::new(state.pointer_x, state.pointer_y, 1.0, 1.0)),
         )
     }
 
-    fn mark_cursor_dirty(&mut self, viewport: Viewport, previous: Option<Rect>) {
-        let Some(current) = self.current_cursor_rect(viewport) else {
+    fn mark_cursor_dirty(state: &mut MochiWindowState, viewport: Viewport, previous: Option<Rect>) {
+        let Some(current) = Self::current_cursor_rect(state, viewport) else {
             return;
         };
         let dirty = previous
             .map_or(current, |previous| previous.union(current))
             .expanded(2.0);
-        self.cursor_dirty = Some(self.cursor_dirty.map_or(dirty, |old| old.union(dirty)));
+        state.cursor_dirty = Some(state.cursor_dirty.map_or(dirty, |old| old.union(dirty)));
     }
 
     fn handle_compositor_event(
         &mut self,
         event: [u8; 32],
-        window: &MochiOsWindow,
+        state: &mut MochiWindowState,
     ) -> Result<(), MochiOsBackendError> {
         let kind = unsafe { read_u32_raw(event.as_ptr(), 0) };
         let a = unsafe { read_i32_raw(event.as_ptr(), 4) };
         let b = unsafe { read_i32_raw(event.as_ptr(), 8) };
         let c = unsafe { read_u32_raw(event.as_ptr(), 12) };
-        let scale = window.viewport().scale_factor as f32;
+        let scale = state.window.viewport().scale_factor as f32;
         let logical_x = a as f32 / scale;
         let logical_y = b as f32 / scale;
 
@@ -940,11 +1125,12 @@ where
                         x: logical_x,
                         y: logical_y,
                     },
-                    window,
+                    &state.window,
                 );
             }
             EVENT_POINTER_LEAVE => {
-                self.app.handle_event(PlatformEvent::PointerLeft, window);
+                self.app
+                    .handle_event(PlatformEvent::PointerLeft, &state.window);
             }
             EVENT_POINTER_BUTTON => {
                 let button_id = (c & 0xffff) as u16;
@@ -956,7 +1142,7 @@ where
                         x: logical_x,
                         y: logical_y,
                     },
-                    window,
+                    &state.window,
                 );
                 let button = match button_id {
                     1 => PointerButton::Primary,
@@ -964,25 +1150,30 @@ where
                     3 => PointerButton::Middle,
                     other => PointerButton::Other(other),
                 };
-                let state = if flags & u32::from(INPUT_FLAG_PRESS) != 0 {
-                    if !self.pressed_buttons.contains(&button_id) {
-                        self.pressed_buttons.push(button_id);
+                let button_state = if flags & u32::from(INPUT_FLAG_PRESS) != 0 {
+                    if !state.pressed_buttons.contains(&button_id) {
+                        state.pressed_buttons.push(button_id);
                     }
                     ButtonState::Pressed
                 } else if flags & u32::from(INPUT_FLAG_RELEASE) != 0 {
-                    if let Some(pos) = self
+                    if let Some(pos) = state
                         .pressed_buttons
                         .iter()
                         .position(|pressed| *pressed == button_id)
                     {
-                        self.pressed_buttons.swap_remove(pos);
+                        state.pressed_buttons.swap_remove(pos);
                     }
                     ButtonState::Released
                 } else {
-                    self.toggle_button_state(button_id)
+                    Self::toggle_button_state(state, button_id)
                 };
-                self.app
-                    .handle_event(PlatformEvent::PointerButton { button, state }, window);
+                self.app.handle_event(
+                    PlatformEvent::PointerButton {
+                        button,
+                        state: button_state,
+                    },
+                    &state.window,
+                );
             }
             EVENT_POINTER_SCROLL => {
                 self.app.handle_event(
@@ -990,7 +1181,7 @@ where
                         delta_x: a as f32,
                         delta_y: b as f32,
                     },
-                    window,
+                    &state.window,
                 );
             }
             EVENT_KEY => {
@@ -998,23 +1189,26 @@ where
                 if flags & INPUT_FLAG_PRESS != 0 {
                     let modifiers = key_modifiers_from_wire(c >> 16);
                     if let Some(key) = key_from_wire(a as u16, b as u32) {
-                        self.app
-                            .handle_event(PlatformEvent::KeyPressed { key, modifiers }, window);
+                        self.app.handle_event(
+                            PlatformEvent::KeyPressed { key, modifiers },
+                            &state.window,
+                        );
                     }
                     if let Some(event) = self.key_event(a as u16, b as u32, modifiers) {
-                        self.app.handle_event(event, window);
+                        self.app.handle_event(event, &state.window);
                     }
                 }
             }
             EVENT_CLOSE_REQUESTED => {
-                self.app.handle_event(PlatformEvent::CloseRequested, window);
-                self.close_requested = true;
+                state.close_accepted = self.app.should_close_window(&state.window);
             }
             EVENT_FOCUS_GAINED => {
-                self.app.handle_event(PlatformEvent::Focused(true), window);
+                self.app
+                    .handle_event(PlatformEvent::Focused(true), &state.window);
             }
             EVENT_FOCUS_LOST => {
-                self.app.handle_event(PlatformEvent::Focused(false), window);
+                self.app
+                    .handle_event(PlatformEvent::Focused(false), &state.window);
             }
             EVENT_FRAME_DONE => {}
             EVENT_CONFIGURE => {
@@ -1022,7 +1216,7 @@ where
                 let height =
                     u32::try_from(b).map_err(|_| MochiOsBackendError::InvalidWindowSize)?;
                 checked_surface_size(Size::new(width as f32, height as f32))?;
-                self.pending_resize = Some((width, height));
+                state.pending_resize = Some((width, height));
             }
             EVENT_CONTEXT_MENU_RESULT => {
                 let status = unsafe { read_u32_raw(event.as_ptr(), 4) };
@@ -1033,25 +1227,27 @@ where
                         request_id,
                         command_id: (status == 0).then_some(command_id),
                     },
-                    window,
+                    &state.window,
                 );
             }
             EVENT_APPEARANCE_CHANGED => {
                 if self.app.reload_appearance() {
-                    let previous_scale = window.viewport().scale_factor as f32;
+                    let previous_scale = state.window.viewport().scale_factor as f32;
                     let viewport = scaled_viewport(
-                        window.width(),
-                        window.height(),
+                        state.window.width(),
+                        state.window.height(),
                         self.app.interface_scale_factor(),
                     );
-                    let physical_x = self.pointer_x * previous_scale;
-                    let physical_y = self.pointer_y * previous_scale;
-                    self.pointer_x = physical_x / viewport.scale_factor as f32;
-                    self.pointer_y = physical_y / viewport.scale_factor as f32;
-                    window.set_viewport(viewport);
-                    self.app
-                        .handle_event(PlatformEvent::ScaleFactorChanged { viewport }, window);
-                    window.request_redraw();
+                    let physical_x = state.pointer_x * previous_scale;
+                    let physical_y = state.pointer_y * previous_scale;
+                    state.pointer_x = physical_x / viewport.scale_factor as f32;
+                    state.pointer_y = physical_y / viewport.scale_factor as f32;
+                    state.window.set_viewport(viewport);
+                    self.app.handle_event(
+                        PlatformEvent::ScaleFactorChanged { viewport },
+                        &state.window,
+                    );
+                    state.window.request_redraw();
                 }
             }
             _ => {}
@@ -1122,19 +1318,23 @@ where
         })
     }
 
-    fn toggle_button_state(&mut self, button_id: u16) -> ButtonState {
-        if let Some(pos) = self
+    fn toggle_button_state(state: &mut MochiWindowState, button_id: u16) -> ButtonState {
+        if let Some(pos) = state
             .pressed_buttons
             .iter()
             .position(|pressed| *pressed == button_id)
         {
-            self.pressed_buttons.swap_remove(pos);
+            state.pressed_buttons.swap_remove(pos);
             ButtonState::Released
         } else {
-            self.pressed_buttons.push(button_id);
+            state.pressed_buttons.push(button_id);
             ButtonState::Pressed
         }
     }
+}
+
+fn is_application_reopen_message(len: usize, event: &[u8; EVENT_BUFFER_SIZE]) -> bool {
+    len == 16 && event.get(..16) == Some(b"MAPPREOPEN\0\0\0\0\0\0")
 }
 
 fn scaled_viewport(width: u32, height: u32, scale_factor: f64) -> Viewport {

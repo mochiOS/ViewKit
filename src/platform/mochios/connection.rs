@@ -297,36 +297,6 @@ pub(super) fn try_recv_event()
     Ok(Some((len, out)))
 }
 
-pub(super) fn wait_for_event<A: PlatformApplication>(
-    endpoint: u64,
-    window: &MochiOsWindow,
-    backend: &mut MochiOsBackend<A>,
-) -> Result<(), MochiOsBackendError> {
-    if let Some((len, event)) = read_event_blocking(endpoint)? {
-        backend.handle_or_queue_event_message(len, event, window)?;
-        backend.flush_pending_pointer_motion(window);
-    }
-    Ok(())
-}
-
-pub(super) fn wait_until_deadline<A: PlatformApplication>(
-    deadline: Instant,
-    window: &MochiOsWindow,
-    backend: &mut MochiOsBackend<A>,
-) -> Result<bool, MochiOsBackendError> {
-    loop {
-        if let Some((len, event)) = try_recv_event()? {
-            backend.handle_or_queue_event_message(len, event, window)?;
-            backend.flush_pending_pointer_motion(window);
-            return Ok(true);
-        }
-        if Instant::now() >= deadline {
-            return Ok(false);
-        }
-        let _ = syscall::call0(syscall::SyscallNumber::ThreadYield);
-    }
-}
-
 pub(super) fn read_event_blocking(
     endpoint: u64,
 ) -> Result<Option<(usize, [u8; EVENT_BUFFER_SIZE])>, MochiOsBackendError> {

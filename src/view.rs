@@ -1,4 +1,5 @@
 use crate::accessibility::AccessibilityNode;
+use crate::command::CommandStatus;
 use crate::draw_command::DisplayList;
 use crate::event::{EventContext, EventResult, RedrawRequest, ViewEvent};
 use crate::geometry::{Rect, Size};
@@ -68,6 +69,7 @@ pub struct PaintContext<'a> {
     pub text_measurer: &'a mut TextMeasurer,
     redraw_schedule: Option<&'a mut RedrawSchedule>,
     accessibility_nodes: Option<&'a mut Vec<AccessibilityNode>>,
+    command_statuses: Option<&'a mut Vec<CommandStatus>>,
     inherited_corner_radii: Vec<f32>,
 }
 
@@ -86,7 +88,20 @@ impl<'a> PaintContext<'a> {
 
             redraw_schedule: None,
             accessibility_nodes: None,
+            command_statuses: None,
             inherited_corner_radii: Vec::new(),
+        }
+    }
+
+    pub fn with_command_statuses(mut self, command_statuses: &'a mut Vec<CommandStatus>) -> Self {
+        self.command_statuses = Some(command_statuses);
+        self
+    }
+
+    /// Publishes a command's current availability for menu validation.
+    pub fn record_command_status(&mut self, status: CommandStatus) {
+        if let Some(statuses) = self.command_statuses.as_deref_mut() {
+            statuses.push(status);
         }
     }
 

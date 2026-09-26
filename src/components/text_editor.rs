@@ -2,9 +2,13 @@
 
 use super::{BorderStyle, Rectangle, RectangleColor, Text};
 use crate::accessibility::{AccessibilityNode, AccessibilityRole};
+use crate::command::{CommandStatus, standard as commands};
 use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Point, Rect, Size};
+use crate::platform::clipboard::{
+    set_text as set_system_clipboard_text, text as system_clipboard_text,
+};
 use crate::platform::{CursorIcon, Key, PointerButton};
 use crate::state::Binding;
 use crate::theme::{CornerRadius, ScrollBarTokens, ShadowStyle};
@@ -759,6 +763,8 @@ impl View for TextEditor {
         let cursor = inner.cursor.min(value.len());
         let selection = selection_range(&inner);
         let focused = inner.focused && inner.enabled;
+        let can_undo = !inner.undo.is_empty();
+        let can_redo = !inner.redo.is_empty();
         let line_height = self.line_height(context).max(1.0);
         refresh_line_width_cache(
             &mut inner,
@@ -809,6 +815,39 @@ impl View for TextEditor {
         let scroll_x = inner.scroll_x;
         let scroll_y = inner.scroll_y;
         drop(inner);
+
+        context.record_command_status(CommandStatus::new(
+            commands::UNDO,
+            bounds,
+            focused && can_undo,
+        ));
+        context.record_command_status(CommandStatus::new(
+            commands::REDO,
+            bounds,
+            focused && can_redo,
+        ));
+        let has_selection = selection.is_some();
+        context.record_command_status(CommandStatus::new(
+            commands::COPY,
+            bounds,
+            focused && has_selection,
+        ));
+        context.record_command_status(CommandStatus::new(
+            commands::CUT,
+            bounds,
+            focused && has_selection,
+        ));
+        context.record_command_status(CommandStatus::new(commands::PASTE, bounds, focused));
+        context.record_command_status(CommandStatus::new(
+            commands::DELETE,
+            bounds,
+            focused && (has_selection || cursor < value.len()),
+        ));
+        context.record_command_status(CommandStatus::new(
+            commands::SELECT_ALL,
+            bounds,
+            focused && !value.is_empty(),
+        ));
 
         let first_visible_line = (scroll_y / line_height).floor() as usize;
         let last_visible_line = ((scroll_y + content.size.height) / line_height).ceil() as usize;
@@ -1211,6 +1250,99 @@ impl View for TextEditor {
                 }
                 EventResult::Consumed
             }
+            ViewEvent::Command { command, .. }
+                if self.interaction.is_focused() && *command == commands::UNDO =>
+            {
+                if self.interaction.undo() {
+                    self.synchronize();
+                    context.request_redraw_in(bounds);
+                }
+                EventResult::Consumed
+            }
+            ViewEvent::Command { command, .. }
+                if self.interaction.is_focused() && *command == commands::REDO =>
+            {
+                if self.interaction.redo() {
+                    self.synchronize();
+                    context.request_redraw_in(bounds);
+                }
+                EventResult::Consumed
+            }
+            ViewEvent::Command { command, .. }
+                if self.interaction.is_focused() && *command == commands::COPY =>
+            {
+                let selected = {
+                    let inner = self.interaction.inner.borrow();
+                    selection_range(&inner).map(|range| inner.value[range].to_owned())
+                };
+                if let Some(selected) = selected {
+                    let _ = set_system_clipboard_text(&selected);
+                }
+                EventResult::Consumed
+            }
+            ViewEvent::Command { command, .. }
+                if self.interaction.is_focused() && *command == commands::CUT =>
+            {
+                let selected = {
+                    let inner = self.interaction.inner.borrow();
+                    selection_range(&inner).map(|range| inner.value[range].to_owned())
+                };
+                if let Some(selected) = selected
+                    && set_system_clipboard_text(&selected)
+                    && self
+                        .interaction
+                        .edit(|inner| Self::replace_selection(inner, ""))
+                {
+                    self.synchronize();
+                    self.interaction.reset_caret();
+                    context.request_redraw_in(bounds);
+                }
+                EventResult::Consumed
+            }
+            ViewEvent::Command { command, .. }
+                if self.interaction.is_focused() && *command == commands::PASTE =>
+            {
+                if let Some(pasted) = system_clipboard_text()
+                    && !pasted.is_empty()
+                    && self
+                        .interaction
+                        .edit(|inner| Self::replace_selection(inner, &normalize_newlines(pasted)))
+                {
+                    self.synchronize();
+                    self.interaction.reset_caret();
+                    context.request_redraw_in(bounds);
+                }
+                EventResult::Consumed
+            }
+            ViewEvent::Command { command, .. }
+                if self.interaction.is_focused() && *command == commands::SELECT_ALL =>
+            {
+                self.select_all();
+                context.request_redraw_in(bounds);
+                EventResult::Consumed
+            }
+            ViewEvent::Command { command, .. }
+                if self.interaction.is_focused() && *command == commands::DELETE =>
+            {
+                let changed = self.interaction.edit_with_kind(EditKind::Delete, |inner| {
+                    if selection_range(inner).is_some() {
+                        return Self::replace_selection(inner, "");
+                    }
+                    let next = next_boundary(&inner.value, inner.cursor);
+                    if next == inner.cursor {
+                        false
+                    } else {
+                        inner.value.replace_range(inner.cursor..next, "");
+                        true
+                    }
+                });
+                if changed {
+                    self.synchronize();
+                    self.interaction.reset_caret();
+                    context.request_redraw_in(bounds);
+                }
+                EventResult::Consumed
+            }
             ViewEvent::Backspace if self.interaction.is_focused() => {
                 let changed = self.interaction.edit_with_kind(EditKind::Delete, |inner| {
                     if selection_range(inner).is_some() {
@@ -1605,28 +1737,6 @@ fn update_statistics(inner: &mut TextEditorInteractionInner) {
     inner.character_count = inner.value.chars().count();
 }
 
-#[cfg(target_os = "mochios")]
-fn set_system_clipboard_text(value: &str) -> bool {
-    mochi_user_platform::workspace::set_clipboard_text(value).is_ok()
-}
-
-#[cfg(not(target_os = "mochios"))]
-fn set_system_clipboard_text(_value: &str) -> bool {
-    false
-}
-
-#[cfg(target_os = "mochios")]
-fn system_clipboard_text() -> Option<String> {
-    mochi_user_platform::workspace::clipboard_text()
-        .ok()
-        .flatten()
-}
-
-#[cfg(not(target_os = "mochios"))]
-fn system_clipboard_text() -> Option<String> {
-    None
-}
-
 fn line_ranges(value: &str) -> Vec<Range<usize>> {
     let mut ranges = Vec::new();
     let mut start = 0;
@@ -1846,6 +1956,9 @@ mod tests {
 
         assert_eq!(result, EventResult::Ignored);
         assert!(!state.is_focused());
-        assert_eq!(context.redraw_request(), crate::event::RedrawRequest::Region(bounds));
+        assert_eq!(
+            context.redraw_request(),
+            crate::event::RedrawRequest::Region(bounds)
+        );
     }
 }
