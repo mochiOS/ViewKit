@@ -4,17 +4,22 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
-use crate::accessibility::{AccessibilityNode, AccessibilityRole};
+use crate::accessibility::AccessibilityNode;
 use crate::app::{App, ViewContext, WindowId};
 use crate::appearance::AppearanceSettings;
 use crate::command::CommandStatus;
-use crate::components::{BorderStyle, Icon, Rectangle, RectangleColor, SymbolName, Text};
+use crate::components::{
+    BorderStyle, Button, ButtonStyle, Dialog, HStack, Icon, Rectangle, RectangleColor, Spacer,
+    SymbolName, Text, VStack,
+};
 use crate::draw_command::{DisplayList, DrawCommand};
 use crate::event::{ContextMenuRequest, EventContext, EventDispatcher, RedrawRequest};
 use crate::geometry::{Point, Rect};
+use crate::layout::{StackAlignment, StackDistribution, StackGap, ViewExt};
 use crate::platform::{
     ButtonState, Key, PlatformApplication, PlatformEvent, PlatformWindow, PlatformWindowCommand,
     PointerButton, WindowConfig,
@@ -190,20 +195,80 @@ struct WindowRuntime<Body> {
 }
 
 struct RuntimeAlert {
-    title: String,
-    message: String,
-    symbol: SymbolName,
     actions: Vec<RuntimeDialogAction>,
-    hovered: Option<usize>,
-    pressed: Option<usize>,
+    view: Box<dyn View>,
+    selected_action: Rc<Cell<Option<usize>>>,
     default_action: usize,
-    escape_action: usize,
 }
 
 struct RuntimeDialogAction {
     label: &'static str,
     prominent: bool,
     callback: Option<Box<dyn FnOnce()>>,
+}
+
+fn runtime_alert_view(
+    title: &str,
+    message: &str,
+    symbol: SymbolName,
+    actions: &[RuntimeDialogAction],
+    selected_action: Rc<Cell<Option<usize>>>,
+    escape_action: usize,
+) -> Box<dyn View> {
+    let button_row = actions.iter().enumerate().fold(
+        HStack::new()
+            .gap(StackGap::Small)
+            .alignment(StackAlignment::Center)
+            .distribution(StackDistribution::End),
+        |row, (index, action)| {
+            let selection = Rc::clone(&selected_action);
+            let style = if action.prominent {
+                ButtonStyle::Primary
+            } else {
+                ButtonStyle::Standard
+            };
+            row.child(
+                Button::new(action.label)
+                    .style(style)
+                    .on_click(move || selection.set(Some(index))),
+            )
+        },
+    );
+
+    let text_column = VStack::new()
+        .gap(StackGap::ExtraSmall)
+        .alignment(StackAlignment::Stretch)
+        .child(Text::styled(
+            title.to_owned(),
+            crate::typography::TextRole::TitleSmall,
+        ))
+        .child(Text::body(message.to_owned()));
+
+    let content = VStack::new()
+        .gap(StackGap::Medium)
+        .alignment(StackAlignment::Stretch)
+        .child(
+            HStack::new()
+                .gap(StackGap::Large)
+                .alignment(StackAlignment::Start)
+                .child(
+                    Icon::new(symbol)
+                        .size(42.0)
+                        .color(Theme::current().shell.alert)
+                        .frame(42.0, 42.0),
+                )
+                .child(text_column.layout().flex_grow(1.0)),
+        )
+        .child(Spacer::new())
+        .child(button_row);
+
+    let dismiss_selection = selected_action;
+    Box::new(
+        Dialog::new()
+            .accessibility_label(title.to_owned())
+            .on_dismiss(move || dismiss_selection.set(Some(escape_action)))
+            .content(content),
+    )
 }
 
 impl<Body> WindowRuntime<Body> {
@@ -232,19 +297,25 @@ impl<Body> WindowRuntime<Body> {
         appearance: &AppearanceSettings,
     ) -> Self {
         let mut window = Self::new(String::from("Error"), appearance);
+        let actions = vec![RuntimeDialogAction {
+            label: "OK",
+            prominent: true,
+            callback: Some(on_dismiss),
+        }];
+        let selected_action = Rc::new(Cell::new(None));
+        let view = runtime_alert_view(
+            &title,
+            &message,
+            SymbolName::Error,
+            &actions,
+            Rc::clone(&selected_action),
+            0,
+        );
         window.alert = Some(RuntimeAlert {
-            title,
-            message,
-            symbol: SymbolName::Error,
-            actions: vec![RuntimeDialogAction {
-                label: "OK",
-                prominent: true,
-                callback: Some(on_dismiss),
-            }],
-            hovered: None,
-            pressed: None,
+            actions,
+            view,
+            selected_action,
             default_action: 0,
-            escape_action: 0,
         });
         window
     }
@@ -258,31 +329,37 @@ impl<Body> WindowRuntime<Body> {
         appearance: &AppearanceSettings,
     ) -> Self {
         let mut window = Self::new(title.clone(), appearance);
+        let actions = vec![
+            RuntimeDialogAction {
+                label: "Cancel",
+                prominent: false,
+                callback: Some(on_cancel),
+            },
+            RuntimeDialogAction {
+                label: "Don't Save",
+                prominent: false,
+                callback: Some(on_discard),
+            },
+            RuntimeDialogAction {
+                label: "Save",
+                prominent: true,
+                callback: Some(on_save),
+            },
+        ];
+        let selected_action = Rc::new(Cell::new(None));
+        let view = runtime_alert_view(
+            &title,
+            &message,
+            SymbolName::Warning,
+            &actions,
+            Rc::clone(&selected_action),
+            0,
+        );
         window.alert = Some(RuntimeAlert {
-            title,
-            message,
-            symbol: SymbolName::Warning,
-            actions: vec![
-                RuntimeDialogAction {
-                    label: "Cancel",
-                    prominent: false,
-                    callback: Some(on_cancel),
-                },
-                RuntimeDialogAction {
-                    label: "Don't Save",
-                    prominent: false,
-                    callback: Some(on_discard),
-                },
-                RuntimeDialogAction {
-                    label: "Save",
-                    prominent: true,
-                    callback: Some(on_save),
-                },
-            ],
-            hovered: None,
-            pressed: None,
+            actions,
+            view,
+            selected_action,
             default_action: 0,
-            escape_action: 0,
         });
         window
     }
@@ -730,7 +807,7 @@ where
         .with_command_statuses(&mut state.command_statuses);
 
         if let Some(alert) = state.alert.as_ref() {
-            paint_alert_window(alert, viewport_bounds, &mut context);
+            alert.view.paint(viewport_bounds, &mut context);
         } else {
             let root = state
                 .root
@@ -825,56 +902,50 @@ where
         event: &PlatformEvent,
         window: &dyn PlatformWindow,
     ) {
-        let bounds = window.viewport().logical_bounds();
-        let Some(alert) = self
-            .windows
-            .get_mut(&id)
-            .and_then(|state| state.alert.as_mut())
-        else {
+        if matches!(event, PlatformEvent::Focused(false)) {
+            window.activate();
             return;
-        };
-        let buttons = alert_button_bounds(alert, bounds);
-        let mut action = None;
-        match event {
+        }
+
+        let action = match event {
             PlatformEvent::KeyPressed {
                 key: Key::Enter, ..
-            } => action = Some(alert.actions.len().saturating_sub(1)),
-            PlatformEvent::KeyPressed {
-                key: Key::Escape, ..
-            } => action = Some(alert.escape_action),
-            PlatformEvent::PointerMoved { x, y } => {
-                let point = Point::new(*x, *y);
-                let hovered = buttons.iter().position(|button| button.contains(point));
-                if alert.hovered != hovered {
-                    alert.hovered = hovered;
+            } => self.windows.get(&id).and_then(|state| {
+                state
+                    .alert
+                    .as_ref()
+                    .map(|alert| alert.actions.len().saturating_sub(1))
+            }),
+            _ => {
+                let bounds = window.viewport().logical_bounds();
+                let Some(state) = self.windows.get_mut(&id) else {
+                    return;
+                };
+                let Some(alert) = state.alert.as_ref() else {
+                    return;
+                };
+                let mut context = EventContext::new(
+                    &self.theme,
+                    &self.theme.typography,
+                    &mut state.text_measurer,
+                );
+                state
+                    .event_dispatcher
+                    .dispatch(alert.view.as_ref(), bounds, event, &mut context);
+                let action = alert.selected_action.take();
+                let redraw = context.redraw_request();
+                if let Some(cursor) = context.cursor_icon() {
+                    window.set_cursor(cursor);
+                }
+                drop(context);
+                state.pending_redraw = state.pending_redraw.merge(redraw);
+                if redraw.is_requested() {
                     window.request_redraw();
                 }
+                action
             }
-            PlatformEvent::PointerButton {
-                button: PointerButton::Primary,
-                state: ButtonState::Pressed,
-            } => {
-                alert.pressed = alert.hovered;
-                window.request_redraw();
-            }
-            PlatformEvent::PointerButton {
-                button: PointerButton::Primary,
-                state: ButtonState::Released,
-            } => {
-                if alert.pressed.is_some() && alert.pressed == alert.hovered {
-                    action = alert.pressed;
-                }
-                alert.pressed = None;
-                window.request_redraw();
-            }
-            PlatformEvent::PointerLeft => {
-                alert.hovered = None;
-                alert.pressed = None;
-                window.request_redraw();
-            }
-            PlatformEvent::Focused(false) => window.activate(),
-            _ => {}
-        }
+        };
+
         if let Some(action) = action {
             self.dismiss_alert(id, action);
             self.pending_window_commands
@@ -954,97 +1025,6 @@ fn fallback_menu_bounds(request: &ContextMenuRequest, viewport: Rect, theme: &Th
         above_y.max(viewport.origin.y)
     };
     Rect::new(x, y, width, height.min(viewport.size.height))
-}
-
-fn alert_button_bounds(alert: &RuntimeAlert, bounds: Rect) -> Vec<Rect> {
-    let mut right = bounds.origin.x + bounds.size.width - 24.0;
-    let y = bounds.origin.y + bounds.size.height - 50.0;
-    let mut reversed = Vec::with_capacity(alert.actions.len());
-    for action in alert.actions.iter().rev() {
-        let width = match action.label {
-            "Don't Save" => 104.0,
-            "Cancel" => 82.0,
-            _ => 78.0,
-        };
-        right -= width;
-        reversed.push(Rect::new(right, y, width, 30.0));
-        right -= 12.0;
-    }
-    reversed.reverse();
-    reversed
-}
-
-fn paint_alert_window(alert: &RuntimeAlert, bounds: Rect, context: &mut PaintContext<'_>) {
-    Rectangle::new()
-        .color(RectangleColor::Custom(context.theme.dialog.background))
-        .paint(bounds, context);
-
-    let mut dialog = AccessibilityNode::new(AccessibilityRole::Dialog, bounds);
-    dialog.label = Some(alert.title.clone());
-    dialog.value = Some(alert.message.clone());
-    dialog.focus_scope = true;
-    dialog.invalid = alert.symbol == SymbolName::Error;
-    context.record_accessibility(dialog);
-
-    let icon = Rect::new(bounds.origin.x + 24.0, bounds.origin.y + 28.0, 42.0, 42.0);
-    Icon::new(alert.symbol)
-        .size(icon.size.width)
-        .color(context.theme.shell.alert)
-        .paint(icon, context);
-
-    let text_x = icon.origin.x + icon.size.width + 18.0;
-    let text_width = (bounds.size.width - text_x - 24.0).max(0.0);
-    Text::styled(alert.title.clone(), crate::typography::TextRole::TitleSmall).paint(
-        Rect::new(text_x, bounds.origin.y + 26.0, text_width, 26.0),
-        context,
-    );
-    Text::body(alert.message.clone()).paint(
-        Rect::new(text_x, bounds.origin.y + 60.0, text_width, 58.0),
-        context,
-    );
-
-    for (index, (action, button)) in alert
-        .actions
-        .iter()
-        .zip(alert_button_bounds(alert, bounds))
-        .enumerate()
-    {
-        let active = alert.pressed == Some(index);
-        let hovered = alert.hovered == Some(index);
-        let color = if action.prominent {
-            if active {
-                context.theme.shell.action_pressed
-            } else if hovered {
-                context.theme.shell.action_hover
-            } else {
-                context.theme.shell.action
-            }
-        } else if active || hovered {
-            context.theme.shell.control_hover
-        } else {
-            context.theme.colors.surface_subtle
-        };
-        Rectangle::new()
-            .color(RectangleColor::Custom(color))
-            .radius(crate::theme::CornerRadius::Custom(7.0))
-            .paint(button, context);
-        Text::label(action.label)
-            .accessibility_hidden(true)
-            .weight(650)
-            .alignment(crate::typography::TextAlignment::Center)
-            .color(if action.prominent {
-                context.theme.shell.inverse_text
-            } else {
-                context.theme.shell.primary_text
-            })
-            .paint(button, context);
-
-        let mut button_node = AccessibilityNode::new(AccessibilityRole::Button, button);
-        button_node.label = Some(String::from(action.label));
-        button_node.focusable = true;
-        button_node.focused = action.prominent;
-        context.record_accessibility(button_node);
-    }
 }
 
 fn fallback_menu_rows(
@@ -1445,7 +1425,7 @@ mod tests {
     }
 
     #[test]
-    fn document_confirmation_uses_warning_symbol_and_cancel_on_close() {
+    fn document_confirmation_uses_standard_actions_and_cancel_on_close() {
         reset_exit_request();
         let app = PaintMutationApp {
             state: State::new(false),
@@ -1479,7 +1459,6 @@ mod tests {
                 if *id == confirmation && !config.resizable && config.title == "Save changes?"
         ));
         let dialog = runtime.windows[&confirmation].alert.as_ref().unwrap();
-        assert_eq!(dialog.symbol, SymbolName::Warning);
         assert_eq!(
             dialog
                 .actions
