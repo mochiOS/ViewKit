@@ -1250,53 +1250,6 @@ impl View for TextEditor {
                 }
                 EventResult::Ignored
             }
-            ViewEvent::InputMethodPointerPressed { position } if self.interaction.is_focused() => {
-                let candidate = self
-                    .interaction
-                    .inner
-                    .borrow()
-                    .candidate_panel
-                    .as_ref()
-                    .and_then(|panel| panel.candidate_at(*position));
-                let Some(candidate) = candidate else {
-                    return EventResult::Ignored;
-                };
-                if self
-                    .interaction
-                    .input_method_action(InputMethodAction::Choose(candidate))
-                {
-                    self.interaction.inner.borrow_mut().hovered_candidate = None;
-                    self.synchronize();
-                    self.interaction.reset_caret();
-                    context.request_redraw();
-                    EventResult::Consumed
-                } else {
-                    EventResult::Ignored
-                }
-            }
-            ViewEvent::InputMethodScroll { position, delta_y } if self.interaction.is_focused() => {
-                let can_page = self
-                    .interaction
-                    .inner
-                    .borrow()
-                    .candidate_panel
-                    .as_ref()
-                    .is_some_and(|panel| panel.contains(*position) && panel.has_multiple_pages());
-                if !can_page || *delta_y == 0.0 {
-                    return EventResult::Ignored;
-                }
-                let direction = if *delta_y > 0.0 { 1 } else { -1 };
-                if self
-                    .interaction
-                    .input_method_action(InputMethodAction::Page(direction))
-                {
-                    self.synchronize();
-                    context.request_redraw();
-                    EventResult::Consumed
-                } else {
-                    EventResult::Ignored
-                }
-            }
             ViewEvent::PointerPressed {
                 position,
                 button: PointerButton::Primary,
@@ -1346,6 +1299,26 @@ impl View for TextEditor {
                 EventResult::Consumed
             }
             ViewEvent::PointerFocusRequested { position } => {
+                let candidate = self
+                    .interaction
+                    .inner
+                    .borrow()
+                    .candidate_panel
+                    .as_ref()
+                    .and_then(|panel| panel.candidate_at(*position));
+                if let Some(candidate) = candidate
+                    && self.interaction.is_focused()
+                    && self
+                        .interaction
+                        .input_method_action(InputMethodAction::Choose(candidate))
+                {
+                    self.interaction.inner.borrow_mut().hovered_candidate = None;
+                    self.synchronize();
+                    self.interaction.reset_caret();
+                    context.intercept_pointer_press();
+                    context.request_redraw();
+                    return EventResult::Consumed;
+                }
                 let focused = bounds.contains(*position) && self.enabled;
                 let mut inner = self.interaction.inner.borrow_mut();
                 let changed = inner.focused != focused;
@@ -1404,6 +1377,24 @@ impl View for TextEditor {
                 delta_x,
                 delta_y,
             } if bounds.contains(*position) => {
+                let can_page = self
+                    .interaction
+                    .inner
+                    .borrow()
+                    .candidate_panel
+                    .as_ref()
+                    .is_some_and(|panel| panel.contains(*position) && panel.has_multiple_pages());
+                if can_page && *delta_y != 0.0 {
+                    let direction = if *delta_y > 0.0 { 1 } else { -1 };
+                    if self
+                        .interaction
+                        .input_method_action(InputMethodAction::Page(direction))
+                    {
+                        self.synchronize();
+                        context.request_redraw();
+                        return EventResult::Consumed;
+                    }
+                }
                 let mut inner = self.interaction.inner.borrow_mut();
                 inner.scroll_x = (inner.scroll_x + delta_x).max(0.0);
                 inner.scroll_y = (inner.scroll_y + delta_y).max(0.0);

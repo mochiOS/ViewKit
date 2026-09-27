@@ -44,15 +44,6 @@ pub enum ViewEvent {
 
     PointerLeft,
 
-    InputMethodPointerPressed {
-        position: Point,
-    },
-
-    InputMethodScroll {
-        position: Point,
-        delta_y: f32,
-    },
-
     KeyPressed {
         key: Key,
         modifiers: KeyModifiers,
@@ -124,8 +115,6 @@ impl ViewEvent {
             | Self::PointerPressed { position, .. }
             | Self::PointerReleased { position, .. }
             | Self::Scroll { position, .. }
-            | Self::InputMethodPointerPressed { position }
-            | Self::InputMethodScroll { position, .. }
             | Self::PointerFocusRequested { position } => Some(*position),
 
             Self::Command { target, .. } => *target,
@@ -170,8 +159,6 @@ impl ViewEvent {
                 | Self::PointerFocusRequested { .. }
                 | Self::KeyboardFocusRequested { .. }
                 | Self::PointerLeft
-                | Self::InputMethodPointerPressed { .. }
-                | Self::InputMethodScroll { .. }
                 | Self::KeyPressed { .. }
                 | Self::TextInput { .. }
                 | Self::Backspace
@@ -249,6 +236,7 @@ pub struct EventContext<'a> {
     cursor_icon: Option<CursorIcon>,
     context_menu_request: Option<ContextMenuRequest>,
     keyboard_focus_request: Option<Option<Rect>>,
+    pointer_press_intercepted: bool,
     command_requests: Vec<CommandId>,
     command_statuses: &'a [CommandStatus],
     command_target: Option<Point>,
@@ -268,6 +256,7 @@ impl<'a> EventContext<'a> {
             cursor_icon: None,
             context_menu_request: None,
             keyboard_focus_request: None,
+            pointer_press_intercepted: false,
             command_requests: Vec::new(),
             command_statuses: &[],
             command_target: None,
@@ -342,6 +331,14 @@ impl<'a> EventContext<'a> {
 
     pub fn clear_keyboard_focus(&mut self) {
         self.keyboard_focus_request = Some(None);
+    }
+
+    pub(crate) fn intercept_pointer_press(&mut self) {
+        self.pointer_press_intercepted = true;
+    }
+
+    fn take_pointer_press_interception(&mut self) -> bool {
+        std::mem::take(&mut self.pointer_press_intercepted)
     }
 
     /// Queues a semantic command for responder-chain dispatch after the
@@ -563,35 +560,15 @@ impl EventDispatcher {
         );
 
         if is_primary_press && let Some(position) = self.pointer_position {
-            let candidate_result = root.handle_event(
+            let focus_result = root.handle_event(
                 bounds,
-                &ViewEvent::InputMethodPointerPressed { position },
+                &ViewEvent::PointerFocusRequested { position },
                 context,
             );
-            result = result.merge(candidate_result);
-            if candidate_result.is_consumed() {
+            result = result.merge(focus_result);
+            if context.take_pointer_press_interception() {
                 return result;
             }
-        }
-
-        if let PlatformEvent::Scroll { delta_y, .. } = event
-            && let Some(position) = self.pointer_position
-        {
-            let candidate_result = root.handle_event(
-                bounds,
-                &ViewEvent::InputMethodScroll {
-                    position,
-                    delta_y: *delta_y,
-                },
-                context,
-            );
-            result = result.merge(candidate_result);
-            if candidate_result.is_consumed() {
-                return result;
-            }
-        }
-
-        if is_primary_press && let Some(position) = self.pointer_position {
             let target = self
                 .focus_order
                 .iter()
@@ -601,11 +578,6 @@ impl EventDispatcher {
             result = result.merge(root.handle_event(
                 bounds,
                 &ViewEvent::KeyboardFocusRequested { bounds: target },
-                context,
-            ));
-            result = result.merge(root.handle_event(
-                bounds,
-                &ViewEvent::PointerFocusRequested { position },
                 context,
             ));
         }
@@ -733,12 +705,39 @@ impl EventDispatcher {
 
 #[cfg(test)]
 mod tests {
-    use super::EventDispatcher;
+    use super::{EventContext, EventDispatcher, EventResult, ViewEvent};
     use crate::accessibility::{AccessibilityNode, AccessibilityRole};
     use crate::command::{CommandStatus, standard as commands};
     use crate::geometry::Rect;
+    use crate::platform::{ButtonState, PlatformEvent, PointerButton};
     use crate::theme::Theme;
     use crate::typography::TextMeasurer;
+    use crate::view::{PaintContext, View};
+    use std::cell::Cell;
+
+    struct PointerRecorder {
+        presses: Cell<usize>,
+    }
+
+    impl View for PointerRecorder {
+        fn paint(&self, _bounds: Rect, _context: &mut PaintContext<'_>) {}
+
+        fn handle_event(
+            &self,
+            _bounds: Rect,
+            event: &ViewEvent,
+            _context: &mut EventContext<'_>,
+        ) -> EventResult {
+            match event {
+                ViewEvent::PointerFocusRequested { .. } => EventResult::Consumed,
+                ViewEvent::PointerPressed { .. } => {
+                    self.presses.set(self.presses.get() + 1);
+                    EventResult::Consumed
+                }
+                _ => EventResult::Ignored,
+            }
+        }
+    }
 
     #[test]
     fn first_focusable_node_becomes_the_initial_keyboard_focus() {
@@ -796,5 +795,35 @@ mod tests {
 
         assert_eq!(dispatcher.focused_bounds, None);
         assert_eq!(dispatcher.pending_focus_request, None);
+    }
+
+    #[test]
+    fn pointer_focus_preflight_does_not_swallow_regular_clicks() {
+        let root = PointerRecorder {
+            presses: Cell::new(0),
+        };
+        let bounds = Rect::new(0.0, 0.0, 300.0, 200.0);
+        let theme = Theme::LIGHT;
+        let mut measurer = TextMeasurer::new();
+        let mut context = EventContext::new(&theme, &theme.typography, &mut measurer);
+        let mut dispatcher = EventDispatcher::new();
+
+        dispatcher.dispatch(
+            &root,
+            bounds,
+            &PlatformEvent::PointerMoved { x: 40.0, y: 50.0 },
+            &mut context,
+        );
+        dispatcher.dispatch(
+            &root,
+            bounds,
+            &PlatformEvent::PointerButton {
+                button: PointerButton::Primary,
+                state: ButtonState::Pressed,
+            },
+            &mut context,
+        );
+
+        assert_eq!(root.presses.get(), 1);
     }
 }

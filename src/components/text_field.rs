@@ -1309,59 +1309,6 @@ impl View for TextField {
                 EventResult::Ignored
             }
 
-            ViewEvent::InputMethodPointerPressed { position }
-                if self.interaction.is_focused() && !self.secure =>
-            {
-                let candidate = self
-                    .interaction
-                    .inner
-                    .borrow()
-                    .candidate_panel
-                    .as_ref()
-                    .and_then(|panel| panel.candidate_at(*position));
-                let Some(candidate) = candidate else {
-                    return EventResult::Ignored;
-                };
-                if self
-                    .interaction
-                    .input_method_action(InputMethodAction::Choose(candidate))
-                {
-                    self.interaction.inner.borrow_mut().hovered_candidate = None;
-                    self.synchronize_binding();
-                    self.interaction.reset_caret_blink();
-                    context.request_redraw();
-                    EventResult::Consumed
-                } else {
-                    EventResult::Ignored
-                }
-            }
-
-            ViewEvent::InputMethodScroll { position, delta_y }
-                if self.interaction.is_focused() && !self.secure =>
-            {
-                let can_page = self
-                    .interaction
-                    .inner
-                    .borrow()
-                    .candidate_panel
-                    .as_ref()
-                    .is_some_and(|panel| panel.contains(*position) && panel.has_multiple_pages());
-                if !can_page || *delta_y == 0.0 {
-                    return EventResult::Ignored;
-                }
-                let direction = if *delta_y > 0.0 { 1 } else { -1 };
-                if self
-                    .interaction
-                    .input_method_action(InputMethodAction::Page(direction))
-                {
-                    self.synchronize_binding();
-                    context.request_redraw();
-                    EventResult::Consumed
-                } else {
-                    EventResult::Ignored
-                }
-            }
-
             ViewEvent::PointerReleased {
                 button: PointerButton::Primary,
                 ..
@@ -1385,6 +1332,27 @@ impl View for TextField {
             }
 
             ViewEvent::PointerFocusRequested { position } => {
+                let candidate = self
+                    .interaction
+                    .inner
+                    .borrow()
+                    .candidate_panel
+                    .as_ref()
+                    .and_then(|panel| panel.candidate_at(*position));
+                if let Some(candidate) = candidate
+                    && self.interaction.is_focused()
+                    && !self.secure
+                    && self
+                        .interaction
+                        .input_method_action(InputMethodAction::Choose(candidate))
+                {
+                    self.interaction.inner.borrow_mut().hovered_candidate = None;
+                    self.synchronize_binding();
+                    self.interaction.reset_caret_blink();
+                    context.intercept_pointer_press();
+                    context.request_redraw();
+                    return EventResult::Consumed;
+                }
                 let should_focus = bounds.contains(*position);
                 let mut inner = self.interaction.inner.borrow_mut();
                 let changed = inner.focused != should_focus
