@@ -229,14 +229,24 @@ impl InputMethodState {
 
     fn refresh(&mut self, value: &mut String, cursor: &mut usize, flush: bool) {
         let (reading, pending) = roman_to_hiragana(&self.raw, flush);
+        let pending = if !flush && pending == "n" {
+            if self.raw.ends_with("nn") { "" } else { "ん" }
+        } else {
+            pending.as_str()
+        };
         self.replace_marked(value, cursor, format!("{reading}{pending}"));
     }
 
     fn refresh_candidates(&mut self) {
-        let (reading, pending) = roman_to_hiragana(&self.raw, true);
+        let (mut reading, pending) = roman_to_hiragana(&self.raw, false);
         self.candidates.clear();
         self.selected = 0;
-        if reading.is_empty() || !pending.is_empty() {
+        if pending == "n" && !self.raw.ends_with("nn") {
+            reading.push('ん');
+        } else if !pending.is_empty() && !(pending == "n" && self.raw.ends_with("nn")) {
+            return;
+        }
+        if reading.is_empty() {
             return;
         }
         self.candidates = input_method::candidates(&reading);
@@ -353,6 +363,11 @@ fn roman_to_hiragana(raw: &str, flush: bool) -> (String, String) {
     let mut output = String::new();
     while !input.is_empty() {
         let bytes = input.as_bytes();
+        if input.starts_with("tch") {
+            output.push('っ');
+            input = &input[1..];
+            continue;
+        }
         if bytes.len() >= 2
             && bytes[0] == bytes[1]
             && matches!(
@@ -378,6 +393,16 @@ fn roman_to_hiragana(raw: &str, flush: bool) -> (String, String) {
         }
         if input.starts_with('n') && input.len() >= 2 {
             let next = input.as_bytes()[1];
+            if next == b'\'' {
+                output.push('ん');
+                input = &input[2..];
+                continue;
+            }
+            if input == "nn" {
+                output.push('ん');
+                input = &input[2..];
+                continue;
+            }
             if next == b'n' || !matches!(next, b'a' | b'i' | b'u' | b'e' | b'o' | b'y') {
                 output.push('ん');
                 input = &input[1..];
@@ -423,6 +448,8 @@ fn syllable(value: &str) -> Option<&'static str> {
 }
 
 const ROMAJI: &[(&str, &str)] = &[
+    ("ltsu", "っ"),
+    ("xtsu", "っ"),
     ("kya", "きゃ"),
     ("kyu", "きゅ"),
     ("kyo", "きょ"),
@@ -436,6 +463,7 @@ const ROMAJI: &[(&str, &str)] = &[
     ("syu", "しゅ"),
     ("syo", "しょ"),
     ("ja", "じゃ"),
+    ("ji", "じ"),
     ("ju", "じゅ"),
     ("jo", "じょ"),
     ("jya", "じゃ"),
@@ -468,11 +496,40 @@ const ROMAJI: &[(&str, &str)] = &[
     ("rya", "りゃ"),
     ("ryu", "りゅ"),
     ("ryo", "りょ"),
+    ("xya", "ゃ"),
+    ("xyu", "ゅ"),
+    ("xyo", "ょ"),
+    ("lya", "ゃ"),
+    ("lyu", "ゅ"),
+    ("lyo", "ょ"),
+    ("she", "しぇ"),
+    ("je", "じぇ"),
+    ("che", "ちぇ"),
+    ("tsa", "つぁ"),
+    ("tsi", "つぃ"),
+    ("tse", "つぇ"),
+    ("tso", "つぉ"),
+    ("kwa", "くぁ"),
+    ("kwi", "くぃ"),
+    ("kwe", "くぇ"),
+    ("kwo", "くぉ"),
+    ("gwa", "ぐぁ"),
+    ("gwi", "ぐぃ"),
+    ("gwe", "ぐぇ"),
+    ("gwo", "ぐぉ"),
+    ("wha", "うぁ"),
+    ("whi", "うぃ"),
+    ("whe", "うぇ"),
+    ("who", "うぉ"),
+    ("wi", "うぃ"),
+    ("we", "うぇ"),
+    ("ye", "いぇ"),
     ("shi", "し"),
     ("chi", "ち"),
     ("tsu", "つ"),
     ("dhi", "でぃ"),
     ("dhu", "どぅ"),
+    ("dzu", "づ"),
     ("thi", "てぃ"),
     ("thu", "とぅ"),
     ("fa", "ふぁ"),
@@ -484,6 +541,8 @@ const ROMAJI: &[(&str, &str)] = &[
     ("vu", "ゔ"),
     ("ve", "ゔぇ"),
     ("vo", "ゔぉ"),
+    ("xtu", "っ"),
+    ("ltu", "っ"),
     ("ka", "か"),
     ("ki", "き"),
     ("ku", "く"),
@@ -550,6 +609,18 @@ const ROMAJI: &[(&str, &str)] = &[
     ("ro", "ろ"),
     ("wa", "わ"),
     ("wo", "を"),
+    ("xa", "ぁ"),
+    ("xi", "ぃ"),
+    ("xu", "ぅ"),
+    ("xe", "ぇ"),
+    ("xo", "ぉ"),
+    ("la", "ぁ"),
+    ("li", "ぃ"),
+    ("lu", "ぅ"),
+    ("le", "ぇ"),
+    ("lo", "ぉ"),
+    ("xwa", "ゎ"),
+    ("lwa", "ゎ"),
     ("a", "あ"),
     ("i", "い"),
     ("u", "う"),
@@ -560,6 +631,9 @@ const ROMAJI: &[(&str, &str)] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static INPUT_MODE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn converts_roman_input_and_preserves_incomplete_suffix() {
@@ -573,10 +647,61 @@ mod tests {
             roman_to_hiragana("gakkou", false),
             ("がっこう".into(), "".into())
         );
+        assert_eq!(
+            roman_to_hiragana("konnichiha", false),
+            ("こんにちは".into(), "".into())
+        );
+        assert_eq!(
+            roman_to_hiragana("kan'i", false),
+            ("かんい".into(), "".into())
+        );
+    }
+
+    #[test]
+    fn converts_common_words_and_romanization_variants() {
+        let cases = [
+            ("ohayou", "おはよう"),
+            ("arigatou", "ありがとう"),
+            ("shinjuku", "しんじゅく"),
+            ("kanpai", "かんぱい"),
+            ("annai", "あんない"),
+            ("tennou", "てんのう"),
+            ("kin'youbi", "きんようび"),
+            ("konn", "こん"),
+            ("nn", "ん"),
+            ("gakkou", "がっこう"),
+            ("zasshi", "ざっし"),
+            ("maccha", "まっちゃ"),
+            ("matcha", "まっちゃ"),
+            ("ryokou", "りょこう"),
+            ("toukyou", "とうきょう"),
+            ("sushi", "すし"),
+            ("syasin", "しゃしん"),
+            ("tyotto", "ちょっと"),
+            ("faasuto", "ふぁあすと"),
+            ("she", "しぇ"),
+            ("ji", "じ"),
+            ("ye", "いぇ"),
+            ("tsa", "つぁ"),
+            ("kwa", "くぁ"),
+            ("whi", "うぃ"),
+            ("xtu", "っ"),
+            ("xya", "ゃ"),
+            ("xa", "ぁ"),
+        ];
+
+        for (roman, expected) in cases {
+            assert_eq!(
+                roman_to_hiragana(roman, true),
+                (expected.into(), String::new()),
+                "failed to convert {roman}",
+            );
+        }
     }
 
     #[test]
     fn composes_converts_and_commits_inside_a_text_value() {
+        let _guard = INPUT_MODE_TEST_LOCK.lock().unwrap();
         JAPANESE_INPUT_ENABLED.store(true, Ordering::Relaxed);
         let mut state = InputMethodState::default();
         let mut value = String::from("A");
@@ -602,6 +727,31 @@ mod tests {
         assert!(state.handle_text(&mut value, &mut cursor, None, "."));
         assert!(state.handle_text(&mut value, &mut cursor, None, "1"));
         assert_eq!(value, "Aきょう。１");
+
+        JAPANESE_INPUT_ENABLED.store(false, Ordering::Relaxed);
+    }
+
+    #[test]
+    fn hides_the_overlapping_n_while_waiting_for_the_next_vowel() {
+        let _guard = INPUT_MODE_TEST_LOCK.lock().unwrap();
+        JAPANESE_INPUT_ENABLED.store(true, Ordering::Relaxed);
+        let mut state = InputMethodState::default();
+        let mut value = String::new();
+        let mut cursor = 0;
+
+        assert!(state.handle_text(&mut value, &mut cursor, None, "konn"));
+        assert_eq!(value, "こん");
+        assert_eq!(state.candidates.first().map(String::as_str), Some("こん"));
+        assert!(state.handle_text(&mut value, &mut cursor, None, "ichiha"));
+        assert_eq!(value, "こんにちは");
+
+        let mut single_n = InputMethodState::default();
+        let mut single_n_value = String::new();
+        let mut single_n_cursor = 0;
+        assert!(single_n.handle_text(&mut single_n_value, &mut single_n_cursor, None, "kan"));
+        assert_eq!(single_n_value, "かん");
+        assert!(single_n.handle_text(&mut single_n_value, &mut single_n_cursor, None, "a"));
+        assert_eq!(single_n_value, "かな");
 
         JAPANESE_INPUT_ENABLED.store(false, Ordering::Relaxed);
     }
