@@ -252,7 +252,8 @@ impl TextFieldInteractionState {
             InputMethodAction::Next(delta) => {
                 input_method.select_next(&mut inner.value, &mut cursor, delta)
             }
-            InputMethodAction::Commit => input_method.commit(),
+            InputMethodAction::Commit => input_method.commit_before_text('\n'),
+            InputMethodAction::CommitForNavigation => input_method.commit(),
             InputMethodAction::Cancel => input_method.cancel(&mut inner.value, &mut cursor),
             InputMethodAction::Backspace => input_method.backspace(&mut inner.value, &mut cursor),
             InputMethodAction::Toggle => {
@@ -559,6 +560,7 @@ pub struct TextField {
 enum InputMethodAction {
     Next(isize),
     Commit,
+    CommitForNavigation,
     Cancel,
     Backspace,
     Toggle,
@@ -808,7 +810,7 @@ impl View for TextField {
 
         let appearance = self.appearance(context);
 
-        let (value, cursor, focused, stored_scroll_offset_x, selection) = {
+        let (value, cursor, focused, stored_scroll_offset_x, selection, marked, converting) = {
             let inner = self.interaction.inner.borrow();
 
             (
@@ -817,6 +819,8 @@ impl View for TextField {
                 inner.focused && inner.enabled,
                 inner.scroll_offset_x,
                 selection_range(&inner),
+                inner.input_method.marked_range(),
+                inner.input_method.is_converting(),
             )
         };
 
@@ -1047,13 +1051,57 @@ impl View for TextField {
                     .accessibility_hidden(true)
                     .color(appearance.foreground)
                     .paint(content_bounds, context);
+
+                if let Some(range) = marked.as_ref() {
+                    let start_width = Text::styled(
+                        self.display_prefix(&value, range.start),
+                        self.size.text_role(),
+                    )
+                    .measure_unbounded_with_typography(context.text_measurer, context.typography)
+                    .width;
+                    let end_width = Text::styled(
+                        self.display_prefix(&value, range.end),
+                        self.size.text_role(),
+                    )
+                    .measure_unbounded_with_typography(context.text_measurer, context.typography)
+                    .width;
+                    let left = (text_bounds.origin.x + start_width - scroll_offset_x)
+                        .max(text_bounds.origin.x);
+                    let right = (text_bounds.origin.x + end_width - scroll_offset_x)
+                        .min(text_bounds.origin.x + text_bounds.size.width);
+                    if right > left {
+                        context
+                            .display_list
+                            .push(DrawCommand::PushClip { rect: text_bounds });
+                        context.display_list.push(DrawCommand::FillRect {
+                            rect: Rect::new(
+                                left,
+                                text_bounds.origin.y + text_bounds.size.height
+                                    - if converting { 2.0 } else { 1.0 },
+                                right - left,
+                                if converting { 2.0 } else { 1.0 },
+                            ),
+                            color: context.theme.colors.accent,
+                        });
+                        context.display_list.push(DrawCommand::PopClip);
+                    }
+                }
             }
         }
 
         if focused && !self.secure {
             let inner = self.interaction.inner.borrow();
             let (candidates, selected) = inner.input_method.candidates();
-            paint_candidates(bounds, candidates, selected, context);
+            let anchor_x = (text_bounds.origin.x + prefix_width - scroll_offset_x).clamp(
+                text_bounds.origin.x,
+                text_bounds.origin.x + text_bounds.size.width,
+            );
+            paint_candidates(
+                Rect::new(anchor_x, text_bounds.origin.y, 1.0, text_bounds.size.height),
+                candidates,
+                selected,
+                context,
+            );
         }
 
         if selection.is_some() {
@@ -1230,6 +1278,8 @@ impl View for TextField {
                     return EventResult::Ignored;
                 }
 
+                self.interaction
+                    .input_method_action(InputMethodAction::CommitForNavigation);
                 let cursor = self.cursor_at_x(position.x, bounds, context);
                 let mut inner = self.interaction.inner.borrow_mut();
 
@@ -1410,6 +1460,8 @@ impl View for TextField {
                     return EventResult::Ignored;
                 }
 
+                self.interaction
+                    .input_method_action(InputMethodAction::CommitForNavigation);
                 self.interaction.move_cursor_left();
                 self.interaction.reset_caret_blink();
                 context.request_redraw_in(bounds.expanded(16.0));
@@ -1422,6 +1474,8 @@ impl View for TextField {
                     return EventResult::Ignored;
                 }
 
+                self.interaction
+                    .input_method_action(InputMethodAction::CommitForNavigation);
                 self.interaction.move_cursor_right();
                 self.interaction.reset_caret_blink();
                 context.request_redraw_in(bounds.expanded(16.0));
@@ -1434,6 +1488,8 @@ impl View for TextField {
                     return EventResult::Ignored;
                 }
 
+                self.interaction
+                    .input_method_action(InputMethodAction::CommitForNavigation);
                 self.interaction.move_cursor_home();
                 self.interaction.reset_caret_blink();
                 context.request_redraw_in(bounds.expanded(16.0));
@@ -1446,6 +1502,8 @@ impl View for TextField {
                     return EventResult::Ignored;
                 }
 
+                self.interaction
+                    .input_method_action(InputMethodAction::CommitForNavigation);
                 self.interaction.move_cursor_end();
                 self.interaction.reset_caret_blink();
                 context.request_redraw_in(bounds.expanded(16.0));
@@ -1458,6 +1516,8 @@ impl View for TextField {
                     return EventResult::Ignored;
                 }
 
+                self.interaction
+                    .input_method_action(InputMethodAction::CommitForNavigation);
                 self.interaction.extend_selection_left();
 
                 self.interaction.reset_caret_blink();
@@ -1472,6 +1532,8 @@ impl View for TextField {
                     return EventResult::Ignored;
                 }
 
+                self.interaction
+                    .input_method_action(InputMethodAction::CommitForNavigation);
                 self.interaction.extend_selection_right();
 
                 self.interaction.reset_caret_blink();
@@ -1486,6 +1548,8 @@ impl View for TextField {
                     return EventResult::Ignored;
                 }
 
+                self.interaction
+                    .input_method_action(InputMethodAction::CommitForNavigation);
                 self.interaction.extend_selection_home();
 
                 self.interaction.reset_caret_blink();
@@ -1500,6 +1564,8 @@ impl View for TextField {
                     return EventResult::Ignored;
                 }
 
+                self.interaction
+                    .input_method_action(InputMethodAction::CommitForNavigation);
                 self.interaction.extend_selection_end();
 
                 self.interaction.reset_caret_blink();

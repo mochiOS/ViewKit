@@ -365,7 +365,8 @@ impl TextEditorInteractionState {
                 InputMethodAction::Next(delta) => {
                     input_method.select_next(&mut inner.value, &mut cursor, delta)
                 }
-                InputMethodAction::Commit => input_method.commit(),
+                InputMethodAction::Commit => input_method.commit_before_text('\n'),
+                InputMethodAction::CommitForNavigation => input_method.commit(),
                 InputMethodAction::Cancel => input_method.cancel(&mut inner.value, &mut cursor),
                 InputMethodAction::Backspace => {
                     input_method.backspace(&mut inner.value, &mut cursor)
@@ -389,6 +390,7 @@ impl TextEditorInteractionState {
 enum InputMethodAction {
     Next(isize),
     Commit,
+    CommitForNavigation,
     Cancel,
     Backspace,
     Toggle,
@@ -836,6 +838,8 @@ impl View for TextEditor {
         let cursor = inner.cursor.min(value.len());
         let selection = selection_range(&inner);
         let focused = inner.focused && inner.enabled;
+        let marked = inner.input_method.marked_range();
+        let converting = inner.input_method.is_converting();
         let can_undo = !inner.undo.is_empty();
         let can_redo = !inner.redo.is_empty();
         let line_height = self.line_height(context).max(1.0);
@@ -1014,6 +1018,38 @@ impl View for TextEditor {
             }
         }
 
+        if let Some(marked) = marked.as_ref() {
+            for line_index in visible_lines.clone() {
+                let line_range = &lines[line_index];
+                let start = marked.start.max(line_range.start);
+                let end = marked.end.min(line_range.end);
+                if start >= end {
+                    continue;
+                }
+                let line = &value[line_range.clone()];
+                let start_width = self
+                    .text(&line[..start - line_range.start])
+                    .measure_unbounded_with_typography(context.text_measurer, context.typography)
+                    .width;
+                let end_width = self
+                    .text(&line[..end - line_range.start])
+                    .measure_unbounded_with_typography(context.text_measurer, context.typography)
+                    .width;
+                let thickness = if converting { 2.0 } else { 1.0 };
+                context.display_list.push(DrawCommand::FillRect {
+                    rect: Rect::new(
+                        content.origin.x + start_width - scroll_x,
+                        content.origin.y + (line_index + 1) as f32 * line_height
+                            - scroll_y
+                            - thickness,
+                        (end_width - start_width).max(1.0),
+                        thickness,
+                    ),
+                    color: context.theme.colors.accent,
+                });
+            }
+        }
+
         if focused && selection.is_none() {
             let now = Instant::now();
             let (visible, next_redraw) = caret_state(&self.interaction, now);
@@ -1120,6 +1156,8 @@ impl View for TextEditor {
                     context.request_redraw_in(bounds);
                     return EventResult::Consumed;
                 }
+                self.interaction
+                    .input_method_action(InputMethodAction::CommitForNavigation);
                 let cursor = self.index_at_point(*position, bounds, context);
                 let mut inner = self.interaction.inner.borrow_mut();
                 inner.focused = self.enabled;
@@ -1513,12 +1551,16 @@ impl View for TextEditor {
                 EventResult::Consumed
             }
             ViewEvent::ArrowLeft | ViewEvent::SelectLeft if self.interaction.is_focused() => {
+                self.interaction
+                    .input_method_action(InputMethodAction::CommitForNavigation);
                 self.move_horizontal(false, matches!(event, ViewEvent::SelectLeft));
                 self.interaction.reset_caret();
                 context.request_redraw_in(bounds);
                 EventResult::Consumed
             }
             ViewEvent::ArrowRight | ViewEvent::SelectRight if self.interaction.is_focused() => {
+                self.interaction
+                    .input_method_action(InputMethodAction::CommitForNavigation);
                 self.move_horizontal(true, matches!(event, ViewEvent::SelectRight));
                 self.interaction.reset_caret();
                 context.request_redraw_in(bounds);
@@ -1581,12 +1623,16 @@ impl View for TextEditor {
                 EventResult::Consumed
             }
             ViewEvent::Home | ViewEvent::SelectHome if self.interaction.is_focused() => {
+                self.interaction
+                    .input_method_action(InputMethodAction::CommitForNavigation);
                 self.move_line_edge(false, matches!(event, ViewEvent::SelectHome));
                 self.interaction.reset_caret();
                 context.request_redraw_in(bounds);
                 EventResult::Consumed
             }
             ViewEvent::End | ViewEvent::SelectEnd if self.interaction.is_focused() => {
+                self.interaction
+                    .input_method_action(InputMethodAction::CommitForNavigation);
                 self.move_line_edge(true, matches!(event, ViewEvent::SelectEnd));
                 self.interaction.reset_caret();
                 context.request_redraw_in(bounds);
