@@ -802,6 +802,7 @@ where
             &self.theme.typography,
             &mut state.text_measurer,
         )
+        .with_viewport_bounds(viewport_bounds)
         .with_redraw_schedule(&mut state.redraw_schedule)
         .with_accessibility_nodes(&mut state.accessibility_nodes)
         .with_command_statuses(&mut state.command_statuses);

@@ -44,6 +44,15 @@ pub enum ViewEvent {
 
     PointerLeft,
 
+    InputMethodPointerPressed {
+        position: Point,
+    },
+
+    InputMethodScroll {
+        position: Point,
+        delta_y: f32,
+    },
+
     KeyPressed {
         key: Key,
         modifiers: KeyModifiers,
@@ -115,6 +124,8 @@ impl ViewEvent {
             | Self::PointerPressed { position, .. }
             | Self::PointerReleased { position, .. }
             | Self::Scroll { position, .. }
+            | Self::InputMethodPointerPressed { position }
+            | Self::InputMethodScroll { position, .. }
             | Self::PointerFocusRequested { position } => Some(*position),
 
             Self::Command { target, .. } => *target,
@@ -159,6 +170,8 @@ impl ViewEvent {
                 | Self::PointerFocusRequested { .. }
                 | Self::KeyboardFocusRequested { .. }
                 | Self::PointerLeft
+                | Self::InputMethodPointerPressed { .. }
+                | Self::InputMethodScroll { .. }
                 | Self::KeyPressed { .. }
                 | Self::TextInput { .. }
                 | Self::Backspace
@@ -548,6 +561,35 @@ impl EventDispatcher {
                 state: ButtonState::Pressed,
             }
         );
+
+        if is_primary_press && let Some(position) = self.pointer_position {
+            let candidate_result = root.handle_event(
+                bounds,
+                &ViewEvent::InputMethodPointerPressed { position },
+                context,
+            );
+            result = result.merge(candidate_result);
+            if candidate_result.is_consumed() {
+                return result;
+            }
+        }
+
+        if let PlatformEvent::Scroll { delta_y, .. } = event
+            && let Some(position) = self.pointer_position
+        {
+            let candidate_result = root.handle_event(
+                bounds,
+                &ViewEvent::InputMethodScroll {
+                    position,
+                    delta_y: *delta_y,
+                },
+                context,
+            );
+            result = result.merge(candidate_result);
+            if candidate_result.is_consumed() {
+                return result;
+            }
+        }
 
         if is_primary_press && let Some(position) = self.pointer_position {
             let target = self

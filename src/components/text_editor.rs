@@ -19,7 +19,9 @@ use std::ops::Range;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use super::input_method::{InputMethodState, paint_candidates, paint_input_mode_indicator};
+use super::input_method::{
+    CandidatePanelLayout, InputMethodState, paint_candidates, paint_input_mode_indicator,
+};
 
 const CARET_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 const HISTORY_GROUP_INTERVAL: Duration = Duration::from_millis(750);
@@ -69,6 +71,8 @@ struct TextEditorInteractionInner {
     last_edit_kind: Option<EditKind>,
     last_edit_at: Option<Instant>,
     input_method: InputMethodState,
+    candidate_panel: Option<CandidatePanelLayout>,
+    hovered_candidate: Option<usize>,
 }
 
 impl Default for TextEditorInteractionInner {
@@ -102,6 +106,8 @@ impl Default for TextEditorInteractionInner {
             last_edit_kind: None,
             last_edit_at: None,
             input_method: InputMethodState::default(),
+            candidate_panel: None,
+            hovered_candidate: None,
         }
     }
 }
@@ -375,6 +381,9 @@ impl TextEditorInteractionState {
                 InputMethodAction::Page(delta) => {
                     input_method.select_page(&mut inner.value, &mut cursor, delta)
                 }
+                InputMethodAction::Choose(index) => {
+                    input_method.choose(&mut inner.value, &mut cursor, index)
+                }
                 InputMethodAction::Commit => {
                     input_method.commit_before_text(&mut inner.value, &mut cursor, '\n')
                 }
@@ -410,6 +419,7 @@ enum InputMethodAction {
     Next(isize),
     PreviousFromSpace,
     Page(isize),
+    Choose(usize),
     Commit,
     CommitForNavigation,
     Cancel,
@@ -1121,20 +1131,36 @@ impl View for TextEditor {
         context.display_list.push(DrawCommand::PopClip);
 
         if focused {
-            let inner = self.interaction.inner.borrow();
-            let (candidates, selected) = inner.input_method.candidates();
             let anchor = Rect::new(
                 content.origin.x + cursor_x - scroll_x,
                 content.origin.y + cursor_line as f32 * line_height - scroll_y,
                 1.0,
                 line_height,
             );
-            paint_candidates(anchor, candidates, selected, context);
             let now = Instant::now();
-            if let Some((japanese, expires_at)) = inner.input_method.mode_indicator(now) {
+            let (candidate_panel, mode_indicator) = {
+                let inner = self.interaction.inner.borrow();
+                let (candidates, selected) = inner.input_method.candidates();
+                (
+                    paint_candidates(
+                        anchor,
+                        candidates,
+                        selected,
+                        inner.hovered_candidate,
+                        context,
+                    ),
+                    inner.input_method.mode_indicator(now),
+                )
+            };
+            self.interaction.inner.borrow_mut().candidate_panel = candidate_panel;
+            if let Some((japanese, expires_at)) = mode_indicator {
                 paint_input_mode_indicator(anchor, japanese, context);
                 context.request_redraw_in_at(bounds.expanded(16.0), expires_at);
             }
+        } else {
+            let mut inner = self.interaction.inner.borrow_mut();
+            inner.candidate_panel = None;
+            inner.hovered_candidate = None;
         }
 
         paint_editor_scrollbars(
@@ -1170,7 +1196,16 @@ impl View for TextEditor {
                 let hovered = bounds.contains(*position);
                 let selecting = {
                     let mut inner = self.interaction.inner.borrow_mut();
+                    let candidate_hover = inner
+                        .candidate_panel
+                        .as_ref()
+                        .and_then(|panel| panel.candidate_at(*position));
+                    let candidate_hover_changed = inner.hovered_candidate != candidate_hover;
                     inner.hovered = hovered;
+                    inner.hovered_candidate = candidate_hover;
+                    if candidate_hover_changed {
+                        context.request_redraw();
+                    }
                     inner.selecting && inner.focused
                 };
                 if hovered {
@@ -1203,6 +1238,64 @@ impl View for TextEditor {
                     context.request_redraw_in(bounds);
                 }
                 EventResult::Ignored
+            }
+            ViewEvent::PointerLeft => {
+                let mut inner = self.interaction.inner.borrow_mut();
+                let changed = inner.hovered || inner.hovered_candidate.is_some();
+                inner.hovered = false;
+                inner.hovered_candidate = None;
+                drop(inner);
+                if changed {
+                    context.request_redraw();
+                }
+                EventResult::Ignored
+            }
+            ViewEvent::InputMethodPointerPressed { position } if self.interaction.is_focused() => {
+                let candidate = self
+                    .interaction
+                    .inner
+                    .borrow()
+                    .candidate_panel
+                    .as_ref()
+                    .and_then(|panel| panel.candidate_at(*position));
+                let Some(candidate) = candidate else {
+                    return EventResult::Ignored;
+                };
+                if self
+                    .interaction
+                    .input_method_action(InputMethodAction::Choose(candidate))
+                {
+                    self.interaction.inner.borrow_mut().hovered_candidate = None;
+                    self.synchronize();
+                    self.interaction.reset_caret();
+                    context.request_redraw();
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
+            }
+            ViewEvent::InputMethodScroll { position, delta_y } if self.interaction.is_focused() => {
+                let can_page = self
+                    .interaction
+                    .inner
+                    .borrow()
+                    .candidate_panel
+                    .as_ref()
+                    .is_some_and(|panel| panel.contains(*position) && panel.has_multiple_pages());
+                if !can_page || *delta_y == 0.0 {
+                    return EventResult::Ignored;
+                }
+                let direction = if *delta_y > 0.0 { 1 } else { -1 };
+                if self
+                    .interaction
+                    .input_method_action(InputMethodAction::Page(direction))
+                {
+                    self.synchronize();
+                    context.request_redraw();
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
             }
             ViewEvent::PointerPressed {
                 position,
@@ -1260,6 +1353,8 @@ impl View for TextEditor {
                 if !focused {
                     inner.selecting = false;
                     inner.caret_blink_origin = None;
+                    inner.candidate_panel = None;
+                    inner.hovered_candidate = None;
                 }
                 drop(inner);
                 if changed {
@@ -1296,6 +1391,8 @@ impl View for TextEditor {
                 inner.focused = false;
                 inner.selecting = false;
                 inner.caret_blink_origin = None;
+                inner.candidate_panel = None;
+                inner.hovered_candidate = None;
                 drop(inner);
                 if changed {
                     context.request_redraw_in(bounds);

@@ -70,6 +70,7 @@ pub struct PaintContext<'a> {
     redraw_schedule: Option<&'a mut RedrawSchedule>,
     accessibility_nodes: Option<&'a mut Vec<AccessibilityNode>>,
     command_statuses: Option<&'a mut Vec<CommandStatus>>,
+    viewport_bounds: Option<Rect>,
     inherited_corner_radii: Vec<f32>,
 }
 
@@ -89,6 +90,7 @@ impl<'a> PaintContext<'a> {
             redraw_schedule: None,
             accessibility_nodes: None,
             command_statuses: None,
+            viewport_bounds: None,
             inherited_corner_radii: Vec::new(),
         }
     }
@@ -96,6 +98,15 @@ impl<'a> PaintContext<'a> {
     pub fn with_command_statuses(mut self, command_statuses: &'a mut Vec<CommandStatus>) -> Self {
         self.command_statuses = Some(command_statuses);
         self
+    }
+
+    pub fn with_viewport_bounds(mut self, bounds: Rect) -> Self {
+        self.viewport_bounds = Some(bounds);
+        self
+    }
+
+    pub(crate) fn viewport_bounds(&self) -> Option<Rect> {
+        self.viewport_bounds
     }
 
     /// Publishes a command's current availability for menu validation.

@@ -19,7 +19,9 @@ use std::rc::Rc;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use super::input_method::{InputMethodState, paint_candidates, paint_input_mode_indicator};
+use super::input_method::{
+    CandidatePanelLayout, InputMethodState, paint_candidates, paint_input_mode_indicator,
+};
 
 use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 const CARET_BLINK_INTERVAL: Duration = Duration::from_millis(500);
@@ -36,6 +38,8 @@ struct TextFieldInteractionInner {
     selection_anchor: Option<usize>,
     selecting: bool,
     input_method: InputMethodState,
+    candidate_panel: Option<CandidatePanelLayout>,
+    hovered_candidate: Option<usize>,
 
     value_initialized: bool,
     caret_blink_origin: Option<Instant>,
@@ -257,6 +261,9 @@ impl TextFieldInteractionState {
             }
             InputMethodAction::Page(delta) => {
                 input_method.select_page(&mut inner.value, &mut cursor, delta)
+            }
+            InputMethodAction::Choose(index) => {
+                input_method.choose(&mut inner.value, &mut cursor, index)
             }
             InputMethodAction::Commit => {
                 input_method.commit_before_text(&mut inner.value, &mut cursor, '\n')
@@ -576,6 +583,7 @@ enum InputMethodAction {
     Next(isize),
     PreviousFromSpace,
     Page(isize),
+    Choose(usize),
     Commit,
     CommitForNavigation,
     Cancel,
@@ -1142,27 +1150,35 @@ impl View for TextField {
         }
 
         if focused && !self.secure {
-            let inner = self.interaction.inner.borrow();
-            let (candidates, selected) = inner.input_method.candidates();
             let anchor_x = (text_bounds.origin.x + prefix_width - scroll_offset_x).clamp(
                 text_bounds.origin.x,
                 text_bounds.origin.x + text_bounds.size.width,
             );
-            paint_candidates(
-                Rect::new(anchor_x, text_bounds.origin.y, 1.0, text_bounds.size.height),
-                candidates,
-                selected,
-                context,
-            );
             let now = Instant::now();
-            if let Some((japanese, expires_at)) = inner.input_method.mode_indicator(now) {
-                paint_input_mode_indicator(
-                    Rect::new(anchor_x, text_bounds.origin.y, 1.0, text_bounds.size.height),
-                    japanese,
-                    context,
-                );
+            let anchor = Rect::new(anchor_x, text_bounds.origin.y, 1.0, text_bounds.size.height);
+            let (candidate_panel, mode_indicator) = {
+                let inner = self.interaction.inner.borrow();
+                let (candidates, selected) = inner.input_method.candidates();
+                (
+                    paint_candidates(
+                        anchor,
+                        candidates,
+                        selected,
+                        inner.hovered_candidate,
+                        context,
+                    ),
+                    inner.input_method.mode_indicator(now),
+                )
+            };
+            self.interaction.inner.borrow_mut().candidate_panel = candidate_panel;
+            if let Some((japanese, expires_at)) = mode_indicator {
+                paint_input_mode_indicator(anchor, japanese, context);
                 context.request_redraw_in_at(bounds.expanded(16.0), expires_at);
             }
+        } else {
+            let mut inner = self.interaction.inner.borrow_mut();
+            inner.candidate_panel = None;
+            inner.hovered_candidate = None;
         }
 
         if selection.is_some() {
@@ -1263,11 +1279,17 @@ impl View for TextField {
                 let hovered = bounds.contains(*position);
                 let selecting = {
                     let mut inner = self.interaction.inner.borrow_mut();
+                    let candidate_hover = inner
+                        .candidate_panel
+                        .as_ref()
+                        .and_then(|panel| panel.candidate_at(*position));
                     let hover_changed = inner.hovered != hovered;
+                    let candidate_hover_changed = inner.hovered_candidate != candidate_hover;
                     inner.hovered = hovered;
+                    inner.hovered_candidate = candidate_hover;
 
-                    if hover_changed {
-                        context.request_redraw_in(bounds.expanded(16.0));
+                    if hover_changed || candidate_hover_changed {
+                        context.request_redraw();
                     }
 
                     inner.selecting && inner.focused
@@ -1285,6 +1307,59 @@ impl View for TextField {
                 }
 
                 EventResult::Ignored
+            }
+
+            ViewEvent::InputMethodPointerPressed { position }
+                if self.interaction.is_focused() && !self.secure =>
+            {
+                let candidate = self
+                    .interaction
+                    .inner
+                    .borrow()
+                    .candidate_panel
+                    .as_ref()
+                    .and_then(|panel| panel.candidate_at(*position));
+                let Some(candidate) = candidate else {
+                    return EventResult::Ignored;
+                };
+                if self
+                    .interaction
+                    .input_method_action(InputMethodAction::Choose(candidate))
+                {
+                    self.interaction.inner.borrow_mut().hovered_candidate = None;
+                    self.synchronize_binding();
+                    self.interaction.reset_caret_blink();
+                    context.request_redraw();
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
+            }
+
+            ViewEvent::InputMethodScroll { position, delta_y }
+                if self.interaction.is_focused() && !self.secure =>
+            {
+                let can_page = self
+                    .interaction
+                    .inner
+                    .borrow()
+                    .candidate_panel
+                    .as_ref()
+                    .is_some_and(|panel| panel.contains(*position) && panel.has_multiple_pages());
+                if !can_page || *delta_y == 0.0 {
+                    return EventResult::Ignored;
+                }
+                let direction = if *delta_y > 0.0 { 1 } else { -1 };
+                if self
+                    .interaction
+                    .input_method_action(InputMethodAction::Page(direction))
+                {
+                    self.synchronize_binding();
+                    context.request_redraw();
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
             }
 
             ViewEvent::PointerReleased {
@@ -1365,9 +1440,10 @@ impl View for TextField {
             ViewEvent::PointerLeft => {
                 let mut inner = self.interaction.inner.borrow_mut();
 
-                let changed = inner.hovered;
+                let changed = inner.hovered || inner.hovered_candidate.is_some();
 
                 inner.hovered = false;
+                inner.hovered_candidate = None;
 
                 drop(inner);
 
@@ -1386,6 +1462,8 @@ impl View for TextField {
 
                 inner.hovered = false;
                 inner.focused = false;
+                inner.candidate_panel = None;
+                inner.hovered_candidate = None;
 
                 drop(inner);
 

@@ -1,7 +1,7 @@
 use crate::platform::input_method;
 use crate::{
     components::{BorderStyle, Rectangle, RectangleColor, Text},
-    geometry::Rect,
+    geometry::{Point, Rect},
     theme::{CornerRadius, ShadowStyle},
     typography::{TextAlignment, TextRole},
     view::{PaintContext, View},
@@ -13,6 +13,29 @@ use std::time::{Duration, Instant};
 static JAPANESE_INPUT_ENABLED: AtomicBool = AtomicBool::new(false);
 const CANDIDATES_PER_PAGE: usize = 8;
 const INPUT_MODE_INDICATOR_DURATION: Duration = Duration::from_millis(1200);
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct CandidatePanelLayout {
+    pub(crate) panel: Rect,
+    rows: Vec<(Rect, usize)>,
+    page_count: usize,
+}
+
+impl CandidatePanelLayout {
+    pub(crate) fn candidate_at(&self, position: Point) -> Option<usize> {
+        self.rows
+            .iter()
+            .find_map(|(bounds, index)| bounds.contains(position).then_some(*index))
+    }
+
+    pub(crate) fn contains(&self, position: Point) -> bool {
+        self.panel.contains(position)
+    }
+
+    pub(crate) fn has_multiple_pages(&self) -> bool {
+        self.page_count > 1
+    }
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct InputMethodState {
@@ -212,6 +235,15 @@ impl InputMethodState {
         delta: isize,
     ) -> bool {
         self.select_next(value, cursor, delta * CANDIDATES_PER_PAGE as isize)
+    }
+
+    pub(crate) fn choose(&mut self, value: &mut String, cursor: &mut usize, index: usize) -> bool {
+        let Some(candidate) = self.candidates.get(index).cloned() else {
+            return false;
+        };
+        self.replace_marked(value, cursor, candidate);
+        self.clear();
+        true
     }
 
     pub(crate) fn commit(&mut self, value: &mut String, cursor: &mut usize) -> bool {
@@ -416,10 +448,11 @@ pub(crate) fn paint_candidates(
     anchor: Rect,
     candidates: &[String],
     selected: Option<usize>,
+    hovered: Option<usize>,
     context: &mut PaintContext<'_>,
-) {
+) -> Option<CandidatePanelLayout> {
     if candidates.is_empty() {
-        return;
+        return None;
     }
     let page_start = selected.unwrap_or(0) / CANDIDATES_PER_PAGE * CANDIDATES_PER_PAGE;
     let page_end = (page_start + CANDIDATES_PER_PAGE).min(candidates.len());
@@ -433,11 +466,30 @@ pub(crate) fn paint_candidates(
         0.0
     };
     let width = 260.0;
+    let height =
+        row_height * shown as f32 + footer_height + context.theme.spacing.extra_small * 2.0;
+    let gap = context.theme.spacing.extra_small;
+    let viewport =
+        context
+            .viewport_bounds()
+            .unwrap_or(Rect::new(0.0, 0.0, f32::INFINITY, f32::INFINITY));
+    let maximum_x = (viewport.origin.x + viewport.size.width - width).max(viewport.origin.x);
+    let x = anchor.origin.x.clamp(viewport.origin.x, maximum_x);
+    let below = anchor.origin.y + anchor.size.height + gap;
+    let above = anchor.origin.y - gap - height;
+    let maximum_y = (viewport.origin.y + viewport.size.height - height).max(viewport.origin.y);
+    let y = if below + height <= viewport.origin.y + viewport.size.height {
+        below
+    } else if above >= viewport.origin.y {
+        above
+    } else {
+        below.clamp(viewport.origin.y, maximum_y)
+    };
     let panel = Rect::new(
-        anchor.origin.x,
-        anchor.origin.y + anchor.size.height + context.theme.spacing.extra_small,
-        width,
-        row_height * shown as f32 + footer_height + context.theme.spacing.extra_small * 2.0,
+        x,
+        y,
+        width.min(viewport.size.width),
+        height.min(viewport.size.height),
     );
     Rectangle::new()
         .color(RectangleColor::Custom(
@@ -447,6 +499,7 @@ pub(crate) fn paint_candidates(
         .shadow(ShadowStyle::Card)
         .border(BorderStyle::custom(context.theme.colors.border, 1.0))
         .paint(panel, context);
+    let mut rows = Vec::with_capacity(shown);
     for (row_index, candidate) in candidates[page_start..page_end].iter().enumerate() {
         let index = page_start + row_index;
         let row = Rect::new(
@@ -455,9 +508,14 @@ pub(crate) fn paint_candidates(
             panel.size.width - context.theme.spacing.extra_small * 2.0,
             row_height,
         );
-        if selected == Some(index) {
+        rows.push((row, index));
+        if selected == Some(index) || hovered == Some(index) {
             Rectangle::new()
-                .color(RectangleColor::Custom(context.theme.colors.accent_soft))
+                .color(RectangleColor::Custom(if selected == Some(index) {
+                    context.theme.colors.accent_soft
+                } else {
+                    context.theme.menu.item_hovered_background
+                }))
                 .radius(CornerRadius::Small)
                 .shadow(ShadowStyle::None)
                 .border(BorderStyle::None)
@@ -494,6 +552,11 @@ pub(crate) fn paint_candidates(
             context,
         );
     }
+    Some(CandidatePanelLayout {
+        panel,
+        rows,
+        page_count,
+    })
 }
 
 fn roman_to_hiragana(raw: &str, flush: bool) -> (String, String) {
@@ -787,6 +850,7 @@ const ROMAJI: &[(&str, &str)] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{draw_command::DisplayList, theme::Theme, typography::TextMeasurer};
 
     #[test]
     fn converts_roman_input_and_preserves_incomplete_suffix() {
@@ -1017,5 +1081,39 @@ mod tests {
         assert!(state.select_page(&mut value, &mut cursor, -1));
         assert_eq!(state.selected, 17);
         assert_eq!(value, "候補17");
+    }
+
+    #[test]
+    fn candidate_panel_flips_and_clamps_inside_the_viewport() {
+        let candidates = (0..9)
+            .map(|index| format!("候補{index}"))
+            .collect::<Vec<_>>();
+        let viewport = Rect::new(0.0, 0.0, 400.0, 300.0);
+        let anchor = Rect::new(390.0, 280.0, 1.0, 18.0);
+        let mut display_list = DisplayList::new();
+        let mut measurer = TextMeasurer::new();
+        let mut context = PaintContext::new(
+            &mut display_list,
+            &Theme::DEFAULT,
+            &Theme::DEFAULT.typography,
+            &mut measurer,
+        )
+        .with_viewport_bounds(viewport);
+
+        let layout = paint_candidates(anchor, &candidates, Some(0), None, &mut context)
+            .expect("candidate panel");
+
+        assert!(layout.panel.origin.y < anchor.origin.y);
+        assert!(layout.panel.origin.x + layout.panel.size.width <= 400.0);
+        assert!(layout.panel.origin.y + layout.panel.size.height <= 300.0);
+        let first_row = layout.rows[0].0;
+        assert_eq!(
+            layout.candidate_at(Point::new(
+                first_row.origin.x + 1.0,
+                first_row.origin.y + 1.0,
+            )),
+            Some(0)
+        );
+        assert!(layout.has_multiple_pages());
     }
 }
