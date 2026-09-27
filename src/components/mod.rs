@@ -18,6 +18,7 @@ mod hstack;
 mod icon;
 mod icon_button;
 mod image;
+mod input_method;
 mod list;
 mod menu;
 mod message_bubble;

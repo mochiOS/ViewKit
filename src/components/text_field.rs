@@ -19,6 +19,8 @@ use std::rc::Rc;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
+use super::input_method::{InputMethodState, paint_candidates};
+
 use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 const CARET_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 const SECURE_GLYPH: char = '\u{2022}';
@@ -33,6 +35,7 @@ struct TextFieldInteractionInner {
     scroll_offset_x: f32,
     selection_anchor: Option<usize>,
     selecting: bool,
+    input_method: InputMethodState,
 
     value_initialized: bool,
     caret_blink_origin: Option<Instant>,
@@ -224,6 +227,48 @@ impl TextFieldInteractionState {
         inner.selecting = false;
 
         true
+    }
+
+    fn input_method_text(&self, text: &str) -> bool {
+        let mut inner = self.inner.borrow_mut();
+        let selection = selection_range(&inner);
+        let mut input_method = std::mem::take(&mut inner.input_method);
+        let mut cursor = inner.cursor;
+        let handled = input_method.handle_text(&mut inner.value, &mut cursor, selection, text);
+        inner.cursor = cursor;
+        if handled {
+            inner.selection_anchor = None;
+            inner.selecting = false;
+        }
+        inner.input_method = input_method;
+        handled
+    }
+
+    fn input_method_action(&self, action: InputMethodAction) -> bool {
+        let mut inner = self.inner.borrow_mut();
+        let mut input_method = std::mem::take(&mut inner.input_method);
+        let mut cursor = inner.cursor;
+        let handled = match action {
+            InputMethodAction::Convert => input_method.convert(&mut inner.value, &mut cursor),
+            InputMethodAction::Next(delta) => {
+                input_method.select_next(&mut inner.value, &mut cursor, delta)
+            }
+            InputMethodAction::Commit => input_method.commit(),
+            InputMethodAction::Cancel => input_method.cancel(&mut inner.value, &mut cursor),
+            InputMethodAction::Backspace => input_method.backspace(&mut inner.value, &mut cursor),
+            InputMethodAction::Toggle => {
+                input_method.commit();
+                input_method.toggle();
+                true
+            }
+        };
+        inner.cursor = cursor;
+        inner.input_method = input_method;
+        handled
+    }
+
+    fn commit_input_method_on_blur(&self) {
+        self.inner.borrow_mut().input_method.commit_on_blur();
     }
 
     fn extend_selection_left(&self) -> bool {
@@ -504,6 +549,16 @@ pub struct TextField {
     invalid: bool,
     secure: bool,
     on_submit: Option<RefCell<Box<dyn FnMut()>>>,
+}
+
+#[derive(Clone, Copy)]
+enum InputMethodAction {
+    Convert,
+    Next(isize),
+    Commit,
+    Cancel,
+    Backspace,
+    Toggle,
 }
 
 impl TextField {
@@ -991,6 +1046,12 @@ impl View for TextField {
             }
         }
 
+        if focused && !self.secure {
+            let inner = self.interaction.inner.borrow();
+            let (candidates, selected) = inner.input_method.candidates();
+            paint_candidates(bounds, candidates, selected, context);
+        }
+
         if selection.is_some() {
             self.interaction.stop_caret_blink();
 
@@ -1058,6 +1119,7 @@ impl View for TextField {
                 let changed = inner.focused != should_focus;
                 inner.focused = should_focus && inner.enabled;
                 if !should_focus {
+                    inner.input_method.commit_on_blur();
                     inner.selection_anchor = None;
                     inner.selecting = false;
                     inner.caret_blink_origin = None;
@@ -1189,6 +1251,7 @@ impl View for TextField {
             }
 
             ViewEvent::FocusChanged { focused: false } => {
+                self.interaction.commit_input_method_on_blur();
                 let mut inner = self.interaction.inner.borrow_mut();
 
                 let changed = inner.hovered || inner.focused;
@@ -1210,7 +1273,9 @@ impl View for TextField {
                     return EventResult::Ignored;
                 }
 
-                if self.interaction.insert_text(text) {
+                if (!self.secure && self.interaction.input_method_text(text))
+                    || self.interaction.insert_text(text)
+                {
                     self.synchronize_binding();
                     self.interaction.reset_caret_blink();
                     context.request_redraw_in(bounds.expanded(16.0));
@@ -1220,12 +1285,91 @@ impl View for TextField {
             }
 
             ViewEvent::KeyPressed {
+                key: Key::Space,
+                modifiers,
+            } if self.interaction.is_focused() && modifiers.control() && !self.secure => {
+                self.interaction
+                    .input_method_action(InputMethodAction::Toggle);
+                context.request_redraw_in(bounds.expanded(16.0));
+                EventResult::Consumed
+            }
+
+            ViewEvent::KeyPressed {
+                key: Key::Space,
+                modifiers,
+            } if self.interaction.is_focused() && modifiers.bits() == 0 && !self.secure => {
+                if self
+                    .interaction
+                    .input_method_action(InputMethodAction::Convert)
+                {
+                    self.synchronize_binding();
+                    context.request_redraw_in(bounds.expanded(220.0));
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
+            }
+
+            ViewEvent::KeyPressed {
+                key: Key::ArrowDown,
+                ..
+            } if self.interaction.is_focused() && !self.secure => {
+                if self
+                    .interaction
+                    .input_method_action(InputMethodAction::Next(1))
+                {
+                    self.synchronize_binding();
+                    context.request_redraw_in(bounds.expanded(220.0));
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
+            }
+
+            ViewEvent::KeyPressed {
+                key: Key::ArrowUp, ..
+            } if self.interaction.is_focused() && !self.secure => {
+                if self
+                    .interaction
+                    .input_method_action(InputMethodAction::Next(-1))
+                {
+                    self.synchronize_binding();
+                    context.request_redraw_in(bounds.expanded(220.0));
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
+            }
+
+            ViewEvent::KeyPressed {
+                key: Key::Escape, ..
+            } if self.interaction.is_focused() && !self.secure => {
+                if self
+                    .interaction
+                    .input_method_action(InputMethodAction::Cancel)
+                {
+                    self.synchronize_binding();
+                    context.request_redraw_in(bounds.expanded(220.0));
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
+            }
+
+            ViewEvent::KeyPressed {
                 key: Key::Enter, ..
             } => {
                 if !self.interaction.is_focused() {
                     return EventResult::Ignored;
                 }
-                if let Some(callback) = self.on_submit.as_ref() {
+                if !self.secure
+                    && self
+                        .interaction
+                        .input_method_action(InputMethodAction::Commit)
+                {
+                    self.synchronize_binding();
+                    context.request_redraw_in(bounds.expanded(220.0));
+                } else if let Some(callback) = self.on_submit.as_ref() {
                     (callback.borrow_mut())();
                 }
                 EventResult::Consumed
@@ -1236,7 +1380,12 @@ impl View for TextField {
                     return EventResult::Ignored;
                 }
 
-                if self.interaction.delete_backward() {
+                if (!self.secure
+                    && self
+                        .interaction
+                        .input_method_action(InputMethodAction::Backspace))
+                    || self.interaction.delete_backward()
+                {
                     self.synchronize_binding();
                     self.interaction.reset_caret_blink();
                     context.request_redraw_in(bounds.expanded(16.0));

@@ -1,5 +1,6 @@
 mod event;
 mod font;
+pub(crate) mod input_method;
 mod window;
 pub(crate) mod clipboard;
 

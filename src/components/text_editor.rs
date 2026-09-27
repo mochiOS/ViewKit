@@ -19,6 +19,8 @@ use std::ops::Range;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use super::input_method::{InputMethodState, paint_candidates};
+
 const CARET_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 const HISTORY_GROUP_INTERVAL: Duration = Duration::from_millis(750);
 const MAX_HISTORY: usize = 100;
@@ -66,6 +68,7 @@ struct TextEditorInteractionInner {
     redo: Vec<EditorSnapshot>,
     last_edit_kind: Option<EditKind>,
     last_edit_at: Option<Instant>,
+    input_method: InputMethodState,
 }
 
 impl Default for TextEditorInteractionInner {
@@ -98,6 +101,7 @@ impl Default for TextEditorInteractionInner {
             redo: Vec::new(),
             last_edit_kind: None,
             last_edit_at: None,
+            input_method: InputMethodState::default(),
         }
     }
 }
@@ -320,6 +324,68 @@ impl TextEditorInteractionState {
         inner.caret_blink_origin = Some(Instant::now());
         inner.reveal_caret = true;
     }
+
+    fn input_method_text(&self, text: &str) -> bool {
+        let mut handled = false;
+        self.edit_with_kind(EditKind::Insert, |inner| {
+            let selection = selection_range(inner);
+            let mut input_method = std::mem::take(&mut inner.input_method);
+            let mut cursor = inner.cursor;
+            handled = input_method.handle_text(&mut inner.value, &mut cursor, selection, text);
+            inner.cursor = cursor;
+            if handled {
+                inner.selection_anchor = None;
+                inner.selecting = false;
+            }
+            inner.input_method = input_method;
+            handled
+        });
+        handled
+    }
+
+    fn input_method_action(&self, action: InputMethodAction) -> bool {
+        if matches!(action, InputMethodAction::Toggle) {
+            let mut inner = self.inner.borrow_mut();
+            inner.input_method.commit();
+            inner.input_method.toggle();
+            return true;
+        }
+        let mut handled = false;
+        self.edit_with_kind(EditKind::Insert, |inner| {
+            let mut input_method = std::mem::take(&mut inner.input_method);
+            let mut cursor = inner.cursor;
+            handled = match action {
+                InputMethodAction::Convert => input_method.convert(&mut inner.value, &mut cursor),
+                InputMethodAction::Next(delta) => {
+                    input_method.select_next(&mut inner.value, &mut cursor, delta)
+                }
+                InputMethodAction::Commit => input_method.commit(),
+                InputMethodAction::Cancel => input_method.cancel(&mut inner.value, &mut cursor),
+                InputMethodAction::Backspace => {
+                    input_method.backspace(&mut inner.value, &mut cursor)
+                }
+                InputMethodAction::Toggle => unreachable!(),
+            };
+            inner.cursor = cursor;
+            inner.input_method = input_method;
+            handled
+        });
+        handled
+    }
+
+    fn commit_input_method_on_blur(&self) {
+        self.inner.borrow_mut().input_method.commit_on_blur();
+    }
+}
+
+#[derive(Clone, Copy)]
+enum InputMethodAction {
+    Convert,
+    Next(isize),
+    Commit,
+    Cancel,
+    Backspace,
+    Toggle,
 }
 
 pub struct TextEditor {
@@ -960,6 +1026,18 @@ impl View for TextEditor {
         }
         context.display_list.push(DrawCommand::PopClip);
 
+        if focused {
+            let inner = self.interaction.inner.borrow();
+            let (candidates, selected) = inner.input_method.candidates();
+            let anchor = Rect::new(
+                content.origin.x + cursor_x - scroll_x,
+                content.origin.y + cursor_line as f32 * line_height - scroll_y,
+                1.0,
+                line_height,
+            );
+            paint_candidates(anchor, candidates, selected, context);
+        }
+
         paint_editor_scrollbars(
             content,
             Size::new(content_width, content_height),
@@ -1087,6 +1165,7 @@ impl View for TextEditor {
                 if focused {
                     inner.caret_blink_origin = Some(Instant::now());
                 } else {
+                    inner.input_method.commit_on_blur();
                     inner.selecting = false;
                     inner.caret_blink_origin = None;
                 }
@@ -1097,6 +1176,7 @@ impl View for TextEditor {
                 EventResult::Ignored
             }
             ViewEvent::FocusChanged { focused: false } => {
+                self.interaction.commit_input_method_on_blur();
                 let mut inner = self.interaction.inner.borrow_mut();
                 let changed = inner.focused || inner.selecting;
                 inner.focused = false;
@@ -1127,9 +1207,10 @@ impl View for TextEditor {
                     .filter(|character| *character == '\t' || !character.is_control())
                     .collect();
                 if !inserted.is_empty()
-                    && self.interaction.edit_with_kind(EditKind::Insert, |inner| {
-                        Self::replace_selection(inner, &inserted)
-                    })
+                    && (self.interaction.input_method_text(&inserted)
+                        || self.interaction.edit_with_kind(EditKind::Insert, |inner| {
+                            Self::replace_selection(inner, &inserted)
+                        }))
                 {
                     self.synchronize();
                     self.interaction.reset_caret();
@@ -1138,9 +1219,52 @@ impl View for TextEditor {
                 EventResult::Consumed
             }
             ViewEvent::KeyPressed {
+                key: Key::Space,
+                modifiers,
+            } if self.interaction.is_focused() && modifiers.control() => {
+                self.interaction
+                    .input_method_action(InputMethodAction::Toggle);
+                context.request_redraw_in(bounds);
+                EventResult::Consumed
+            }
+            ViewEvent::KeyPressed {
+                key: Key::Space,
+                modifiers,
+            } if self.interaction.is_focused() && modifiers.bits() == 0 => {
+                if self
+                    .interaction
+                    .input_method_action(InputMethodAction::Convert)
+                {
+                    self.synchronize();
+                    context.request_redraw_in(bounds);
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
+            }
+            ViewEvent::KeyPressed {
+                key: Key::Escape, ..
+            } if self.interaction.is_focused() => {
+                if self
+                    .interaction
+                    .input_method_action(InputMethodAction::Cancel)
+                {
+                    self.synchronize();
+                    context.request_redraw_in(bounds);
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
+            }
+            ViewEvent::KeyPressed {
                 key: Key::Enter, ..
             } if self.interaction.is_focused() => {
                 if self
+                    .interaction
+                    .input_method_action(InputMethodAction::Commit)
+                {
+                    self.synchronize();
+                } else if self
                     .interaction
                     .edit(|inner| Self::replace_selection(inner, "\n"))
                 {
@@ -1344,19 +1468,22 @@ impl View for TextEditor {
                 EventResult::Consumed
             }
             ViewEvent::Backspace if self.interaction.is_focused() => {
-                let changed = self.interaction.edit_with_kind(EditKind::Delete, |inner| {
-                    if selection_range(inner).is_some() {
-                        return Self::replace_selection(inner, "");
-                    }
-                    let previous = previous_boundary(&inner.value, inner.cursor);
-                    if previous == inner.cursor {
-                        false
-                    } else {
-                        inner.value.replace_range(previous..inner.cursor, "");
-                        inner.cursor = previous;
-                        true
-                    }
-                });
+                let changed = self
+                    .interaction
+                    .input_method_action(InputMethodAction::Backspace)
+                    || self.interaction.edit_with_kind(EditKind::Delete, |inner| {
+                        if selection_range(inner).is_some() {
+                            return Self::replace_selection(inner, "");
+                        }
+                        let previous = previous_boundary(&inner.value, inner.cursor);
+                        if previous == inner.cursor {
+                            false
+                        } else {
+                            inner.value.replace_range(previous..inner.cursor, "");
+                            inner.cursor = previous;
+                            true
+                        }
+                    });
                 if changed {
                     self.synchronize();
                     self.interaction.reset_caret();
@@ -1400,7 +1527,14 @@ impl View for TextEditor {
                 key: Key::ArrowUp,
                 modifiers,
             } if self.interaction.is_focused() => {
-                self.move_vertical(false, modifiers.shift());
+                if !self
+                    .interaction
+                    .input_method_action(InputMethodAction::Next(-1))
+                {
+                    self.move_vertical(false, modifiers.shift());
+                } else {
+                    self.synchronize();
+                }
                 self.interaction.reset_caret();
                 context.request_redraw_in(bounds);
                 EventResult::Consumed
@@ -1409,7 +1543,14 @@ impl View for TextEditor {
                 key: Key::ArrowDown,
                 modifiers,
             } if self.interaction.is_focused() => {
-                self.move_vertical(true, modifiers.shift());
+                if !self
+                    .interaction
+                    .input_method_action(InputMethodAction::Next(1))
+                {
+                    self.move_vertical(true, modifiers.shift());
+                } else {
+                    self.synchronize();
+                }
                 self.interaction.reset_caret();
                 context.request_redraw_in(bounds);
                 EventResult::Consumed
