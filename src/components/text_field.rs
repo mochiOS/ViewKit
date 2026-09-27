@@ -1469,6 +1469,68 @@ impl View for TextField {
             }
 
             ViewEvent::KeyPressed {
+                key: Key::Character(character),
+                modifiers,
+            } if self.interaction.is_focused()
+                && modifiers.shortcut()
+                && (*character == 'c' || *character == 'C') =>
+            {
+                if !self.secure {
+                    let selected = {
+                        let inner = self.interaction.inner.borrow();
+                        selection_range(&inner).map(|range| inner.value[range].to_owned())
+                    };
+                    if let Some(selected) = selected {
+                        let _ = set_system_clipboard_text(&selected);
+                    }
+                }
+                EventResult::Consumed
+            }
+
+            ViewEvent::KeyPressed {
+                key: Key::Character(character),
+                modifiers,
+            } if self.interaction.is_focused()
+                && modifiers.shortcut()
+                && (*character == 'x' || *character == 'X') =>
+            {
+                if !self.secure {
+                    let selected = {
+                        let inner = self.interaction.inner.borrow();
+                        selection_range(&inner).map(|range| inner.value[range].to_owned())
+                    };
+                    if let Some(selected) = selected
+                        && set_system_clipboard_text(&selected)
+                    {
+                        let changed = delete_selection(&mut self.interaction.inner.borrow_mut());
+                        if changed {
+                            self.synchronize_binding();
+                            self.interaction.reset_caret_blink();
+                            context.request_redraw_in(bounds.expanded(16.0));
+                        }
+                    }
+                }
+                EventResult::Consumed
+            }
+
+            ViewEvent::KeyPressed {
+                key: Key::Character(character),
+                modifiers,
+            } if self.interaction.is_focused()
+                && modifiers.shortcut()
+                && (*character == 'v' || *character == 'V') =>
+            {
+                if let Some(text) = system_clipboard_text()
+                    && self.interaction.insert_text(&text)
+                {
+                    self.synchronize_binding();
+                    self.interaction.reset_caret_blink();
+                    context.request_redraw_in(bounds.expanded(16.0));
+                }
+                EventResult::Consumed
+            }
+
+            ViewEvent::KeyPressed {
                 key: Key::Space,
                 modifiers,
             } if self.interaction.is_focused()
