@@ -76,6 +76,10 @@ impl PlatformWindow for MochiOsWindow {
         let _ = self.set_compositor_title(title);
     }
 
+    fn activate(&self) {
+        let _ = simple_token_request(self.compositor, OP_ACTIVATE_SURFACE, self.surface);
+    }
+
     fn viewport(&self) -> Viewport {
         self.viewport.get()
     }

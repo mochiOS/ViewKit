@@ -33,19 +33,10 @@ pub struct WindowConfig {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum PlatformWindowCommand {
-    Open {
-        id: WindowId,
-        config: WindowConfig,
-    },
-    Close {
-        id: WindowId,
-    },
-    RequestClose {
-        id: WindowId,
-    },
-    Redraw {
-        id: WindowId,
-    },
+    Open { id: WindowId, config: WindowConfig },
+    Close { id: WindowId },
+    RequestClose { id: WindowId },
+    Redraw { id: WindowId },
 }
 
 impl Default for WindowConfig {
@@ -67,6 +58,9 @@ pub trait PlatformWindow {
     fn request_redraw(&self);
 
     fn set_title(&self, title: &str);
+
+    /// Requests that this window become the frontmost key window.
+    fn activate(&self) {}
 
     fn viewport(&self) -> Viewport;
 

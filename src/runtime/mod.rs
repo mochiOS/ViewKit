@@ -16,8 +16,8 @@ mod view_mode;
 pub use action::*;
 pub use adapter::ViewAdapter;
 pub use application::{
-    ViewKitError, close_window, key_window, main_window, request_close_key_window,
-    request_close_window, request_exit, request_new_window, run,
+    ViewKitError, close_window, key_window, main_window, request_alert_window,
+    request_close_key_window, request_close_window, request_exit, request_new_window, run,
 };
 pub use builder::*;
 pub use id::*;

@@ -19,8 +19,8 @@ pub use crate::layout::{
 };
 pub use crate::platform::{CursorIcon, Key, KeyModifiers};
 pub use crate::runtime::{
-    ViewKitError, close_window, key_window, main_window, request_close_key_window,
-    request_close_window, request_exit, request_new_window, run,
+    ViewKitError, close_window, key_window, main_window, request_alert_window,
+    request_close_key_window, request_close_window, request_exit, request_new_window, run,
 };
 pub use crate::state::{Binding, State};
 pub use crate::svg::{SvgData, SvgError};
