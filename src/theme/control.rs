@@ -357,7 +357,7 @@ impl SliderTokens {
             disabled_knob: colors.surface_subtle,
             knob_border: colors.border,
             hovered_knob_border: colors.accent,
-            knob_radius: CornerRadius::Custom(4.0),
+            knob_radius: CornerRadius::ExtraLarge,
             focus_ring: colors.focus_ring,
             disabled_opacity: 0.45,
             stroke_width: FigmaTokens::SHAPE.stroke_default,
