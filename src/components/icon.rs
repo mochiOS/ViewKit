@@ -88,11 +88,9 @@ impl View for Icon {
         let Some(svg) = self.name.svg() else {
             return;
         };
-        let artwork = normalized_svg_bounds(
-            bounds,
-            &svg,
-            context.theme.layout.icon_optical_scale,
-        );
+        let icon_bounds = resolved_paint_bounds(bounds, self.size);
+        let artwork =
+            normalized_svg_bounds(icon_bounds, &svg, context.theme.layout.icon_optical_scale);
         if let Some(label) = self.accessibility_label.as_ref() {
             let mut node = AccessibilityNode::new(AccessibilityRole::Image, bounds);
             node.label = Some(label.clone());
@@ -101,10 +99,34 @@ impl View for Icon {
         let symbol = super::svg::Svg::new(svg)
             .tint(self.color)
             .opacity(self.opacity);
-        context.display_list.push(DrawCommand::PushClip { rect: bounds });
+        context
+            .display_list
+            .push(DrawCommand::PushClip { rect: bounds });
         symbol.paint(artwork, context);
         context.display_list.push(DrawCommand::PopClip);
     }
+}
+
+fn resolved_paint_bounds(bounds: Rect, requested_size: Option<f32>) -> Rect {
+    let Some(requested_size) = requested_size else {
+        return bounds;
+    };
+    if !bounds.size.width.is_finite()
+        || !bounds.size.height.is_finite()
+        || bounds.size.width <= 0.0
+        || bounds.size.height <= 0.0
+    {
+        return bounds;
+    }
+    let size = requested_size
+        .min(bounds.size.width)
+        .min(bounds.size.height);
+    Rect::new(
+        bounds.origin.x + (bounds.size.width - size) / 2.0,
+        bounds.origin.y + (bounds.size.height - size) / 2.0,
+        size,
+        size,
+    )
 }
 
 fn normalized_svg_bounds(bounds: Rect, svg: &SvgData, optical_scale: f32) -> Rect {
@@ -188,14 +210,30 @@ mod tests {
 
         let left_scale = left_bounds.size.width / left.width();
         let right_scale = right_bounds.size.width / right.width();
-        let left_visual_center = left_bounds.origin.x
-            + (left_content.x + left_content.width / 2.0) * left_scale;
-        let right_visual_center = right_bounds.origin.x
-            + (right_content.x + right_content.width / 2.0) * right_scale;
+        let left_visual_center =
+            left_bounds.origin.x + (left_content.x + left_content.width / 2.0) * left_scale;
+        let right_visual_center =
+            right_bounds.origin.x + (right_content.x + right_content.width / 2.0) * right_scale;
 
         assert!((left_visual_center - 20.0).abs() < 0.001);
         assert!((right_visual_center - 20.0).abs() < 0.001);
         assert!((left_content.width * left_scale - 16.8).abs() < 0.001);
         assert!((right_content.width * right_scale - 16.8).abs() < 0.001);
+    }
+
+    #[test]
+    fn explicit_size_is_centered_inside_paint_bounds() {
+        assert_eq!(
+            resolved_paint_bounds(Rect::new(10.0, 20.0, 40.0, 30.0), Some(20.0)),
+            Rect::new(20.0, 25.0, 20.0, 20.0)
+        );
+    }
+
+    #[test]
+    fn explicit_size_does_not_overflow_paint_bounds() {
+        assert_eq!(
+            resolved_paint_bounds(Rect::new(10.0, 20.0, 16.0, 12.0), Some(20.0)),
+            Rect::new(12.0, 20.0, 12.0, 12.0)
+        );
     }
 }
