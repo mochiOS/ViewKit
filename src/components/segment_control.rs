@@ -6,6 +6,8 @@ use crate::platform::Key;
 use crate::state::Binding;
 use crate::theme::{CornerRadius, Motion, ShadowStyle};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::time::Instant;
 
 struct SegmentedItem {
@@ -20,6 +22,7 @@ pub struct SegmentedControl {
     items: Vec<SegmentedItem>,
     enabled: bool,
     accessibility_label: Option<String>,
+    on_change: Option<Rc<RefCell<Box<dyn FnMut(usize)>>>>,
 }
 
 impl SegmentedControl {
@@ -29,6 +32,7 @@ impl SegmentedControl {
             items: Vec::new(),
             enabled: true,
             accessibility_label: None,
+            on_change: None,
         }
     }
 
@@ -64,6 +68,11 @@ impl SegmentedControl {
         self
     }
 
+    pub fn on_change(mut self, callback: impl FnMut(usize) + 'static) -> Self {
+        self.on_change = Some(Rc::new(RefCell::new(Box::new(callback))));
+        self
+    }
+
     pub fn selected_value(&self) -> usize {
         self.selection.get()
     }
@@ -73,6 +82,7 @@ impl SegmentedControl {
 
         let selection = self.selection.clone();
         let value = item.value;
+        let on_change = self.on_change.clone();
 
         Button::with_interaction_and_label(item.interaction.clone(), item.label.clone())
             .style(ButtonStyle::Ghost)
@@ -85,6 +95,9 @@ impl SegmentedControl {
             .on_click(move || {
                 if selection.get() != value {
                     selection.set(value);
+                    if let Some(on_change) = on_change.as_ref() {
+                        (on_change.borrow_mut())(value);
+                    }
                 }
             })
     }
@@ -309,6 +322,9 @@ impl View for SegmentedControl {
             && let Some(target_bounds) = segment_bounds.get(index).copied()
         {
             self.selection.set_if_changed(self.items[index].value);
+            if let Some(on_change) = self.on_change.as_ref() {
+                (on_change.borrow_mut())(self.items[index].value);
+            }
             context.request_keyboard_focus(target_bounds);
             context.request_redraw_in(bounds.expanded(16.0));
             return EventResult::Consumed;

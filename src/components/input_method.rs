@@ -18,6 +18,7 @@ pub(crate) struct InputMethodState {
     marked: Option<Range<usize>>,
     candidates: Vec<String>,
     selected: usize,
+    converting: bool,
     suppress: Option<char>,
 }
 
@@ -41,8 +42,8 @@ impl InputMethodState {
         }
     }
 
-    pub(crate) fn candidates(&self) -> (&[String], usize) {
-        (&self.candidates, self.selected)
+    pub(crate) fn candidates(&self) -> (&[String], Option<usize>) {
+        (&self.candidates, self.converting.then_some(self.selected))
     }
 
     pub(crate) fn marked_range(&self) -> Option<Range<usize>> {
@@ -50,7 +51,7 @@ impl InputMethodState {
     }
 
     pub(crate) fn is_converting(&self) -> bool {
-        !self.candidates.is_empty()
+        self.converting
     }
 
     pub(crate) fn handle_text(
@@ -69,7 +70,7 @@ impl InputMethodState {
         // Conversion belongs to the text-input path so it cannot be missed by
         // platform key mapping and so the same event is not inserted as text.
         if text == " " && self.marked.is_some() {
-            return if self.candidates.is_empty() {
+            return if !self.converting {
                 self.convert(value, cursor)
             } else {
                 self.select_next(value, cursor, 1)
@@ -124,9 +125,11 @@ impl InputMethodState {
         }
         self.candidates.clear();
         self.selected = 0;
+        self.converting = false;
         self.raw
             .extend(text.chars().map(|character| character.to_ascii_lowercase()));
         self.refresh(value, cursor, false);
+        self.refresh_candidates();
         true
     }
 
@@ -138,11 +141,14 @@ impl InputMethodState {
         if reading.is_empty() || !pending.is_empty() {
             return true;
         }
-        self.candidates = input_method::candidates(&reading);
         if self.candidates.is_empty() {
-            self.candidates.push(reading);
+            self.candidates = input_method::candidates(&reading);
+            if self.candidates.is_empty() {
+                self.candidates.push(reading);
+            }
         }
         self.selected = 0;
+        self.converting = true;
         self.replace_marked(value, cursor, self.candidates[0].clone());
         true
     }
@@ -158,6 +164,7 @@ impl InputMethodState {
         }
         let count = self.candidates.len() as isize;
         self.selected = (self.selected as isize + delta).rem_euclid(count) as usize;
+        self.converting = true;
         self.replace_marked(value, cursor, self.candidates[self.selected].clone());
         true
     }
@@ -179,10 +186,10 @@ impl InputMethodState {
     }
 
     pub(crate) fn cancel(&mut self, value: &mut String, cursor: &mut usize) -> bool {
-        if !self.candidates.is_empty() {
-            self.candidates.clear();
+        if self.converting {
+            self.converting = false;
             self.selected = 0;
-            self.refresh(value, cursor, true);
+            self.refresh(value, cursor, false);
             return true;
         }
         let Some(range) = self.marked.take() else {
@@ -198,9 +205,11 @@ impl InputMethodState {
         if self.marked.is_none() {
             return false;
         }
-        if !self.candidates.is_empty() {
-            self.candidates.clear();
+        if self.converting {
+            self.converting = false;
             self.selected = 0;
+            self.refresh(value, cursor, false);
+            return true;
         } else {
             self.raw.pop();
         }
@@ -208,6 +217,7 @@ impl InputMethodState {
             return self.cancel(value, cursor);
         }
         self.refresh(value, cursor, false);
+        self.refresh_candidates();
         true
     }
 
@@ -220,6 +230,19 @@ impl InputMethodState {
     fn refresh(&mut self, value: &mut String, cursor: &mut usize, flush: bool) {
         let (reading, pending) = roman_to_hiragana(&self.raw, flush);
         self.replace_marked(value, cursor, format!("{reading}{pending}"));
+    }
+
+    fn refresh_candidates(&mut self) {
+        let (reading, pending) = roman_to_hiragana(&self.raw, true);
+        self.candidates.clear();
+        self.selected = 0;
+        if reading.is_empty() || !pending.is_empty() {
+            return;
+        }
+        self.candidates = input_method::candidates(&reading);
+        if self.candidates.is_empty() {
+            self.candidates.push(reading);
+        }
     }
 
     fn replace_marked(&mut self, value: &mut String, cursor: &mut usize, replacement: String) {
@@ -237,6 +260,7 @@ impl InputMethodState {
         self.marked = None;
         self.candidates.clear();
         self.selected = 0;
+        self.converting = false;
     }
 }
 
@@ -268,13 +292,13 @@ fn japanese_punctuation(text: &str) -> Option<&'static str> {
 pub(crate) fn paint_candidates(
     anchor: Rect,
     candidates: &[String],
-    selected: usize,
+    selected: Option<usize>,
     context: &mut PaintContext<'_>,
 ) {
     if candidates.is_empty() {
         return;
     }
-    let page_start = selected / CANDIDATES_PER_PAGE * CANDIDATES_PER_PAGE;
+    let page_start = selected.unwrap_or(0) / CANDIDATES_PER_PAGE * CANDIDATES_PER_PAGE;
     let page_end = (page_start + CANDIDATES_PER_PAGE).min(candidates.len());
     let shown = page_end - page_start;
     let row_height = context.theme.layout.compact_control_height.max(26.0);
@@ -301,7 +325,7 @@ pub(crate) fn paint_candidates(
             panel.size.width - context.theme.spacing.extra_small * 2.0,
             row_height,
         );
-        if index == selected {
+        if selected == Some(index) {
             Rectangle::new()
                 .color(RectangleColor::Custom(context.theme.colors.accent_soft))
                 .radius(CornerRadius::Small)
@@ -560,6 +584,8 @@ mod tests {
 
         assert!(state.handle_text(&mut value, &mut cursor, None, "kyou"));
         assert_eq!(value, "Aきょう");
+        assert!(!state.candidates.is_empty());
+        assert!(!state.is_converting());
         assert!(state.handle_text(&mut value, &mut cursor, None, " "));
         assert_eq!(value, "Aきょう");
         assert!(!state.candidates.is_empty());
@@ -567,12 +593,15 @@ mod tests {
         assert!(!state.candidates.is_empty());
         assert!(state.cancel(&mut value, &mut cursor));
         assert_eq!(value, "Aきょう");
-        assert!(state.candidates.is_empty());
+        assert!(!state.is_converting());
+        assert!(!state.candidates.is_empty());
         assert!(state.handle_text(&mut value, &mut cursor, None, "1"));
-        assert_eq!(value, "Aきょう１");
+        assert_eq!(value, "Aきょう");
+        assert!(state.marked.is_none());
 
         assert!(state.handle_text(&mut value, &mut cursor, None, "."));
-        assert_eq!(value, "Aきょう１。");
+        assert!(state.handle_text(&mut value, &mut cursor, None, "1"));
+        assert_eq!(value, "Aきょう。１");
 
         JAPANESE_INPUT_ENABLED.store(false, Ordering::Relaxed);
     }
