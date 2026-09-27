@@ -249,7 +249,6 @@ impl TextFieldInteractionState {
         let mut input_method = std::mem::take(&mut inner.input_method);
         let mut cursor = inner.cursor;
         let handled = match action {
-            InputMethodAction::Convert => input_method.convert(&mut inner.value, &mut cursor),
             InputMethodAction::Next(delta) => {
                 input_method.select_next(&mut inner.value, &mut cursor, delta)
             }
@@ -558,7 +557,6 @@ pub struct TextField {
 
 #[derive(Clone, Copy)]
 enum InputMethodAction {
-    Convert,
     Next(isize),
     Commit,
     Cancel,
@@ -1293,7 +1291,7 @@ impl View for TextField {
                 {
                     self.synchronize_binding();
                     self.interaction.reset_caret_blink();
-                    context.request_redraw_in(bounds.expanded(16.0));
+                    context.request_redraw_in(bounds.expanded(220.0));
                 }
 
                 EventResult::Consumed
@@ -1307,22 +1305,6 @@ impl View for TextField {
                     .input_method_action(InputMethodAction::Toggle);
                 context.request_redraw_in(bounds.expanded(16.0));
                 EventResult::Consumed
-            }
-
-            ViewEvent::KeyPressed {
-                key: Key::Space,
-                modifiers,
-            } if self.interaction.is_focused() && modifiers.bits() == 0 && !self.secure => {
-                if self
-                    .interaction
-                    .input_method_action(InputMethodAction::Convert)
-                {
-                    self.synchronize_binding();
-                    context.request_redraw_in(bounds.expanded(220.0));
-                    EventResult::Consumed
-                } else {
-                    EventResult::Ignored
-                }
             }
 
             ViewEvent::KeyPressed {

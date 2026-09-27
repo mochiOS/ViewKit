@@ -56,6 +56,12 @@ impl InputMethodState {
         {
             return true;
         }
+        // mochiOS delivers both a key event and a text-input event for Space.
+        // Conversion belongs to the text-input path so it cannot be missed by
+        // platform key mapping and so the same event is not inserted as text.
+        if text == " " && self.marked.is_some() {
+            return self.convert(value, cursor);
+        }
         if !self.candidates.is_empty()
             && let Some(digit) = text.chars().next()
             && text.len() == 1
@@ -107,7 +113,6 @@ impl InputMethodState {
         }
         self.selected = 0;
         self.replace_marked(value, cursor, self.candidates[0].clone());
-        self.suppress = Some(' ');
         true
     }
 
@@ -483,8 +488,9 @@ mod tests {
 
         assert!(state.handle_text(&mut value, &mut cursor, None, "kyou"));
         assert_eq!(value, "Aきょう");
-        assert!(state.convert(&mut value, &mut cursor));
+        assert!(state.handle_text(&mut value, &mut cursor, None, " "));
         assert_eq!(value, "Aきょう");
+        assert!(!state.candidates.is_empty());
         assert!(state.handle_text(&mut value, &mut cursor, None, "1"));
         assert_eq!(value, "Aきょう");
         assert!(state.marked.is_none());

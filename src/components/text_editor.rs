@@ -362,7 +362,6 @@ impl TextEditorInteractionState {
             let mut input_method = std::mem::take(&mut inner.input_method);
             let mut cursor = inner.cursor;
             handled = match action {
-                InputMethodAction::Convert => input_method.convert(&mut inner.value, &mut cursor),
                 InputMethodAction::Next(delta) => {
                     input_method.select_next(&mut inner.value, &mut cursor, delta)
                 }
@@ -388,7 +387,6 @@ impl TextEditorInteractionState {
 
 #[derive(Clone, Copy)]
 enum InputMethodAction {
-    Convert,
     Next(isize),
     Commit,
     Cancel,
@@ -1232,7 +1230,7 @@ impl View for TextEditor {
                 {
                     self.synchronize();
                     self.interaction.reset_caret();
-                    context.request_redraw_in(bounds);
+                    context.request_redraw_in(bounds.expanded(220.0));
                 }
                 EventResult::Consumed
             }
@@ -1244,21 +1242,6 @@ impl View for TextEditor {
                     .input_method_action(InputMethodAction::Toggle);
                 context.request_redraw_in(bounds);
                 EventResult::Consumed
-            }
-            ViewEvent::KeyPressed {
-                key: Key::Space,
-                modifiers,
-            } if self.interaction.is_focused() && modifiers.bits() == 0 => {
-                if self
-                    .interaction
-                    .input_method_action(InputMethodAction::Convert)
-                {
-                    self.synchronize();
-                    context.request_redraw_in(bounds);
-                    EventResult::Consumed
-                } else {
-                    EventResult::Ignored
-                }
             }
             ViewEvent::KeyPressed {
                 key: Key::Escape, ..
