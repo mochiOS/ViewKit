@@ -49,6 +49,14 @@ impl<T> State<T> {
         self.value.borrow().clone()
     }
 
+    /// 現在値を複製せず、読み取り専用で参照します。
+    ///
+    /// 大きなViewモデルを描画やヒットテストから読む場合に、不要な割り当てを
+    /// 避けるために使用します。
+    pub fn with<R>(&self, read: impl FnOnce(&T) -> R) -> R {
+        read(&self.value.borrow())
+    }
+
     /// 現在の値を置き換えます。
     pub fn set(&self, value: T) {
         let previous = self.value.replace(value);
@@ -221,5 +229,21 @@ impl<T> Clone for Binding<T> {
             previous_value: Rc::clone(&self.previous_value),
             last_changed_at: Rc::clone(&self.last_changed_at),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::State;
+
+    struct NonCloneValue {
+        count: usize,
+    }
+
+    #[test]
+    fn with_reads_state_without_requiring_clone() {
+        let state = State::new(NonCloneValue { count: 42 });
+
+        assert_eq!(state.with(|value| value.count), 42);
     }
 }

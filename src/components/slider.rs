@@ -106,6 +106,10 @@ pub struct Slider {
 
 impl Slider {
     pub fn new(value: Binding<f32>) -> Self {
+        Self::with_interaction(value, SliderInteractionState::new())
+    }
+
+    pub fn with_interaction(value: Binding<f32>, interaction: SliderInteractionState) -> Self {
         Self {
             value,
 
@@ -116,7 +120,7 @@ impl Slider {
             label: None,
             enabled: true,
 
-            interaction: SliderInteractionState::new(),
+            interaction,
         }
     }
 
@@ -263,8 +267,13 @@ impl Slider {
     ) -> Rect {
         let slider_bounds = self.slider_bounds(bounds, label_height, label_spacing);
 
-        let center_x =
-            self.knob_center_x(bounds, label_height, label_spacing, thumb_width, track_height);
+        let center_x = self.knob_center_x(
+            bounds,
+            label_height,
+            label_spacing,
+            thumb_width,
+            track_height,
+        );
 
         Rect::new(
             center_x - thumb_width / 2.0,
