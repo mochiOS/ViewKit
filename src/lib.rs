@@ -27,5 +27,6 @@ pub mod view;
 
 pub use runtime::{
     ViewKitError, close_window, key_window, main_window, request_alert_window,
-    request_close_key_window, request_close_window, request_exit, request_new_window, run,
+    request_close_key_window, request_close_window, request_document_confirmation_window,
+    request_exit, request_new_window, run,
 };

@@ -11,7 +11,7 @@ use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 use crate::app::{App, ViewContext, WindowId};
 use crate::appearance::AppearanceSettings;
 use crate::command::CommandStatus;
-use crate::components::{BorderStyle, Ellipse, EllipseColor, Rectangle, RectangleColor, Text};
+use crate::components::{BorderStyle, Icon, Rectangle, RectangleColor, SymbolName, Text};
 use crate::draw_command::{DisplayList, DrawCommand};
 use crate::event::{ContextMenuRequest, EventContext, EventDispatcher, RedrawRequest};
 use crate::geometry::{Point, Rect};
@@ -41,6 +41,14 @@ enum WindowRequest {
         title: String,
         message: String,
         on_dismiss: Box<dyn FnOnce()>,
+    },
+    Confirmation {
+        id: WindowId,
+        title: String,
+        message: String,
+        on_save: Box<dyn FnOnce()>,
+        on_discard: Box<dyn FnOnce()>,
+        on_cancel: Box<dyn FnOnce()>,
     },
     Close(WindowId),
     RequestClose(WindowId),
@@ -82,6 +90,30 @@ pub fn request_alert_window(
             title: title.into(),
             message: message.into(),
             on_dismiss: Box::new(on_dismiss),
+        });
+    });
+    id
+}
+
+/// Presents a frontmost unsaved-changes window with Save, Don't Save, and
+/// Cancel actions. Closing the window is equivalent to choosing Cancel.
+pub fn request_document_confirmation_window(
+    title: impl Into<String>,
+    message: impl Into<String>,
+    on_save: impl FnOnce() + 'static,
+    on_discard: impl FnOnce() + 'static,
+    on_cancel: impl FnOnce() + 'static,
+) -> WindowId {
+    let raw = NEXT_WINDOW_ID.fetch_add(1, Ordering::Relaxed).max(2);
+    let id = WindowId::from_raw(raw).expect("allocated window IDs are non-zero");
+    WINDOW_REQUESTS.with(|requests| {
+        requests.borrow_mut().push(WindowRequest::Confirmation {
+            id,
+            title: title.into(),
+            message: message.into(),
+            on_save: Box::new(on_save),
+            on_discard: Box::new(on_discard),
+            on_cancel: Box::new(on_cancel),
         });
     });
     id
@@ -140,6 +172,7 @@ where
     appearance: AppearanceSettings,
     windows: BTreeMap<WindowId, WindowRuntime<A::Body>>,
     pending_window_commands: Vec<PlatformWindowCommand>,
+    deferred_dialog_callbacks: Vec<Box<dyn FnOnce()>>,
 }
 
 struct WindowRuntime<Body> {
@@ -159,9 +192,18 @@ struct WindowRuntime<Body> {
 struct RuntimeAlert {
     title: String,
     message: String,
-    hovered: bool,
-    pressed: bool,
-    on_dismiss: Option<Box<dyn FnOnce()>>,
+    symbol: SymbolName,
+    actions: Vec<RuntimeDialogAction>,
+    hovered: Option<usize>,
+    pressed: Option<usize>,
+    default_action: usize,
+    escape_action: usize,
+}
+
+struct RuntimeDialogAction {
+    label: &'static str,
+    prominent: bool,
+    callback: Option<Box<dyn FnOnce()>>,
 }
 
 impl<Body> WindowRuntime<Body> {
@@ -193,9 +235,54 @@ impl<Body> WindowRuntime<Body> {
         window.alert = Some(RuntimeAlert {
             title,
             message,
-            hovered: false,
-            pressed: false,
-            on_dismiss: Some(on_dismiss),
+            symbol: SymbolName::Error,
+            actions: vec![RuntimeDialogAction {
+                label: "OK",
+                prominent: true,
+                callback: Some(on_dismiss),
+            }],
+            hovered: None,
+            pressed: None,
+            default_action: 0,
+            escape_action: 0,
+        });
+        window
+    }
+
+    fn new_confirmation(
+        title: String,
+        message: String,
+        on_save: Box<dyn FnOnce()>,
+        on_discard: Box<dyn FnOnce()>,
+        on_cancel: Box<dyn FnOnce()>,
+        appearance: &AppearanceSettings,
+    ) -> Self {
+        let mut window = Self::new(title.clone(), appearance);
+        window.alert = Some(RuntimeAlert {
+            title,
+            message,
+            symbol: SymbolName::Warning,
+            actions: vec![
+                RuntimeDialogAction {
+                    label: "Cancel",
+                    prominent: false,
+                    callback: Some(on_cancel),
+                },
+                RuntimeDialogAction {
+                    label: "Don't Save",
+                    prominent: false,
+                    callback: Some(on_discard),
+                },
+                RuntimeDialogAction {
+                    label: "Save",
+                    prominent: true,
+                    callback: Some(on_save),
+                },
+            ],
+            hovered: None,
+            pressed: None,
+            default_action: 0,
+            escape_action: 0,
         });
         window
     }
@@ -228,6 +315,7 @@ where
             appearance,
             windows,
             pending_window_commands: Vec::new(),
+            deferred_dialog_callbacks: Vec::new(),
         }
     }
 
@@ -324,6 +412,14 @@ where
     }
 
     fn take_window_commands(&mut self) -> Vec<PlatformWindowCommand> {
+        // A dialog action may open a blocking system panel. Run it only after
+        // the backend has consumed the dialog's Close command and destroyed
+        // its native surface.
+        if self.pending_window_commands.is_empty() {
+            for callback in std::mem::take(&mut self.deferred_dialog_callbacks) {
+                callback();
+            }
+        }
         let requests =
             WINDOW_REQUESTS.with(|requests| requests.borrow_mut().drain(..).collect::<Vec<_>>());
         for request in requests {
@@ -353,6 +449,39 @@ where
                             config: WindowConfig {
                                 title: window_title,
                                 size: crate::geometry::Size::new(520.0, 190.0),
+                                resizable: false,
+                                fullscreen: false,
+                                secure_overlay: false,
+                                system_modal: false,
+                            },
+                        });
+                }
+                WindowRequest::Confirmation {
+                    id,
+                    title,
+                    message,
+                    on_save,
+                    on_discard,
+                    on_cancel,
+                } => {
+                    let window_title = title.clone();
+                    self.windows.insert(
+                        id,
+                        WindowRuntime::new_confirmation(
+                            title,
+                            message,
+                            on_save,
+                            on_discard,
+                            on_cancel,
+                            &self.appearance,
+                        ),
+                    );
+                    self.pending_window_commands
+                        .push(PlatformWindowCommand::Open {
+                            id,
+                            config: WindowConfig {
+                                title: window_title,
+                                size: crate::geometry::Size::new(560.0, 220.0),
                                 resizable: false,
                                 fullscreen: false,
                                 secure_overlay: false,
@@ -696,7 +825,7 @@ where
         event: &PlatformEvent,
         window: &dyn PlatformWindow,
     ) {
-        let button = alert_button_bounds(window.viewport().logical_bounds());
+        let bounds = window.viewport().logical_bounds();
         let Some(alert) = self
             .windows
             .get_mut(&id)
@@ -704,13 +833,18 @@ where
         else {
             return;
         };
-        let mut dismiss = false;
+        let buttons = alert_button_bounds(alert, bounds);
+        let mut action = None;
         match event {
-            PlatformEvent::KeyPressed { key, .. } if matches!(key, Key::Enter | Key::Escape) => {
-                dismiss = true;
-            }
+            PlatformEvent::KeyPressed {
+                key: Key::Enter, ..
+            } => action = Some(alert.actions.len().saturating_sub(1)),
+            PlatformEvent::KeyPressed {
+                key: Key::Escape, ..
+            } => action = Some(alert.escape_action),
             PlatformEvent::PointerMoved { x, y } => {
-                let hovered = button.contains(Point::new(*x, *y));
+                let point = Point::new(*x, *y);
+                let hovered = buttons.iter().position(|button| button.contains(point));
                 if alert.hovered != hovered {
                     alert.hovered = hovered;
                     window.request_redraw();
@@ -727,32 +861,58 @@ where
                 button: PointerButton::Primary,
                 state: ButtonState::Released,
             } => {
-                dismiss = alert.pressed && alert.hovered;
-                alert.pressed = false;
+                if alert.pressed.is_some() && alert.pressed == alert.hovered {
+                    action = alert.pressed;
+                }
+                alert.pressed = None;
                 window.request_redraw();
             }
             PlatformEvent::PointerLeft => {
-                alert.hovered = false;
-                alert.pressed = false;
+                alert.hovered = None;
+                alert.pressed = None;
                 window.request_redraw();
             }
             PlatformEvent::Focused(false) => window.activate(),
             _ => {}
         }
-        if dismiss {
-            self.remove_window(id);
+        if let Some(action) = action {
+            self.dismiss_alert(id, action);
             self.pending_window_commands
                 .push(PlatformWindowCommand::Close { id });
         }
     }
 
-    fn remove_window(&mut self, id: WindowId) {
-        if let Some(mut state) = self.windows.remove(&id)
-            && let Some(alert) = state.alert.as_mut()
-            && let Some(on_dismiss) = alert.on_dismiss.take()
-        {
-            on_dismiss();
+    fn dismiss_alert(&mut self, id: WindowId, action: usize) {
+        let callback = self
+            .windows
+            .get_mut(&id)
+            .and_then(|state| state.alert.as_mut())
+            .and_then(|alert| {
+                let callback = alert
+                    .actions
+                    .get_mut(action)
+                    .and_then(|action| action.callback.take());
+                for action in &mut alert.actions {
+                    action.callback.take();
+                }
+                callback
+            });
+        self.remove_window(id);
+        if let Some(callback) = callback {
+            self.deferred_dialog_callbacks.push(callback);
         }
+    }
+
+    fn remove_window(&mut self, id: WindowId) {
+        let callback = self.windows.get_mut(&id).and_then(|state| {
+            state.alert.as_mut().and_then(|alert| {
+                alert
+                    .actions
+                    .get_mut(alert.default_action)
+                    .and_then(|action| action.callback.take())
+            })
+        });
+        self.windows.remove(&id);
         KEY_WINDOW.with(|key| {
             if key.get() == Some(id) {
                 key.set(None);
@@ -763,6 +923,9 @@ where
                 main.set(self.windows.keys().next_back().copied());
             }
         });
+        if let Some(callback) = callback {
+            self.deferred_dialog_callbacks.push(callback);
+        }
     }
 }
 
@@ -793,13 +956,22 @@ fn fallback_menu_bounds(request: &ContextMenuRequest, viewport: Rect, theme: &Th
     Rect::new(x, y, width, height.min(viewport.size.height))
 }
 
-fn alert_button_bounds(bounds: Rect) -> Rect {
-    Rect::new(
-        bounds.origin.x + bounds.size.width - 102.0,
-        bounds.origin.y + bounds.size.height - 50.0,
-        78.0,
-        30.0,
-    )
+fn alert_button_bounds(alert: &RuntimeAlert, bounds: Rect) -> Vec<Rect> {
+    let mut right = bounds.origin.x + bounds.size.width - 24.0;
+    let y = bounds.origin.y + bounds.size.height - 50.0;
+    let mut reversed = Vec::with_capacity(alert.actions.len());
+    for action in alert.actions.iter().rev() {
+        let width = match action.label {
+            "Don't Save" => 104.0,
+            "Cancel" => 82.0,
+            _ => 78.0,
+        };
+        right -= width;
+        reversed.push(Rect::new(right, y, width, 30.0));
+        right -= 12.0;
+    }
+    reversed.reverse();
+    reversed
 }
 
 fn paint_alert_window(alert: &RuntimeAlert, bounds: Rect, context: &mut PaintContext<'_>) {
@@ -811,20 +983,13 @@ fn paint_alert_window(alert: &RuntimeAlert, bounds: Rect, context: &mut PaintCon
     dialog.label = Some(alert.title.clone());
     dialog.value = Some(alert.message.clone());
     dialog.focus_scope = true;
-    dialog.invalid = true;
+    dialog.invalid = alert.symbol == SymbolName::Error;
     context.record_accessibility(dialog);
 
     let icon = Rect::new(bounds.origin.x + 24.0, bounds.origin.y + 28.0, 42.0, 42.0);
-    Ellipse::new()
-        .color(EllipseColor::Custom(context.theme.shell.alert))
-        .paint(icon, context);
-    Text::new("!")
-        .accessibility_hidden(true)
-        .font_size(26.0)
-        .line_height(icon.size.height)
-        .weight(750)
-        .alignment(crate::typography::TextAlignment::Center)
-        .color(context.theme.shell.inverse_text)
+    Icon::new(alert.symbol)
+        .size(icon.size.width)
+        .color(context.theme.shell.alert)
         .paint(icon, context);
 
     let text_x = icon.origin.x + icon.size.width + 18.0;
@@ -838,30 +1003,48 @@ fn paint_alert_window(alert: &RuntimeAlert, bounds: Rect, context: &mut PaintCon
         context,
     );
 
-    let button = alert_button_bounds(bounds);
-    let color = if alert.pressed {
-        context.theme.shell.action_pressed
-    } else if alert.hovered {
-        context.theme.shell.action_hover
-    } else {
-        context.theme.shell.action
-    };
-    Rectangle::new()
-        .color(RectangleColor::Custom(color))
-        .radius(crate::theme::CornerRadius::Custom(7.0))
-        .paint(button, context);
-    Text::label("OK")
-        .accessibility_hidden(true)
-        .weight(650)
-        .alignment(crate::typography::TextAlignment::Center)
-        .color(context.theme.shell.inverse_text)
-        .paint(button, context);
+    for (index, (action, button)) in alert
+        .actions
+        .iter()
+        .zip(alert_button_bounds(alert, bounds))
+        .enumerate()
+    {
+        let active = alert.pressed == Some(index);
+        let hovered = alert.hovered == Some(index);
+        let color = if action.prominent {
+            if active {
+                context.theme.shell.action_pressed
+            } else if hovered {
+                context.theme.shell.action_hover
+            } else {
+                context.theme.shell.action
+            }
+        } else if active || hovered {
+            context.theme.shell.control_hover
+        } else {
+            context.theme.colors.surface_subtle
+        };
+        Rectangle::new()
+            .color(RectangleColor::Custom(color))
+            .radius(crate::theme::CornerRadius::Custom(7.0))
+            .paint(button, context);
+        Text::label(action.label)
+            .accessibility_hidden(true)
+            .weight(650)
+            .alignment(crate::typography::TextAlignment::Center)
+            .color(if action.prominent {
+                context.theme.shell.inverse_text
+            } else {
+                context.theme.shell.primary_text
+            })
+            .paint(button, context);
 
-    let mut button_node = AccessibilityNode::new(AccessibilityRole::Button, button);
-    button_node.label = Some(String::from("OK"));
-    button_node.focusable = true;
-    button_node.focused = true;
-    context.record_accessibility(button_node);
+        let mut button_node = AccessibilityNode::new(AccessibilityRole::Button, button);
+        button_node.label = Some(String::from(action.label));
+        button_node.focusable = true;
+        button_node.focused = action.prominent;
+        context.record_accessibility(button_node);
+    }
 }
 
 fn fallback_menu_rows(
@@ -1254,9 +1437,100 @@ mod tests {
         assert!(runtime.windows[&alert].root.is_none());
 
         assert!(runtime.should_close_window(&TestWindow(alert)));
+        let _ = runtime.take_window_commands();
         assert!(dismissed.get());
         assert!(!runtime.windows.contains_key(&alert));
         assert_eq!(main_window(), Some(WindowId::PRIMARY));
+        reset_exit_request();
+    }
+
+    #[test]
+    fn document_confirmation_uses_warning_symbol_and_cancel_on_close() {
+        reset_exit_request();
+        let app = PaintMutationApp {
+            state: State::new(false),
+            builds: Rc::new(Cell::new(0)),
+        };
+        let mut runtime = ApplicationRuntime::new(app);
+        let saved = Rc::new(Cell::new(false));
+        let discarded = Rc::new(Cell::new(false));
+        let cancelled = Rc::new(Cell::new(false));
+        let confirmation = request_document_confirmation_window(
+            "Save changes?",
+            "Unsaved changes will be lost.",
+            {
+                let saved = Rc::clone(&saved);
+                move || saved.set(true)
+            },
+            {
+                let discarded = Rc::clone(&discarded);
+                move || discarded.set(true)
+            },
+            {
+                let cancelled = Rc::clone(&cancelled);
+                move || cancelled.set(true)
+            },
+        );
+
+        let commands = runtime.take_window_commands();
+        assert!(matches!(
+            commands.as_slice(),
+            [PlatformWindowCommand::Open { id, config }]
+                if *id == confirmation && !config.resizable && config.title == "Save changes?"
+        ));
+        let dialog = runtime.windows[&confirmation].alert.as_ref().unwrap();
+        assert_eq!(dialog.symbol, SymbolName::Warning);
+        assert_eq!(
+            dialog
+                .actions
+                .iter()
+                .map(|action| action.label)
+                .collect::<Vec<_>>(),
+            ["Cancel", "Don't Save", "Save"]
+        );
+
+        assert!(runtime.should_close_window(&TestWindow(confirmation)));
+        let _ = runtime.take_window_commands();
+        assert!(cancelled.get());
+        assert!(!saved.get());
+        assert!(!discarded.get());
+        reset_exit_request();
+    }
+
+    #[test]
+    fn document_confirmation_enter_runs_save_after_native_close() {
+        reset_exit_request();
+        let app = PaintMutationApp {
+            state: State::new(false),
+            builds: Rc::new(Cell::new(0)),
+        };
+        let mut runtime = ApplicationRuntime::new(app);
+        let saved = Rc::new(Cell::new(false));
+        let saved_callback = Rc::clone(&saved);
+        let confirmation = request_document_confirmation_window(
+            "Save changes?",
+            "Unsaved changes will be lost.",
+            move || saved_callback.set(true),
+            || {},
+            || {},
+        );
+        let _ = runtime.take_window_commands();
+
+        runtime.handle_alert_event(
+            confirmation,
+            &PlatformEvent::KeyPressed {
+                key: Key::Enter,
+                modifiers: crate::platform::KeyModifiers::default(),
+            },
+            &TestWindow(confirmation),
+        );
+        assert!(!saved.get());
+        assert!(matches!(
+            runtime.take_window_commands().as_slice(),
+            [PlatformWindowCommand::Close { id }] if *id == confirmation
+        ));
+        let _ = runtime.take_window_commands();
+        assert!(saved.get());
         reset_exit_request();
     }
 
