@@ -191,6 +191,29 @@ impl InputMethodState {
         true
     }
 
+    pub(crate) fn select_previous_from_space(
+        &mut self,
+        value: &mut String,
+        cursor: &mut usize,
+    ) -> bool {
+        if !self.select_next(value, cursor, -1) {
+            return false;
+        }
+        // The platform emits a TextInput(" ") after the key event. Consume
+        // that event so Shift+Space changes the candidate only once.
+        self.suppress = Some(' ');
+        true
+    }
+
+    pub(crate) fn select_page(
+        &mut self,
+        value: &mut String,
+        cursor: &mut usize,
+        delta: isize,
+    ) -> bool {
+        self.select_next(value, cursor, delta * CANDIDATES_PER_PAGE as isize)
+    }
+
     pub(crate) fn commit(&mut self, value: &mut String, cursor: &mut usize) -> bool {
         if self.marked.is_none() {
             return false;
@@ -401,13 +424,20 @@ pub(crate) fn paint_candidates(
     let page_start = selected.unwrap_or(0) / CANDIDATES_PER_PAGE * CANDIDATES_PER_PAGE;
     let page_end = (page_start + CANDIDATES_PER_PAGE).min(candidates.len());
     let shown = page_end - page_start;
+    let page_count = candidates.len().div_ceil(CANDIDATES_PER_PAGE);
+    let shows_page_indicator = page_count > 1;
     let row_height = context.theme.layout.compact_control_height.max(26.0);
+    let footer_height = if shows_page_indicator {
+        row_height
+    } else {
+        0.0
+    };
     let width = 260.0;
     let panel = Rect::new(
         anchor.origin.x,
         anchor.origin.y + anchor.size.height + context.theme.spacing.extra_small,
         width,
-        row_height * shown as f32 + context.theme.spacing.extra_small * 2.0,
+        row_height * shown as f32 + footer_height + context.theme.spacing.extra_small * 2.0,
     );
     Rectangle::new()
         .color(RectangleColor::Custom(
@@ -445,6 +475,24 @@ pub(crate) fn paint_candidates(
                 ),
                 context,
             );
+    }
+    if shows_page_indicator {
+        Text::styled(
+            format!("{} / {}", page_start / CANDIDATES_PER_PAGE + 1, page_count),
+            TextRole::Caption,
+        )
+        .accessibility_hidden(true)
+        .alignment(TextAlignment::Center)
+        .color(context.theme.colors.text_secondary)
+        .paint(
+            Rect::new(
+                panel.origin.x + context.theme.spacing.extra_small,
+                panel.origin.y + context.theme.spacing.extra_small + row_height * shown as f32,
+                panel.size.width - context.theme.spacing.extra_small * 2.0,
+                footer_height,
+            ),
+            context,
+        );
     }
 }
 
@@ -941,5 +989,33 @@ mod tests {
         assert!(pending.backspace(&mut pending_value, &mut pending_cursor));
         assert_eq!(pending_value, "か");
         assert_eq!(pending.raw, "ka");
+    }
+
+    #[test]
+    fn navigates_candidates_backward_and_by_page_without_inserting_space() {
+        let candidates = (0..18).map(|index| format!("候補{index}")).collect();
+        let mut state = InputMethodState {
+            raw: "kouho".into(),
+            marked: Some(0.."こうほ".len()),
+            candidates,
+            candidate_reading: "こうほ".into(),
+            enabled_override: Some(true),
+            ..InputMethodState::default()
+        };
+        let mut value = "こうほ".to_owned();
+        let mut cursor = value.len();
+
+        assert!(state.select_previous_from_space(&mut value, &mut cursor));
+        assert_eq!(state.selected, 17);
+        assert_eq!(value, "候補17");
+        assert!(state.handle_text(&mut value, &mut cursor, None, " "));
+        assert_eq!(value, "候補17");
+
+        assert!(state.select_page(&mut value, &mut cursor, 1));
+        assert_eq!(state.selected, 7);
+        assert_eq!(value, "候補7");
+        assert!(state.select_page(&mut value, &mut cursor, -1));
+        assert_eq!(state.selected, 17);
+        assert_eq!(value, "候補17");
     }
 }

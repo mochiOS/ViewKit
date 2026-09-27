@@ -252,6 +252,12 @@ impl TextFieldInteractionState {
             InputMethodAction::Next(delta) => {
                 input_method.select_next(&mut inner.value, &mut cursor, delta)
             }
+            InputMethodAction::PreviousFromSpace => {
+                input_method.select_previous_from_space(&mut inner.value, &mut cursor)
+            }
+            InputMethodAction::Page(delta) => {
+                input_method.select_page(&mut inner.value, &mut cursor, delta)
+            }
             InputMethodAction::Commit => {
                 input_method.commit_before_text(&mut inner.value, &mut cursor, '\n')
             }
@@ -568,6 +574,8 @@ pub struct TextField {
 #[derive(Clone, Copy)]
 enum InputMethodAction {
     Next(isize),
+    PreviousFromSpace,
+    Page(isize),
     Commit,
     CommitForNavigation,
     Cancel,
@@ -1056,6 +1064,41 @@ impl View for TextField {
                     context.display_list.push(DrawCommand::PopClip);
                 }
 
+                if converting && let Some(range) = marked.as_ref() {
+                    let start_width = Text::styled(
+                        self.display_prefix(&value, range.start),
+                        self.size.text_role(),
+                    )
+                    .measure_unbounded_with_typography(context.text_measurer, context.typography)
+                    .width;
+                    let end_width = Text::styled(
+                        self.display_prefix(&value, range.end),
+                        self.size.text_role(),
+                    )
+                    .measure_unbounded_with_typography(context.text_measurer, context.typography)
+                    .width;
+                    let left = (text_bounds.origin.x + start_width - scroll_offset_x)
+                        .max(text_bounds.origin.x);
+                    let right = (text_bounds.origin.x + end_width - scroll_offset_x)
+                        .min(text_bounds.origin.x + text_bounds.size.width);
+                    if right > left {
+                        context
+                            .display_list
+                            .push(DrawCommand::PushClip { rect: text_bounds });
+                        context.display_list.push(DrawCommand::FillRoundedRect {
+                            rect: Rect::new(
+                                left,
+                                text_bounds.origin.y,
+                                right - left,
+                                text_bounds.size.height,
+                            ),
+                            radius: context.theme.text_field.selection_radius,
+                            color: context.theme.colors.accent_soft,
+                        });
+                        context.display_list.push(DrawCommand::PopClip);
+                    }
+                }
+
                 Text::styled(display_text, self.size.text_role())
                     .accessibility_hidden(true)
                     .color(appearance.foreground)
@@ -1377,6 +1420,56 @@ impl View for TextField {
                     .input_method_action(InputMethodAction::Toggle);
                 context.request_redraw_in(bounds.expanded(16.0));
                 EventResult::Consumed
+            }
+
+            ViewEvent::KeyPressed {
+                key: Key::Space,
+                modifiers,
+            } if self.interaction.is_focused()
+                && modifiers.shift()
+                && !modifiers.shortcut()
+                && !self.secure =>
+            {
+                if self
+                    .interaction
+                    .input_method_action(InputMethodAction::PreviousFromSpace)
+                {
+                    self.synchronize_binding();
+                    context.request_redraw_in(bounds.expanded(220.0));
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
+            }
+
+            ViewEvent::KeyPressed {
+                key: Key::PageDown, ..
+            } if self.interaction.is_focused() && !self.secure => {
+                if self
+                    .interaction
+                    .input_method_action(InputMethodAction::Page(1))
+                {
+                    self.synchronize_binding();
+                    context.request_redraw_in(bounds.expanded(220.0));
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
+            }
+
+            ViewEvent::KeyPressed {
+                key: Key::PageUp, ..
+            } if self.interaction.is_focused() && !self.secure => {
+                if self
+                    .interaction
+                    .input_method_action(InputMethodAction::Page(-1))
+                {
+                    self.synchronize_binding();
+                    context.request_redraw_in(bounds.expanded(220.0));
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
             }
 
             ViewEvent::KeyPressed {

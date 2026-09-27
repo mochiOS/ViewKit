@@ -369,6 +369,12 @@ impl TextEditorInteractionState {
                 InputMethodAction::Next(delta) => {
                     input_method.select_next(&mut inner.value, &mut cursor, delta)
                 }
+                InputMethodAction::PreviousFromSpace => {
+                    input_method.select_previous_from_space(&mut inner.value, &mut cursor)
+                }
+                InputMethodAction::Page(delta) => {
+                    input_method.select_page(&mut inner.value, &mut cursor, delta)
+                }
                 InputMethodAction::Commit => {
                     input_method.commit_before_text(&mut inner.value, &mut cursor, '\n')
                 }
@@ -402,6 +408,8 @@ impl TextEditorInteractionState {
 #[derive(Clone, Copy)]
 enum InputMethodAction {
     Next(isize),
+    PreviousFromSpace,
+    Page(isize),
     Commit,
     CommitForNavigation,
     Cancel,
@@ -1007,6 +1015,36 @@ impl View for TextEditor {
             }
         }
 
+        if converting && let Some(marked) = marked.as_ref() {
+            for line_index in visible_lines.clone() {
+                let line_range = &lines[line_index];
+                let start = marked.start.max(line_range.start);
+                let end = marked.end.min(line_range.end);
+                if start >= end {
+                    continue;
+                }
+                let line = &value[line_range.clone()];
+                let start_width = self
+                    .text(&line[..start - line_range.start])
+                    .measure_unbounded_with_typography(context.text_measurer, context.typography)
+                    .width;
+                let end_width = self
+                    .text(&line[..end - line_range.start])
+                    .measure_unbounded_with_typography(context.text_measurer, context.typography)
+                    .width;
+                context.display_list.push(DrawCommand::FillRoundedRect {
+                    rect: Rect::new(
+                        content.origin.x + start_width - scroll_x,
+                        content.origin.y + line_index as f32 * line_height - scroll_y,
+                        (end_width - start_width).max(1.0),
+                        line_height,
+                    ),
+                    radius: context.theme.text_field.selection_radius,
+                    color: context.theme.colors.accent_soft,
+                });
+            }
+        }
+
         if value.is_empty() && !focused && !self.placeholder.is_empty() {
             Text::body(self.placeholder.clone())
                 .color(context.theme.text_field.placeholder_foreground)
@@ -1302,6 +1340,22 @@ impl View for TextEditor {
                     .input_method_action(InputMethodAction::Toggle);
                 context.request_redraw_in(bounds);
                 EventResult::Consumed
+            }
+            ViewEvent::KeyPressed {
+                key: Key::Space,
+                modifiers,
+            } if self.interaction.is_focused() && modifiers.shift() && !modifiers.shortcut() => {
+                if self
+                    .interaction
+                    .input_method_action(InputMethodAction::PreviousFromSpace)
+                {
+                    self.synchronize();
+                    self.interaction.reset_caret();
+                    context.request_redraw_in(bounds.expanded(220.0));
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
             }
             ViewEvent::KeyPressed {
                 key: Key::Escape, ..
@@ -1624,10 +1678,17 @@ impl View for TextEditor {
                 key: Key::PageUp,
                 modifiers,
             } if self.interaction.is_focused() => {
-                let page = (bounds.size.height / self.event_line_height(context).max(1.0))
-                    .floor()
-                    .max(1.0) as isize;
-                self.move_vertical_by(-page, modifiers.shift());
+                if self
+                    .interaction
+                    .input_method_action(InputMethodAction::Page(-1))
+                {
+                    self.synchronize();
+                } else {
+                    let page = (bounds.size.height / self.event_line_height(context).max(1.0))
+                        .floor()
+                        .max(1.0) as isize;
+                    self.move_vertical_by(-page, modifiers.shift());
+                }
                 self.interaction.reset_caret();
                 context.request_redraw_in(bounds);
                 EventResult::Consumed
@@ -1636,10 +1697,17 @@ impl View for TextEditor {
                 key: Key::PageDown,
                 modifiers,
             } if self.interaction.is_focused() => {
-                let page = (bounds.size.height / self.event_line_height(context).max(1.0))
-                    .floor()
-                    .max(1.0) as isize;
-                self.move_vertical_by(page, modifiers.shift());
+                if self
+                    .interaction
+                    .input_method_action(InputMethodAction::Page(1))
+                {
+                    self.synchronize();
+                } else {
+                    let page = (bounds.size.height / self.event_line_height(context).max(1.0))
+                        .floor()
+                        .max(1.0) as isize;
+                    self.move_vertical_by(page, modifiers.shift());
+                }
                 self.interaction.reset_caret();
                 context.request_redraw_in(bounds);
                 EventResult::Consumed
