@@ -325,7 +325,7 @@ pub(crate) fn paint_input_mode_indicator(
             context.theme.colors.elevated_surface,
         ))
         .radius(CornerRadius::Medium)
-        .shadow(ShadowStyle::Floating)
+        .shadow(ShadowStyle::Card)
         .border(BorderStyle::custom(context.theme.colors.border, 1.0))
         .paint(panel, context);
 
@@ -414,7 +414,7 @@ pub(crate) fn paint_candidates(
             context.theme.colors.elevated_surface,
         ))
         .radius(CornerRadius::Small)
-        .shadow(ShadowStyle::Floating)
+        .shadow(ShadowStyle::Card)
         .border(BorderStyle::custom(context.theme.colors.border, 1.0))
         .paint(panel, context);
     for (row_index, candidate) in candidates[page_start..page_end].iter().enumerate() {
