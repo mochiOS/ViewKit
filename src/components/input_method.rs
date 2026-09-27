@@ -81,6 +81,9 @@ impl InputMethodState {
         selection: Option<Range<usize>>,
         text: &str,
     ) -> bool {
+        if !text.is_empty() {
+            self.mode_indicator = None;
+        }
         if let Some(suppressed) = self.suppress.take()
             && text.chars().eq([suppressed])
         {
@@ -334,6 +337,10 @@ pub(crate) fn paint_input_mode_indicator(
         .border(BorderStyle::None)
         .paint(selected, context);
 
+    let text_height = (context.typography.style(TextRole::Label).line_height
+        * context.text_measurer.font_scale())
+    .min(panel.size.height);
+    let text_y = panel.origin.y + (panel.size.height - text_height) / 2.0;
     for (index, label) in ["A", "あ"].iter().enumerate() {
         Text::styled(*label, TextRole::Label)
             .accessibility_hidden(true)
@@ -342,9 +349,9 @@ pub(crate) fn paint_input_mode_indicator(
             .paint(
                 Rect::new(
                     panel.origin.x + half * index as f32,
-                    panel.origin.y,
+                    text_y,
                     half,
-                    panel.size.height,
+                    text_height,
                 ),
                 context,
             );
@@ -471,6 +478,15 @@ fn roman_to_hiragana(raw: &str, flush: bool) -> (String, String) {
         if input.starts_with('n') && input.len() >= 2 {
             let next = input.as_bytes()[1];
             if next == b'\'' {
+                output.push('ん');
+                input = &input[2..];
+                continue;
+            }
+            // Treat an additional repeated `n` as the start of the next
+            // syllable instead of producing a second ん. This keeps key
+            // repeat from turning `konnitiha` into `こんんにちは` while the
+            // following `ni` can still be parsed normally.
+            if input.starts_with("nnn") {
                 output.push('ん');
                 input = &input[2..];
                 continue;
@@ -844,5 +860,38 @@ mod tests {
         assert_eq!(boundary_value, "ほn");
         assert!(boundary.handle_text(&mut boundary_value, &mut boundary_cursor, None, "."));
         assert_eq!(boundary_value, "ほん。");
+    }
+
+    #[test]
+    fn converts_konnitiha_one_input_event_at_a_time() {
+        let mut state = InputMethodState {
+            enabled_override: Some(true),
+            ..InputMethodState::default()
+        };
+        let mut value = String::new();
+        let mut cursor = 0;
+
+        let steps = [
+            ('k', "k"),
+            ('o', "こ"),
+            ('n', "こn"),
+            ('n', "こん"),
+            ('i', "こんに"),
+            ('t', "こんにt"),
+            ('i', "こんにち"),
+            ('h', "こんにちh"),
+            ('a', "こんにちは"),
+        ];
+        for (character, expected) in steps {
+            assert!(state.handle_text(&mut value, &mut cursor, None, &character.to_string(),));
+            assert_eq!(value, expected, "failed after inputting {character}");
+        }
+
+        assert_eq!(state.candidate_reading, "こんにちは");
+
+        assert_eq!(
+            roman_to_hiragana("konnnitiha", false),
+            ("こんにちは".into(), String::new())
+        );
     }
 }
