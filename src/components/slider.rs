@@ -10,7 +10,7 @@ use crate::state::Binding;
 use crate::theme::{Color, CornerRadius, ShadowStyle};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
-use super::{Ellipse, EllipseColor, Rectangle, RectangleColor, Text};
+use super::{Rectangle, RectangleColor, Text};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct SliderInteractionInner {
@@ -454,10 +454,18 @@ impl View for Slider {
         };
 
         let knob_shadow = ShadowStyle::None;
+        let knob_radius = context.theme.slider.knob_radius.resolve(
+            &context.theme.radius,
+            knob_bounds.size.width,
+            knob_bounds.size.height,
+        );
 
         if self.interaction.inner.borrow().focused {
-            Ellipse::new()
-                .color(EllipseColor::Custom(context.theme.slider.focus_ring))
+            Rectangle::new()
+                .color(RectangleColor::Custom(context.theme.slider.focus_ring))
+                .radius(CornerRadius::Custom(
+                    knob_radius + context.theme.slider.focus_ring_width,
+                ))
                 .shadow(ShadowStyle::None)
                 .paint(
                     knob_bounds.expanded(context.theme.slider.focus_ring_width),
@@ -465,8 +473,9 @@ impl View for Slider {
                 );
         }
 
-        Ellipse::new()
-            .color(EllipseColor::Custom(knob_color))
+        Rectangle::new()
+            .color(RectangleColor::Custom(knob_color))
+            .radius(context.theme.slider.knob_radius)
             .border(super::BorderStyle::custom(
                 if hovered {
                     context.theme.slider.hovered_knob_border
