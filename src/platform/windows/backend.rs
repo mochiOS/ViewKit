@@ -620,6 +620,7 @@ fn viewport_from_window(window: &Window) -> Viewport {
 fn convert_key(key: &WinitKey) -> Option<Key> {
     match key {
         WinitKey::Named(named) => Some(match named {
+            NamedKey::CapsLock => Key::CapsLock,
             NamedKey::Escape => Key::Escape,
             NamedKey::Tab => Key::Tab,
             NamedKey::Enter => Key::Enter,

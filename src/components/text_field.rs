@@ -1113,6 +1113,15 @@ impl View for TextField {
         }
 
         match event {
+            ViewEvent::KeyPressed {
+                key: Key::CapsLock, ..
+            } if self.interaction.is_focused() && !self.secure => {
+                self.interaction
+                    .input_method_action(InputMethodAction::Toggle);
+                context.request_redraw_in(bounds.expanded(16.0));
+                EventResult::Consumed
+            }
+
             ViewEvent::KeyboardFocusRequested { bounds: target } => {
                 let should_focus = target.is_some_and(|target| target == bounds);
                 let mut inner = self.interaction.inner.borrow_mut();

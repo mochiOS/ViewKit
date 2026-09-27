@@ -19,6 +19,7 @@ pub enum ButtonState {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Key {
+    CapsLock,
     Escape,
     Tab,
     Enter,

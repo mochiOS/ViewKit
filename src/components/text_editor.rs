@@ -1054,6 +1054,15 @@ impl View for TextEditor {
         context: &mut EventContext<'_>,
     ) -> EventResult {
         match event {
+            ViewEvent::KeyPressed {
+                key: Key::CapsLock, ..
+            } if self.interaction.is_focused() => {
+                self.interaction
+                    .input_method_action(InputMethodAction::Toggle);
+                context.request_redraw_in(bounds);
+                EventResult::Consumed
+            }
+
             ViewEvent::PointerMoved { position } => {
                 if self.update_scrollbar_drag(*position, bounds, context) {
                     context.request_redraw_in(bounds);
