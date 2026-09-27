@@ -135,6 +135,8 @@ const KEY_BACKSPACE: u16 = 2;
 const KEY_TAB: u16 = 3;
 const KEY_ENTER: u16 = 4;
 const KEY_SPACE: u16 = 5;
+const KEY_LEFT_ALT: u16 = 10;
+const KEY_RIGHT_ALT: u16 = 11;
 const KEY_CAPS_LOCK: u16 = 12;
 const KEY_A: u16 = 32;
 const KEY_DELETE: u16 = 79;
@@ -1187,8 +1189,8 @@ where
             }
             EVENT_KEY => {
                 let flags = (c & 0xffff) as u16;
+                let modifiers = key_modifiers_from_wire(c >> 16);
                 if flags & INPUT_FLAG_PRESS != 0 {
-                    let modifiers = key_modifiers_from_wire(c >> 16);
                     if let Some(key) = key_from_wire(a as u16, b as u32) {
                         self.app.handle_event(
                             PlatformEvent::KeyPressed { key, modifiers },
@@ -1198,6 +1200,11 @@ where
                     if let Some(event) = self.key_event(a as u16, b as u32, modifiers) {
                         self.app.handle_event(event, &state.window);
                     }
+                } else if flags & INPUT_FLAG_RELEASE != 0
+                    && let Some(key) = key_from_wire(a as u16, b as u32)
+                {
+                    self.app
+                        .handle_event(PlatformEvent::KeyReleased { key, modifiers }, &state.window);
                 }
             }
             EVENT_CLOSE_REQUESTED => {
@@ -1394,6 +1401,7 @@ fn key_from_wire(keycode: u16, codepoint: u32) -> Option<Key> {
     }
 
     Some(match keycode {
+        KEY_LEFT_ALT | KEY_RIGHT_ALT => Key::Alt,
         KEY_CAPS_LOCK => Key::CapsLock,
         KEY_ESCAPE => Key::Escape,
         KEY_BACKSPACE => Key::Backspace,

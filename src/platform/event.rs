@@ -19,6 +19,7 @@ pub enum ButtonState {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Key {
+    Alt,
     CapsLock,
     Escape,
     Tab,
@@ -100,6 +101,10 @@ pub enum PlatformEvent {
     },
     PointerLeft,
     KeyPressed {
+        key: Key,
+        modifiers: KeyModifiers,
+    },
+    KeyReleased {
         key: Key,
         modifiers: KeyModifiers,
     },

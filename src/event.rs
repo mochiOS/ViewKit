@@ -49,6 +49,11 @@ pub enum ViewEvent {
         modifiers: KeyModifiers,
     },
 
+    KeyReleased {
+        key: Key,
+        modifiers: KeyModifiers,
+    },
+
     Scroll {
         position: Point,
         delta_x: f32,
@@ -125,6 +130,7 @@ impl ViewEvent {
 
             Self::PointerLeft
             | Self::KeyPressed { .. }
+            | Self::KeyReleased { .. }
             | Self::TextInput { .. }
             | Self::FileDragExited
             | Self::FocusChanged { .. }
@@ -647,6 +653,10 @@ impl EventDispatcher {
             }
 
             PlatformEvent::KeyPressed { key, modifiers } => Some(ViewEvent::KeyPressed {
+                key: *key,
+                modifiers: *modifiers,
+            }),
+            PlatformEvent::KeyReleased { key, modifiers } => Some(ViewEvent::KeyReleased {
                 key: *key,
                 modifiers: *modifiers,
             }),

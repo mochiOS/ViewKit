@@ -419,14 +419,16 @@ where
             }
 
             WindowEvent::KeyboardInput { event, .. } => {
-                if event.state != ElementState::Pressed {
-                    return;
-                }
-
                 let modifiers = self
                     .windows
                     .get(&window_id)
                     .map_or(KeyModifiers::default(), |state| state.modifiers);
+                if event.state == ElementState::Released {
+                    if let Some(key) = convert_key(&event.logical_key) {
+                        self.emit(window_id, PlatformEvent::KeyReleased { key, modifiers });
+                    }
+                    return;
+                }
                 if let Some(key) = convert_key(&event.logical_key) {
                     self.emit(window_id, PlatformEvent::KeyPressed { key, modifiers });
                 }
@@ -532,6 +534,7 @@ fn viewport_from_window(window: &Window) -> Viewport {
 fn convert_key(key: &WinitKey) -> Option<Key> {
     match key {
         WinitKey::Named(named) => Some(match named {
+            NamedKey::Alt => Key::Alt,
             NamedKey::CapsLock => Key::CapsLock,
             NamedKey::Escape => Key::Escape,
             NamedKey::Tab => Key::Tab,
