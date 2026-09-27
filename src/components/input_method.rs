@@ -3,27 +3,37 @@ use crate::{
     components::{BorderStyle, Rectangle, RectangleColor, Text},
     geometry::Rect,
     theme::{CornerRadius, ShadowStyle},
-    typography::TextRole,
+    typography::{TextAlignment, TextRole},
     view::{PaintContext, View},
 };
 use std::ops::Range;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 static JAPANESE_INPUT_ENABLED: AtomicBool = AtomicBool::new(false);
 const CANDIDATES_PER_PAGE: usize = 8;
+const INPUT_MODE_INDICATOR_DURATION: Duration = Duration::from_millis(1200);
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct InputMethodState {
     raw: String,
     marked: Option<Range<usize>>,
     candidates: Vec<String>,
+    candidate_reading: String,
     selected: usize,
     converting: bool,
     suppress: Option<char>,
+    mode_indicator: Option<(bool, Instant)>,
+    #[cfg(test)]
+    enabled_override: Option<bool>,
 }
 
 impl InputMethodState {
-    pub(crate) fn enabled() -> bool {
+    fn enabled(&self) -> bool {
+        #[cfg(test)]
+        if let Some(enabled) = self.enabled_override {
+            return enabled;
+        }
         if let Some(enabled) = input_method::enabled() {
             JAPANESE_INPUT_ENABLED.store(enabled, Ordering::Relaxed);
         }
@@ -34,12 +44,22 @@ impl InputMethodState {
         let enabled = input_method::toggle()
             .unwrap_or_else(|| !JAPANESE_INPUT_ENABLED.load(Ordering::Relaxed));
         JAPANESE_INPUT_ENABLED.store(enabled, Ordering::Relaxed);
+        self.mode_indicator = Some((enabled, Instant::now()));
     }
 
     pub(crate) fn synchronize(&mut self) {
         if let Some(enabled) = input_method::enabled() {
-            JAPANESE_INPUT_ENABLED.store(enabled, Ordering::Relaxed);
+            let changed = JAPANESE_INPUT_ENABLED.swap(enabled, Ordering::Relaxed) != enabled;
+            if changed {
+                self.mode_indicator = Some((enabled, Instant::now()));
+            }
         }
+    }
+
+    pub(crate) fn mode_indicator(&self, now: Instant) -> Option<(bool, Instant)> {
+        let (japanese, changed_at) = self.mode_indicator?;
+        let expires_at = changed_at + INPUT_MODE_INDICATOR_DURATION;
+        (now < expires_at).then_some((japanese, expires_at))
     }
 
     pub(crate) fn candidates(&self) -> (&[String], Option<usize>) {
@@ -89,7 +109,7 @@ impl InputMethodState {
                 return true;
             }
         }
-        if !Self::enabled() {
+        if !self.enabled() {
             if self.marked.is_some() {
                 self.clear();
             }
@@ -97,7 +117,7 @@ impl InputMethodState {
         }
         if let Some(replacement) = japanese_punctuation(text) {
             if self.marked.is_some() {
-                self.clear();
+                self.commit(value, cursor);
             }
             if let Some(range) = selection {
                 value.replace_range(range.clone(), "");
@@ -112,7 +132,7 @@ impl InputMethodState {
             .all(|character| character.is_ascii_alphabetic())
         {
             if self.marked.is_some() {
-                self.clear();
+                self.commit(value, cursor);
             }
             return false;
         }
@@ -123,7 +143,6 @@ impl InputMethodState {
             }
             self.marked = Some(*cursor..*cursor);
         }
-        self.candidates.clear();
         self.selected = 0;
         self.converting = false;
         self.raw
@@ -169,16 +188,24 @@ impl InputMethodState {
         true
     }
 
-    pub(crate) fn commit(&mut self) -> bool {
+    pub(crate) fn commit(&mut self, value: &mut String, cursor: &mut usize) -> bool {
         if self.marked.is_none() {
             return false;
+        }
+        if !self.converting {
+            self.refresh(value, cursor, true);
         }
         self.clear();
         true
     }
 
-    pub(crate) fn commit_before_text(&mut self, character: char) -> bool {
-        if !self.commit() {
+    pub(crate) fn commit_before_text(
+        &mut self,
+        value: &mut String,
+        cursor: &mut usize,
+        character: char,
+    ) -> bool {
+        if !self.commit(value, cursor) {
             return false;
         }
         self.suppress = Some(character);
@@ -221,38 +248,34 @@ impl InputMethodState {
         true
     }
 
-    pub(crate) fn commit_on_blur(&mut self) {
-        if self.marked.is_some() {
-            self.clear();
-        }
+    pub(crate) fn commit_on_blur(&mut self, value: &mut String, cursor: &mut usize) {
+        self.commit(value, cursor);
     }
 
     fn refresh(&mut self, value: &mut String, cursor: &mut usize, flush: bool) {
         let (reading, pending) = roman_to_hiragana(&self.raw, flush);
-        let pending = if !flush && pending == "n" {
-            if self.raw.ends_with("nn") { "" } else { "ん" }
-        } else {
-            pending.as_str()
-        };
         self.replace_marked(value, cursor, format!("{reading}{pending}"));
     }
 
     fn refresh_candidates(&mut self) {
         let (mut reading, pending) = roman_to_hiragana(&self.raw, false);
-        self.candidates.clear();
         self.selected = 0;
-        if pending == "n" && !self.raw.ends_with("nn") {
+        if pending == "n" {
             reading.push('ん');
-        } else if !pending.is_empty() && !(pending == "n" && self.raw.ends_with("nn")) {
-            return;
         }
         if reading.is_empty() {
+            self.candidates.clear();
+            self.candidate_reading.clear();
+            return;
+        }
+        if reading == self.candidate_reading {
             return;
         }
         self.candidates = input_method::candidates(&reading);
         if self.candidates.is_empty() {
-            self.candidates.push(reading);
+            self.candidates.push(reading.clone());
         }
+        self.candidate_reading = reading;
     }
 
     fn replace_marked(&mut self, value: &mut String, cursor: &mut usize, replacement: String) {
@@ -269,8 +292,62 @@ impl InputMethodState {
         self.raw.clear();
         self.marked = None;
         self.candidates.clear();
+        self.candidate_reading.clear();
         self.selected = 0;
         self.converting = false;
+    }
+}
+
+pub(crate) fn paint_input_mode_indicator(
+    anchor: Rect,
+    japanese: bool,
+    context: &mut PaintContext<'_>,
+) {
+    let width = 76.0;
+    let height = context.theme.layout.compact_control_height.max(28.0);
+    let panel = Rect::new(
+        anchor.origin.x,
+        anchor.origin.y + anchor.size.height + context.theme.spacing.extra_small,
+        width,
+        height,
+    );
+    Rectangle::new()
+        .color(RectangleColor::Custom(
+            context.theme.colors.elevated_surface,
+        ))
+        .radius(CornerRadius::Medium)
+        .shadow(ShadowStyle::Floating)
+        .border(BorderStyle::custom(context.theme.colors.border, 1.0))
+        .paint(panel, context);
+
+    let half = panel.size.width / 2.0;
+    let selected = Rect::new(
+        panel.origin.x + if japanese { half } else { 0.0 },
+        panel.origin.y,
+        half,
+        panel.size.height,
+    );
+    Rectangle::new()
+        .color(RectangleColor::Custom(context.theme.colors.accent_soft))
+        .radius(CornerRadius::Medium)
+        .shadow(ShadowStyle::None)
+        .border(BorderStyle::None)
+        .paint(selected, context);
+
+    for (index, label) in ["A", "あ"].iter().enumerate() {
+        Text::styled(*label, TextRole::Label)
+            .accessibility_hidden(true)
+            .alignment(TextAlignment::Center)
+            .color(context.theme.colors.text_primary)
+            .paint(
+                Rect::new(
+                    panel.origin.x + half * index as f32,
+                    panel.origin.y,
+                    half,
+                    panel.size.height,
+                ),
+                context,
+            );
     }
 }
 
@@ -631,9 +708,6 @@ const ROMAJI: &[(&str, &str)] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    static INPUT_MODE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn converts_roman_input_and_preserves_incomplete_suffix() {
@@ -701,9 +775,10 @@ mod tests {
 
     #[test]
     fn composes_converts_and_commits_inside_a_text_value() {
-        let _guard = INPUT_MODE_TEST_LOCK.lock().unwrap();
-        JAPANESE_INPUT_ENABLED.store(true, Ordering::Relaxed);
-        let mut state = InputMethodState::default();
+        let mut state = InputMethodState {
+            enabled_override: Some(true),
+            ..InputMethodState::default()
+        };
         let mut value = String::from("A");
         let mut cursor = value.len();
 
@@ -727,15 +802,14 @@ mod tests {
         assert!(state.handle_text(&mut value, &mut cursor, None, "."));
         assert!(state.handle_text(&mut value, &mut cursor, None, "1"));
         assert_eq!(value, "Aきょう。１");
-
-        JAPANESE_INPUT_ENABLED.store(false, Ordering::Relaxed);
     }
 
     #[test]
-    fn hides_the_overlapping_n_while_waiting_for_the_next_vowel() {
-        let _guard = INPUT_MODE_TEST_LOCK.lock().unwrap();
-        JAPANESE_INPUT_ENABLED.store(true, Ordering::Relaxed);
-        let mut state = InputMethodState::default();
+    fn keeps_a_single_n_pending_but_resolves_overlapping_nn() {
+        let mut state = InputMethodState {
+            enabled_override: Some(true),
+            ..InputMethodState::default()
+        };
         let mut value = String::new();
         let mut cursor = 0;
 
@@ -745,14 +819,30 @@ mod tests {
         assert!(state.handle_text(&mut value, &mut cursor, None, "ichiha"));
         assert_eq!(value, "こんにちは");
 
-        let mut single_n = InputMethodState::default();
+        let mut single_n = InputMethodState {
+            enabled_override: Some(true),
+            ..InputMethodState::default()
+        };
         let mut single_n_value = String::new();
         let mut single_n_cursor = 0;
         assert!(single_n.handle_text(&mut single_n_value, &mut single_n_cursor, None, "kan"));
-        assert_eq!(single_n_value, "かん");
+        assert_eq!(single_n_value, "かn");
+        assert_eq!(
+            single_n.candidates.first().map(String::as_str),
+            Some("かん")
+        );
         assert!(single_n.handle_text(&mut single_n_value, &mut single_n_cursor, None, "a"));
         assert_eq!(single_n_value, "かな");
 
-        JAPANESE_INPUT_ENABLED.store(false, Ordering::Relaxed);
+        let mut boundary = InputMethodState {
+            enabled_override: Some(true),
+            ..InputMethodState::default()
+        };
+        let mut boundary_value = String::new();
+        let mut boundary_cursor = 0;
+        assert!(boundary.handle_text(&mut boundary_value, &mut boundary_cursor, None, "hon"));
+        assert_eq!(boundary_value, "ほn");
+        assert!(boundary.handle_text(&mut boundary_value, &mut boundary_cursor, None, "."));
+        assert_eq!(boundary_value, "ほん。");
     }
 }

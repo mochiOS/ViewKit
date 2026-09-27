@@ -19,7 +19,7 @@ use std::ops::Range;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use super::input_method::{InputMethodState, paint_candidates};
+use super::input_method::{InputMethodState, paint_candidates, paint_input_mode_indicator};
 
 const CARET_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 const HISTORY_GROUP_INTERVAL: Duration = Duration::from_millis(750);
@@ -349,12 +349,16 @@ impl TextEditorInteractionState {
             InputMethodAction::Toggle | InputMethodAction::Synchronize
         ) {
             let mut inner = self.inner.borrow_mut();
-            inner.input_method.commit();
+            let mut input_method = std::mem::take(&mut inner.input_method);
+            let mut cursor = inner.cursor;
+            input_method.commit(&mut inner.value, &mut cursor);
             if matches!(action, InputMethodAction::Toggle) {
-                inner.input_method.toggle();
+                input_method.toggle();
             } else {
-                inner.input_method.synchronize();
+                input_method.synchronize();
             }
+            inner.cursor = cursor;
+            inner.input_method = input_method;
             return true;
         }
         let mut handled = false;
@@ -365,8 +369,12 @@ impl TextEditorInteractionState {
                 InputMethodAction::Next(delta) => {
                     input_method.select_next(&mut inner.value, &mut cursor, delta)
                 }
-                InputMethodAction::Commit => input_method.commit_before_text('\n'),
-                InputMethodAction::CommitForNavigation => input_method.commit(),
+                InputMethodAction::Commit => {
+                    input_method.commit_before_text(&mut inner.value, &mut cursor, '\n')
+                }
+                InputMethodAction::CommitForNavigation => {
+                    input_method.commit(&mut inner.value, &mut cursor)
+                }
                 InputMethodAction::Cancel => input_method.cancel(&mut inner.value, &mut cursor),
                 InputMethodAction::Backspace => {
                     input_method.backspace(&mut inner.value, &mut cursor)
@@ -382,7 +390,12 @@ impl TextEditorInteractionState {
     }
 
     fn commit_input_method_on_blur(&self) {
-        self.inner.borrow_mut().input_method.commit_on_blur();
+        let mut inner = self.inner.borrow_mut();
+        let mut input_method = std::mem::take(&mut inner.input_method);
+        let mut cursor = inner.cursor;
+        input_method.commit_on_blur(&mut inner.value, &mut cursor);
+        inner.cursor = cursor;
+        inner.input_method = input_method;
     }
 }
 
@@ -1079,6 +1092,11 @@ impl View for TextEditor {
                 line_height,
             );
             paint_candidates(anchor, candidates, selected, context);
+            let now = Instant::now();
+            if let Some((japanese, expires_at)) = inner.input_method.mode_indicator(now) {
+                paint_input_mode_indicator(anchor, japanese, context);
+                context.request_redraw_in_at(bounds.expanded(16.0), expires_at);
+            }
         }
 
         paint_editor_scrollbars(
@@ -1219,7 +1237,11 @@ impl View for TextEditor {
                 if focused {
                     inner.caret_blink_origin = Some(Instant::now());
                 } else {
-                    inner.input_method.commit_on_blur();
+                    let mut input_method = std::mem::take(&mut inner.input_method);
+                    let mut cursor = inner.cursor;
+                    input_method.commit_on_blur(&mut inner.value, &mut cursor);
+                    inner.cursor = cursor;
+                    inner.input_method = input_method;
                     inner.selecting = false;
                     inner.caret_blink_origin = None;
                 }

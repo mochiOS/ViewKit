@@ -19,7 +19,7 @@ use std::rc::Rc;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use super::input_method::{InputMethodState, paint_candidates};
+use super::input_method::{InputMethodState, paint_candidates, paint_input_mode_indicator};
 
 use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 const CARET_BLINK_INTERVAL: Duration = Duration::from_millis(500);
@@ -252,17 +252,21 @@ impl TextFieldInteractionState {
             InputMethodAction::Next(delta) => {
                 input_method.select_next(&mut inner.value, &mut cursor, delta)
             }
-            InputMethodAction::Commit => input_method.commit_before_text('\n'),
-            InputMethodAction::CommitForNavigation => input_method.commit(),
+            InputMethodAction::Commit => {
+                input_method.commit_before_text(&mut inner.value, &mut cursor, '\n')
+            }
+            InputMethodAction::CommitForNavigation => {
+                input_method.commit(&mut inner.value, &mut cursor)
+            }
             InputMethodAction::Cancel => input_method.cancel(&mut inner.value, &mut cursor),
             InputMethodAction::Backspace => input_method.backspace(&mut inner.value, &mut cursor),
             InputMethodAction::Toggle => {
-                input_method.commit();
+                input_method.commit(&mut inner.value, &mut cursor);
                 input_method.toggle();
                 true
             }
             InputMethodAction::Synchronize => {
-                input_method.commit();
+                input_method.commit(&mut inner.value, &mut cursor);
                 input_method.synchronize();
                 true
             }
@@ -273,7 +277,12 @@ impl TextFieldInteractionState {
     }
 
     fn commit_input_method_on_blur(&self) {
-        self.inner.borrow_mut().input_method.commit_on_blur();
+        let mut inner = self.inner.borrow_mut();
+        let mut input_method = std::mem::take(&mut inner.input_method);
+        let mut cursor = inner.cursor;
+        input_method.commit_on_blur(&mut inner.value, &mut cursor);
+        inner.cursor = cursor;
+        inner.input_method = input_method;
     }
 
     fn extend_selection_left(&self) -> bool {
@@ -1102,6 +1111,15 @@ impl View for TextField {
                 selected,
                 context,
             );
+            let now = Instant::now();
+            if let Some((japanese, expires_at)) = inner.input_method.mode_indicator(now) {
+                paint_input_mode_indicator(
+                    Rect::new(anchor_x, text_bounds.origin.y, 1.0, text_bounds.size.height),
+                    japanese,
+                    context,
+                );
+                context.request_redraw_in_at(bounds.expanded(16.0), expires_at);
+            }
         }
 
         if selection.is_some() {
@@ -1180,7 +1198,11 @@ impl View for TextField {
                 let changed = inner.focused != should_focus;
                 inner.focused = should_focus && inner.enabled;
                 if !should_focus {
-                    inner.input_method.commit_on_blur();
+                    let mut input_method = std::mem::take(&mut inner.input_method);
+                    let mut cursor = inner.cursor;
+                    input_method.commit_on_blur(&mut inner.value, &mut cursor);
+                    inner.cursor = cursor;
+                    inner.input_method = input_method;
                     inner.selection_anchor = None;
                     inner.selecting = false;
                     inner.caret_blink_origin = None;
