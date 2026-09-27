@@ -344,10 +344,17 @@ impl TextEditorInteractionState {
     }
 
     fn input_method_action(&self, action: InputMethodAction) -> bool {
-        if matches!(action, InputMethodAction::Toggle) {
+        if matches!(
+            action,
+            InputMethodAction::Toggle | InputMethodAction::Synchronize
+        ) {
             let mut inner = self.inner.borrow_mut();
             inner.input_method.commit();
-            inner.input_method.toggle();
+            if matches!(action, InputMethodAction::Toggle) {
+                inner.input_method.toggle();
+            } else {
+                inner.input_method.synchronize();
+            }
             return true;
         }
         let mut handled = false;
@@ -365,6 +372,7 @@ impl TextEditorInteractionState {
                     input_method.backspace(&mut inner.value, &mut cursor)
                 }
                 InputMethodAction::Toggle => unreachable!(),
+                InputMethodAction::Synchronize => unreachable!(),
             };
             inner.cursor = cursor;
             inner.input_method = input_method;
@@ -386,6 +394,7 @@ enum InputMethodAction {
     Cancel,
     Backspace,
     Toggle,
+    Synchronize,
 }
 
 pub struct TextEditor {
@@ -1058,7 +1067,7 @@ impl View for TextEditor {
                 key: Key::CapsLock, ..
             } if self.interaction.is_focused() => {
                 self.interaction
-                    .input_method_action(InputMethodAction::Toggle);
+                    .input_method_action(InputMethodAction::Synchronize);
                 context.request_redraw_in(bounds);
                 EventResult::Consumed
             }

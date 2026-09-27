@@ -261,6 +261,11 @@ impl TextFieldInteractionState {
                 input_method.toggle();
                 true
             }
+            InputMethodAction::Synchronize => {
+                input_method.commit();
+                input_method.synchronize();
+                true
+            }
         };
         inner.cursor = cursor;
         inner.input_method = input_method;
@@ -559,6 +564,7 @@ enum InputMethodAction {
     Cancel,
     Backspace,
     Toggle,
+    Synchronize,
 }
 
 impl TextField {
@@ -1117,7 +1123,7 @@ impl View for TextField {
                 key: Key::CapsLock, ..
             } if self.interaction.is_focused() && !self.secure => {
                 self.interaction
-                    .input_method_action(InputMethodAction::Toggle);
+                    .input_method_action(InputMethodAction::Synchronize);
                 context.request_redraw_in(bounds.expanded(16.0));
                 EventResult::Consumed
             }

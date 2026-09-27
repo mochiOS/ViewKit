@@ -22,11 +22,22 @@ pub(crate) struct InputMethodState {
 
 impl InputMethodState {
     pub(crate) fn enabled() -> bool {
+        if let Some(enabled) = input_method::enabled() {
+            JAPANESE_INPUT_ENABLED.store(enabled, Ordering::Relaxed);
+        }
         JAPANESE_INPUT_ENABLED.load(Ordering::Relaxed)
     }
 
     pub(crate) fn toggle(&mut self) {
-        JAPANESE_INPUT_ENABLED.fetch_xor(true, Ordering::Relaxed);
+        let enabled = input_method::toggle()
+            .unwrap_or_else(|| !JAPANESE_INPUT_ENABLED.load(Ordering::Relaxed));
+        JAPANESE_INPUT_ENABLED.store(enabled, Ordering::Relaxed);
+    }
+
+    pub(crate) fn synchronize(&mut self) {
+        if let Some(enabled) = input_method::enabled() {
+            JAPANESE_INPUT_ENABLED.store(enabled, Ordering::Relaxed);
+        }
     }
 
     pub(crate) fn candidates(&self) -> (&[String], usize) {

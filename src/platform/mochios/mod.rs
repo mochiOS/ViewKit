@@ -1384,6 +1384,9 @@ fn key_modifiers_from_wire(modifiers: u32) -> KeyModifiers {
 }
 
 fn key_from_wire(keycode: u16, codepoint: u32) -> Option<Key> {
+    if keycode == KEY_SPACE {
+        return Some(Key::Space);
+    }
     if let Some(character) = char::from_u32(codepoint)
         && !character.is_control()
     {

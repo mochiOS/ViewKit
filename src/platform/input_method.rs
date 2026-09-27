@@ -1,6 +1,10 @@
 #[cfg(target_os = "mochios")]
 const CONVERT_OPCODE: u32 = u32::from_le_bytes(*b"IMEC");
 #[cfg(target_os = "mochios")]
+const STATUS_OPCODE: u32 = u32::from_le_bytes(*b"IMES");
+#[cfg(target_os = "mochios")]
+const TOGGLE_OPCODE: u32 = u32::from_le_bytes(*b"IMET");
+#[cfg(target_os = "mochios")]
 const HEADER_LEN: usize = 12;
 const REPLY_HEADER_LEN: usize = 8;
 #[cfg(target_os = "mochios")]
@@ -8,7 +12,7 @@ const MAX_MESSAGE_LEN: usize = 4096;
 const MAX_CANDIDATES: usize = 20;
 
 #[cfg(target_os = "mochios")]
-pub(crate) fn candidates(reading: &str) -> Vec<String> {
+pub fn candidates(reading: &str) -> Vec<String> {
     use mochi_user_platform as platform;
 
     let bytes = reading.as_bytes();
@@ -39,8 +43,41 @@ pub(crate) fn candidates(reading: &str) -> Vec<String> {
 }
 
 #[cfg(not(target_os = "mochios"))]
-pub(crate) fn candidates(_reading: &str) -> Vec<String> {
+pub fn candidates(_reading: &str) -> Vec<String> {
     Vec::new()
+}
+
+#[cfg(target_os = "mochios")]
+pub fn enabled() -> Option<bool> {
+    state_call(STATUS_OPCODE)
+}
+
+#[cfg(not(target_os = "mochios"))]
+pub fn enabled() -> Option<bool> {
+    None
+}
+
+#[cfg(target_os = "mochios")]
+pub fn toggle() -> Option<bool> {
+    state_call(TOGGLE_OPCODE)
+}
+
+#[cfg(not(target_os = "mochios"))]
+pub fn toggle() -> Option<bool> {
+    None
+}
+
+#[cfg(target_os = "mochios")]
+fn state_call(opcode: u32) -> Option<bool> {
+    use mochi_user_platform as platform;
+
+    let input = platform::process::find_by_name("input.service").ok()?;
+    if input == 0 {
+        return None;
+    }
+    let mut reply = [0u8; 1];
+    let message = platform::ipc::call(input, &opcode.to_le_bytes(), &mut reply).ok()?;
+    ((message & 0xffff_ffff) == 1).then_some(reply[0] != 0)
 }
 
 fn decode_reply(reply: &[u8]) -> Vec<String> {
