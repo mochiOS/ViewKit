@@ -241,7 +241,13 @@ impl InputMethodState {
             self.refresh(value, cursor, false);
             return true;
         } else {
+            let had_pending_roman = !roman_to_hiragana(&self.raw, false).1.is_empty();
             self.raw.pop();
+            if !had_pending_roman {
+                while !self.raw.is_empty() && !roman_to_hiragana(&self.raw, false).1.is_empty() {
+                    self.raw.pop();
+                }
+            }
         }
         if self.raw.is_empty() {
             return self.cancel(value, cursor);
@@ -487,6 +493,15 @@ fn roman_to_hiragana(raw: &str, flush: bool) -> (String, String) {
             // repeat from turning `konnitiha` into `こんんにちは` while the
             // following `ni` can still be parsed normally.
             if input.starts_with("nnn") {
+                output.push('ん');
+                input = &input[2..];
+                continue;
+            }
+            // `んぬ` is vanishingly uncommon, while `んう` occurs naturally
+            // across word boundaries (for example ごきげんうるわしゅう).
+            // Interpret nnu as ん + u instead of overlapping the second n
+            // into the `nu` syllable.
+            if input.starts_with("nnu") {
                 output.push('ん');
                 input = &input[2..];
                 continue;
@@ -757,6 +772,7 @@ mod tests {
             ("annai", "あんない"),
             ("tennou", "てんのう"),
             ("kin'youbi", "きんようび"),
+            ("gokigennuruwashuu", "ごきげんうるわしゅう"),
             ("konn", "こん"),
             ("nn", "ん"),
             ("gakkou", "がっこう"),
@@ -893,5 +909,37 @@ mod tests {
             roman_to_hiragana("konnnitiha", false),
             ("こんにちは".into(), String::new())
         );
+    }
+
+    #[test]
+    fn backspace_removes_a_completed_kana_without_leaving_roman_text() {
+        let mut state = InputMethodState {
+            enabled_override: Some(true),
+            ..InputMethodState::default()
+        };
+        let mut value = String::new();
+        let mut cursor = 0;
+
+        assert!(state.handle_text(&mut value, &mut cursor, None, "konnitiwa"));
+        assert_eq!(value, "こんにちわ");
+        assert!(state.backspace(&mut value, &mut cursor));
+        assert_eq!(value, "こんにち");
+        assert_eq!(state.raw, "konniti");
+
+        assert!(state.backspace(&mut value, &mut cursor));
+        assert_eq!(value, "こんに");
+        assert_eq!(state.raw, "konni");
+
+        let mut pending = InputMethodState {
+            enabled_override: Some(true),
+            ..InputMethodState::default()
+        };
+        let mut pending_value = String::new();
+        let mut pending_cursor = 0;
+        assert!(pending.handle_text(&mut pending_value, &mut pending_cursor, None, "kan"));
+        assert_eq!(pending_value, "かn");
+        assert!(pending.backspace(&mut pending_value, &mut pending_cursor));
+        assert_eq!(pending_value, "か");
+        assert_eq!(pending.raw, "ka");
     }
 }
