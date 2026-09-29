@@ -1,5 +1,5 @@
-use std::env;
 use std::collections::{BTreeMap, BTreeSet};
+use std::env;
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -155,15 +155,20 @@ fn generate_symbols(symbol_dir: &Path, out_dir: &Path) {
     for (_, variant, _) in &public_assets {
         writeln!(generated, "        Self::{variant},").expect("write symbol list");
     }
-    generated.push_str("    ];\n\n    pub const fn asset_name(self) -> &'static str {\n        match self {\n");
+    generated.push_str(
+        "    ];\n\n    pub const fn asset_name(self) -> &'static str {\n        match self {\n",
+    );
     for (name, variant, _) in &symbols {
         writeln!(generated, "            Self::{variant} => \"{name}\",")
             .expect("write symbol name");
     }
     generated.push_str("        }\n    }\n\n    pub fn from_asset_name(name: &str) -> Option<Self> {\n        match name {\n");
     for (name, variant, _) in &public_assets {
-        writeln!(generated, "            \"{name}\" => Some(Self::{variant}),")
-            .expect("write symbol lookup");
+        writeln!(
+            generated,
+            "            \"{name}\" => Some(Self::{variant}),"
+        )
+        .expect("write symbol lookup");
     }
     generated.push_str("            _ => None,\n        }\n    }\n\n    pub(crate) fn svg(self) -> Option<SvgData> {\n        match self {\n");
     for (index, (_, variant, filename)) in symbols.iter().enumerate() {
@@ -191,10 +196,9 @@ fn validate_symbol_name(name: &str, path: &Path) {
     let valid = !name.is_empty()
         && name.split('.').all(|segment| {
             !segment.is_empty()
-                && segment
-                    .bytes()
-                    .enumerate()
-                    .all(|(index, byte)| byte.is_ascii_lowercase() || byte.is_ascii_digit() && index > 0)
+                && segment.bytes().enumerate().all(|(index, byte)| {
+                    byte.is_ascii_lowercase() || byte.is_ascii_digit() && index > 0
+                })
         });
     if !valid {
         panic!(
@@ -213,9 +217,18 @@ fn validate_symbol_svg(path: &Path) {
         }
     }
     let lowercase = source.to_ascii_lowercase();
-    for forbidden in ["<script", "<image", "<foreignobject", "xlink:href", " href="] {
+    for forbidden in [
+        "<script",
+        "<image",
+        "<foreignobject",
+        "xlink:href",
+        " href=",
+    ] {
         if lowercase.contains(forbidden) {
-            panic!("{} contains forbidden SVG content: {forbidden}", path.display());
+            panic!(
+                "{} contains forbidden SVG content: {forbidden}",
+                path.display()
+            );
         }
     }
 }

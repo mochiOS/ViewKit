@@ -460,7 +460,8 @@ impl View for Slider {
             knob_bounds.size.height,
         );
 
-        if self.interaction.inner.borrow().focused {
+        let interaction = self.interaction.inner.borrow();
+        if interaction.focused && interaction.hovered {
             Rectangle::new()
                 .color(RectangleColor::Custom(context.theme.slider.focus_ring))
                 .radius(CornerRadius::Custom(
@@ -472,6 +473,7 @@ impl View for Slider {
                     context,
                 );
         }
+        drop(interaction);
 
         Rectangle::new()
             .color(RectangleColor::Custom(knob_color))
