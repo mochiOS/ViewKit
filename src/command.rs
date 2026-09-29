@@ -22,7 +22,7 @@ impl CommandId {
 /// The current responder-chain state of a semantic command.
 ///
 /// Views publish these while painting. Menus and keyboard shortcuts then use
-/// the entry nearest the focused view, matching AppKit's command validation.
+/// the entry nearest the focused view, matching AppCore's command validation.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CommandStatus {
     pub command: CommandId,
