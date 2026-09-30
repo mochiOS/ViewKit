@@ -644,4 +644,62 @@ int32_t vk_push_svg(struct VkRuntime *runtime,
                     uint8_t tint_enabled,
                     struct VkColor tint);
 
+int32_t vk_state_set_string_utf8(struct VkRuntime *runtime,
+                                 uint64_t state_id,
+                                 const uint8_t *pointer,
+                                 size_t length);
+
+int32_t vk_runtime_run_window_utf8(struct VkRuntime *runtime,
+                                   const uint8_t *title_pointer,
+                                   size_t title_length,
+                                   float width,
+                                   float height,
+                                   uint8_t resizable);
+
+int32_t vk_push_text_utf8(struct VkRuntime *runtime,
+                          uint64_t node_id,
+                          const uint8_t *content_pointer,
+                          size_t content_length,
+                          float font_size,
+                          float line_height,
+                          uint16_t weight,
+                          uint32_t alignment,
+                          uint32_t color);
+
+int32_t vk_push_text_role_utf8(struct VkRuntime *runtime,
+                               uint64_t node_id,
+                               const uint8_t *content_pointer,
+                               size_t content_length,
+                               uint32_t role,
+                               uint32_t tone,
+                               uint32_t alignment);
+
+int32_t vk_push_button_utf8(struct VkRuntime *runtime,
+                            uint64_t node_id,
+                            const uint8_t *title_pointer,
+                            size_t title_length,
+                            uint32_t color,
+                            float radius,
+                            uint64_t action_id);
+
+int32_t vk_push_button_semantic_utf8(struct VkRuntime *runtime,
+                                     uint64_t node_id,
+                                     const uint8_t *title_pointer,
+                                     size_t title_length,
+                                     uint32_t style,
+                                     uint32_t size,
+                                     uint64_t action_id);
+
+int32_t vk_push_text_field_utf8(struct VkRuntime *runtime,
+                                uint64_t node_id,
+                                uint64_t state_id,
+                                const uint8_t *value_pointer,
+                                size_t value_length,
+                                const uint8_t *placeholder_pointer,
+                                size_t placeholder_length,
+                                uint32_t size,
+                                float radius,
+                                uint8_t enabled,
+                                uint8_t invalid);
+
 #endif  /* VIEWKIT_ABI_H */

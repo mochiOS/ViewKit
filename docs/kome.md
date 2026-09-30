@@ -2,38 +2,17 @@
 
 ## 概要
 
-ViewKit FFIは、Komeで記述された宣言的UIからViewKitの動的Viewツリーを構築するためのC ABIです。
-
-Komeコンパイラは、次のようなUI記述を直接Rustの型へ変換するのではなく、ViewKit FFIの呼び出し列へ変換します。
-
-```
-VStack(
-    spacing: .large,
-    alignment: .center,
-) {
-    Text("Hello")
-
-    Button(
-        "increment",
-        onClick: handle_click,
-    )
-}
-.padding(24)
-```
-
-概念的には、次の呼び出しへloweringされます。
+ViewKit FFIは、KomeからViewKitの動的Viewツリーを構築するためのC ABIです。
+KomeコンパイラにViewKit固有のloweringはありません。`lib/src/lib.kome`が通常の
+`extern "C"`宣言とKome関数としてViewKit APIを定義します。
 
 ```
-vk_tree_begin
-
-vk_begin_padding
-    vk_begin_vstack
-        vk_push_text
-        vk_push_button
-    vk_end_node
-vk_end_node
-
-vk_tree_commit
+let runtime = vk_runtime_create(1)
+vk_tree_begin(runtime, 10)
+vk_begin_vstack(runtime, 10, 3, 1, 0)
+pushViewText(runtime, 11, "Hello", 16.0, 20.0, 400, 0, 0)
+vk_end_node(runtime)
+vk_tree_commit(runtime)
 ```
 
 ViewKit側では、これらの呼び出しから`ViewNode`ツリーを構築し、既存のViewKitコンポーネントへ変換します。
@@ -42,9 +21,9 @@ ViewKit側では、これらの呼び出しから`ViewNode`ツリーを構築し
 
 ```
 Komeソースコード
+    ↓ 通常のextern C呼び出し
+ViewKit Komeライブラリ
     ↓
-komec
-    ↓ UI式のlowering
 ViewKit C ABI
     ↓
 ViewTreeBuilder
@@ -75,7 +54,7 @@ Viewの子要素
 Actionイベント
 ```
 
-Kome側は次の処理を担当します。
+Kome側のライブラリとアプリケーションは次の処理を担当します。
 
 ```
 Komeコードの構文解析

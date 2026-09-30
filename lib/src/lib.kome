@@ -1,93 +1,130 @@
-enum Color {
-    blue = "#0f82ff",
-    red = "#ff3b30",
-    green = "#1cb843",
+extern "C" {
+	struct VkRuntime
 
-    accent = "#0f82ff",
-    primary = "#1D1D1F",
-    secondary = "#6E6E73",
+	// Returns a borrowed pointer to a Kome String's UTF-8 bytes.
+	fn __kome_string_data(value: String) -> *const u8
+
+	// Returns the byte length of a Kome String.
+	fn __kome_string_len(value: String) -> usize
 }
 
-enum FontWeight {
-    regular = 400,
-    medium = 500,
-    semibold = 600,
-    bold = 700,
+extern "C" from "viewkit" {
+	// Returns the ViewKit C ABI version.
+	fn vk_abi_version() -> u32
+
+	// Creates a ViewKit runtime for a component instance.
+	fn vk_runtime_create(component_instance_id: u64) -> *mut VkRuntime
+
+	// Destroys a ViewKit runtime.
+	fn vk_runtime_destroy(runtime: *mut VkRuntime) -> i32
+
+	// Starts building a view tree.
+	fn vk_tree_begin(runtime: *mut VkRuntime, root_node_id: u64) -> i32
+
+	// Aborts the active view-tree build.
+	fn vk_tree_abort(runtime: *mut VkRuntime) -> i32
+
+	// Closes the current container node.
+	fn vk_end_node(runtime: *mut VkRuntime) -> i32
+
+	// Commits the active view tree.
+	fn vk_tree_commit(runtime: *mut VkRuntime) -> i32
+
+	// Collects pending UI actions.
+	fn vk_runtime_collect_actions(runtime: *mut VkRuntime) -> i32
+
+	// Stores a boolean state value.
+	fn vk_state_set_bool(runtime: *mut VkRuntime, state_id: u64, value: u8) -> i32
+
+	// Stores a floating-point state value.
+	fn vk_state_set_f32(runtime: *mut VkRuntime, state_id: u64, value: f32) -> i32
+
+	// Stores an unsigned integer state value.
+	fn vk_state_set_u64(runtime: *mut VkRuntime, state_id: u64, value: u64) -> i32
+
+	// Stores a string state value from borrowed UTF-8 bytes.
+	fn vk_state_set_string_utf8(runtime: *mut VkRuntime, state_id: u64, pointer: *const u8, length: usize) -> i32
+
+	// Opens a native window with a borrowed UTF-8 title.
+	fn vk_runtime_run_window_utf8(runtime: *mut VkRuntime, title: *const u8, title_length: usize, width: f32, height: f32, resizable: u8) -> i32
+
+	// Begins a vertical stack container.
+	fn vk_begin_vstack(runtime: *mut VkRuntime, node_id: u64, gap: u32, alignment: u32, distribution: u32) -> i32
+
+	// Begins a horizontal stack container.
+	fn vk_begin_hstack(runtime: *mut VkRuntime, node_id: u64, gap: u32, alignment: u32, distribution: u32) -> i32
+
+	// Begins a depth stack container.
+	fn vk_begin_zstack(runtime: *mut VkRuntime, node_id: u64, alignment: u32) -> i32
+
+	// Pushes a text node from borrowed UTF-8 bytes.
+	fn vk_push_text_utf8(runtime: *mut VkRuntime, node_id: u64, content: *const u8, content_length: usize, font_size: f32, line_height: f32, weight: u16, alignment: u32, color: u32) -> i32
+
+	// Pushes semantic text from borrowed UTF-8 bytes.
+	fn vk_push_text_role_utf8(runtime: *mut VkRuntime, node_id: u64, content: *const u8, content_length: usize, role: u32, tone: u32, alignment: u32) -> i32
+
+	// Pushes a button from a borrowed UTF-8 title.
+	fn vk_push_button_utf8(runtime: *mut VkRuntime, node_id: u64, title: *const u8, title_length: usize, color: u32, radius: f32, action_id: u64) -> i32
+
+	// Pushes a semantic button from a borrowed UTF-8 title.
+	fn vk_push_button_semantic_utf8(runtime: *mut VkRuntime, node_id: u64, title: *const u8, title_length: usize, style: u32, size: u32, action_id: u64) -> i32
+
+	// Begins a padding container.
+	fn vk_begin_padding(runtime: *mut VkRuntime, node_id: u64, top: f32, right: f32, bottom: f32, left: f32) -> i32
+
+	// Pushes a flexible spacer.
+	fn vk_push_spacer(runtime: *mut VkRuntime, node_id: u64) -> i32
+
+	// Pushes a divider.
+	fn vk_push_divider(runtime: *mut VkRuntime, node_id: u64) -> i32
+
+	// Begins a context-menu container.
+	fn vk_begin_context_menu(runtime: *mut VkRuntime, node_id: u64) -> i32
+
+	// Begins a transparent group container.
+	fn vk_begin_group(runtime: *mut VkRuntime, node_id: u64) -> i32
+
+	// Begins an overlay container.
+	fn vk_begin_overlay(runtime: *mut VkRuntime, node_id: u64, alignment: u32) -> i32
+
+	// Begins a scroll container.
+	fn vk_begin_scroll(runtime: *mut VkRuntime, node_id: u64, state_id: u64, axis: u32, scrollbar: u32) -> i32
+
+	// Pushes a text field from borrowed UTF-8 strings.
+	fn vk_push_text_field_utf8(runtime: *mut VkRuntime, node_id: u64, state_id: u64, value: *const u8, value_length: usize, placeholder: *const u8, placeholder_length: usize, size: u32, radius: f32, enabled: u8, invalid: u8) -> i32
 }
 
-enum StackSpacing {
-    none = 0,
-    small = 8,
-    medium = 12,
-    large = 20,
+// Stores a Kome String in ViewKit state.
+fn setViewString(runtime: *mut VkRuntime, state_id: u64, value: String) -> i32 {
+	return vk_state_set_string_utf8(runtime, state_id, __kome_string_data(value), __kome_string_len(value))
 }
 
-enum StackAlignment {
-    start = "start",
-    center = "center",
-    end = "end",
-    stretch = "stretch",
+// Runs a ViewKit window with a Kome String title.
+fn runViewWindow(runtime: *mut VkRuntime, title: String, width: f32, height: f32, resizable: u8) -> i32 {
+	return vk_runtime_run_window_utf8(runtime, __kome_string_data(title), __kome_string_len(title), width, height, resizable)
 }
 
-@nativeComponent("Text")
-component Text(
-    content: String,
-    weight: FontWeight = .regular,
-    size: Number = 16,
-    color: Color = .primary,
-)
+// Pushes a ViewKit text node with Kome String content.
+fn pushViewText(runtime: *mut VkRuntime, node_id: u64, content: String, font_size: f32, line_height: f32, weight: u16, alignment: u32, color: u32) -> i32 {
+	return vk_push_text_utf8(runtime, node_id, __kome_string_data(content), __kome_string_len(content), font_size, line_height, weight, alignment, color)
+}
 
-@nativeComponent("VStack")
-component VStack(
-    spacing: StackSpacing = .medium,
-    alignment: StackAlignment = .center,
-)
+// Pushes semantic ViewKit text with Kome String content.
+fn pushViewTextRole(runtime: *mut VkRuntime, node_id: u64, content: String, role: u32, tone: u32, alignment: u32) -> i32 {
+	return vk_push_text_role_utf8(runtime, node_id, __kome_string_data(content), __kome_string_len(content), role, tone, alignment)
+}
 
-@nativeComponent("Button")
-component Button(
-    title: String,
-    color: Color = .accent,
-    radius: Ratio = 0%,
-    onClick: Action<ButtonEvent>? = null,
-)
+// Pushes a ViewKit button with a Kome String title.
+fn pushViewButton(runtime: *mut VkRuntime, node_id: u64, title: String, color: u32, radius: f32, action_id: u64) -> i32 {
+	return vk_push_button_utf8(runtime, node_id, __kome_string_data(title), __kome_string_len(title), color, radius, action_id)
+}
 
-@nativeComponent("TextInput")
-component TextInput(
-    value: String,
-    onChange: Action<TextInputEvent>? = null,
-    onSubmit: Action<TextInputEvent>? = null,
-)
+// Pushes a semantic ViewKit button with a Kome String title.
+fn pushViewButtonSemantic(runtime: *mut VkRuntime, node_id: u64, title: String, style: u32, size: u32, action_id: u64) -> i32 {
+	return vk_push_button_semantic_utf8(runtime, node_id, __kome_string_data(title), __kome_string_len(title), style, size, action_id)
+}
 
-// @nativeComponentはKome componentとして実行せず、
-// ViewKitのViewNodeへ変換する。
-//
-// 例:
-//
-// Text(
-//     "Hello, {name}",
-//     weight: .bold,
-//     color: .primary,
-// )
-//
-// は、次のようなViewNodeへ変換される。
-//
-// ViewNode {
-//     kind: Text,
-//     content: interpolate("Hello, {name}"),
-//     weight: 700,
-//     color: "#1D1D1F",
-// }
-//
-// enumのcaseは、ViewNode生成時にraw valueへ変換される。
-//
-// .bold
-//     -> FontWeight.bold
-//     -> 700
-//
-// .medium
-//     -> StackSpacing.medium
-//     -> 12
-//
-// .center
-//     -> StackAlignment.center
-//     -> "center"
+// Pushes a ViewKit text field with Kome String values.
+fn pushViewTextField(runtime: *mut VkRuntime, node_id: u64, state_id: u64, value: String, placeholder: String, size: u32, radius: f32, enabled: u8, invalid: u8) -> i32 {
+	return vk_push_text_field_utf8(runtime, node_id, state_id, __kome_string_data(value), __kome_string_len(value), __kome_string_data(placeholder), __kome_string_len(placeholder), size, radius, enabled, invalid)
+}

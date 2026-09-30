@@ -27,6 +27,7 @@ use std::str;
 use std::time::Instant;
 
 mod generated_components;
+mod kome;
 mod tree;
 
 use crate::ffi::tree::{
