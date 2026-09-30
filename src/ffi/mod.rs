@@ -37,6 +37,7 @@ use crate::ffi::tree::{
 use crate::image::ImageData;
 use crate::svg::SvgData;
 pub use generated_components::*;
+pub use kome::*;
 
 pub const VK_Z_ALIGNMENT_TOP_LEADING: u32 = 0;
 pub const VK_Z_ALIGNMENT_TOP: u32 = 1;

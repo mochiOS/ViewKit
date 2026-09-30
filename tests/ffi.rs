@@ -6,9 +6,10 @@ use viewkit::ffi::{
     VK_TEXT_COLOR_BLACK, VK_TEXT_ROLE_TITLE_LARGE, VK_TEXT_TONE_PRIMARY, VkActionEvent, VkLength,
     VkRectangleStyle, VkStatus, VkString, vk_abi_version, vk_begin_background, vk_begin_frame,
     vk_begin_hstack, vk_begin_padding, vk_begin_vstack, vk_end_node, vk_poll_action,
-    vk_push_button, vk_push_button_semantic, vk_push_divider, vk_push_rectangle, vk_push_spacer,
-    vk_push_text, vk_push_text_role, vk_runtime_collect_actions, vk_runtime_create,
-    vk_runtime_destroy, vk_status_name, vk_tree_begin, vk_tree_commit,
+    vk_push_button, vk_push_button_semantic, vk_push_button_semantic_utf8, vk_push_divider,
+    vk_push_rectangle, vk_push_spacer, vk_push_text, vk_push_text_role, vk_push_text_utf8,
+    vk_runtime_collect_actions, vk_runtime_create, vk_runtime_destroy, vk_status_name,
+    vk_tree_begin, vk_tree_commit,
 };
 
 fn destroy_runtime(runtime: *mut viewkit::ffi::VkRuntime) -> i32 {
@@ -99,6 +100,50 @@ fn ffi_builds_counter_tree() {
     assert_eq!(has_action, 0,);
 
     assert_eq!(destroy_runtime(runtime,), VkStatus::Ok as i32,);
+}
+
+#[test]
+fn ffi_builds_text_and_buttons_from_flat_utf8_arguments() {
+    let runtime = vk_runtime_create(1);
+    assert!(!runtime.is_null());
+    assert_eq!(vk_tree_begin(runtime, 100), VkStatus::Ok as i32);
+
+    let text = "Kome";
+    assert_eq!(
+        unsafe {
+            vk_push_text_utf8(
+                runtime,
+                101,
+                text.as_ptr(),
+                text.len(),
+                16.0,
+                24.0,
+                400,
+                VK_TEXT_ALIGNMENT_START,
+                VK_TEXT_COLOR_BLACK,
+            )
+        },
+        VkStatus::Ok as i32,
+    );
+
+    let title = "Continue";
+    assert_eq!(
+        unsafe {
+            vk_push_button_semantic_utf8(
+                runtime,
+                102,
+                title.as_ptr(),
+                title.len(),
+                VK_BUTTON_STYLE_ACCENT,
+                VK_BUTTON_SIZE_LARGE,
+                200,
+            )
+        },
+        VkStatus::Ok as i32,
+    );
+
+    assert_eq!(vk_tree_commit(runtime), VkStatus::Ok as i32);
+    assert_eq!(destroy_runtime(runtime), VkStatus::Ok as i32);
 }
 
 #[test]
