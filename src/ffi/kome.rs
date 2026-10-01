@@ -192,3 +192,33 @@ pub unsafe extern "C" fn vk_push_text_field_utf8(
         invalid,
     )
 }
+
+/// Pushes a menu item using borrowed UTF-8 label and shortcut bytes.
+///
+/// # Safety
+///
+/// Each non-null string pointer must address its corresponding readable byte
+/// length for the duration of the call.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn vk_push_menu_item_utf8(
+    runtime: *mut VkRuntime,
+    node_id: u64,
+    label_pointer: *const u8,
+    label_length: usize,
+    shortcut_pointer: *const u8,
+    shortcut_length: usize,
+    enabled: u8,
+    danger: u8,
+    action_id: u64,
+) -> i32 {
+    super::vk_push_menu_item(
+        runtime,
+        node_id,
+        unsafe { borrowed_string(label_pointer, label_length) },
+        unsafe { borrowed_string(shortcut_pointer, shortcut_length) },
+        enabled,
+        danger,
+        action_id,
+    )
+}

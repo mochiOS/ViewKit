@@ -702,4 +702,14 @@ int32_t vk_push_text_field_utf8(struct VkRuntime *runtime,
                                 uint8_t enabled,
                                 uint8_t invalid);
 
+int32_t vk_push_menu_item_utf8(struct VkRuntime *runtime,
+                               uint64_t node_id,
+                               const uint8_t *label_pointer,
+                               size_t label_length,
+                               const uint8_t *shortcut_pointer,
+                               size_t shortcut_length,
+                               uint8_t enabled,
+                               uint8_t danger,
+                               uint64_t action_id);
+
 #endif  /* VIEWKIT_ABI_H */
