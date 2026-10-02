@@ -18,7 +18,7 @@ ui_layout = "0.9.8"
 image = {
     version = "0.25.10",
     default-features = false,
-    features = ["png", "jpeg", "webp"]
+    features = ["png", "jpeg", "webp", "gif", "bmp"]
 }
 resvg = {
     version = "0.47.0",
