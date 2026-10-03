@@ -29,7 +29,7 @@
 
 #define VK_ABI_VERSION_MAJOR 1
 
-#define VK_ABI_VERSION_MINOR 4
+#define VK_ABI_VERSION_MINOR 5
 
 #define VK_ABI_VERSION_PATCH 0
 
@@ -680,9 +680,29 @@ int32_t vk_kome_begin_vstack(uint32_t gap, uint32_t alignment, uint32_t distribu
 int32_t vk_kome_begin_hstack(uint32_t gap, uint32_t alignment, uint32_t distribution);
 
 /**
+ * Begins a padding container in the active Kome view build.
+ */
+int32_t vk_kome_begin_padding(float top, float right, float bottom, float left);
+
+/**
+ * Begins a scroll container in the active Kome view build.
+ */
+int32_t vk_kome_begin_scroll(uint32_t axis, uint32_t scrollbar);
+
+/**
  * Ends the current container in the active Kome view build.
  */
 int32_t vk_kome_end_node(void);
+
+/**
+ * Pushes a flexible spacer into the active Kome view build.
+ */
+int32_t vk_kome_push_spacer(void);
+
+/**
+ * Pushes a divider into the active Kome view build.
+ */
+int32_t vk_kome_push_divider(void);
 
 /**
  * Pushes semantic text into the active Kome view build.
@@ -710,6 +730,23 @@ int32_t vk_kome_push_button_action_utf8(const uint8_t *title_pointer,
                                         uint32_t color,
                                         float radius,
                                         const struct KomeClosure *action);
+
+/**
+ * Pushes a text field into the active Kome view build.
+ *
+ * # Safety
+ *
+ * Each non-null string pointer must address its corresponding readable byte
+ * length for the duration of the call.
+ */
+int32_t vk_kome_push_text_field_utf8(const uint8_t *value_pointer,
+                                     size_t value_length,
+                                     const uint8_t *placeholder_pointer,
+                                     size_t placeholder_length,
+                                     uint32_t size,
+                                     float radius,
+                                     uint8_t enabled,
+                                     uint8_t invalid);
 
 /**
  * Sets a string state value from borrowed UTF-8 bytes.
