@@ -266,10 +266,36 @@ pub extern "C" fn vk_kome_begin_hstack(gap: u32, alignment: u32, distribution: u
     })
 }
 
+/// Begins a padding container in the active Kome view build.
+#[unsafe(no_mangle)]
+pub extern "C" fn vk_kome_begin_padding(top: f32, right: f32, bottom: f32, left: f32) -> i32 {
+    with_kome_node(|runtime, node_id| {
+        super::vk_begin_padding(runtime, node_id, top, right, bottom, left)
+    })
+}
+
+/// Begins a scroll container in the active Kome view build.
+#[unsafe(no_mangle)]
+pub extern "C" fn vk_kome_begin_scroll(axis: u32, scrollbar: u32) -> i32 {
+    with_kome_node(|runtime, node_id| super::vk_begin_scroll(runtime, node_id, 0, axis, scrollbar))
+}
+
 /// Ends the current container in the active Kome view build.
 #[unsafe(no_mangle)]
 pub extern "C" fn vk_kome_end_node() -> i32 {
     with_kome_runtime(|runtime| super::vk_end_node(runtime))
+}
+
+/// Pushes a flexible spacer into the active Kome view build.
+#[unsafe(no_mangle)]
+pub extern "C" fn vk_kome_push_spacer() -> i32 {
+    with_kome_node(|runtime, node_id| super::vk_push_spacer(runtime, node_id))
+}
+
+/// Pushes a divider into the active Kome view build.
+#[unsafe(no_mangle)]
+pub extern "C" fn vk_kome_push_divider() -> i32 {
+    with_kome_node(|runtime, node_id| super::vk_push_divider(runtime, node_id))
 }
 
 /// Pushes semantic text into the active Kome view build.
@@ -321,6 +347,41 @@ pub unsafe extern "C" fn vk_kome_push_button_action_utf8(
             color,
             radius,
             action,
+        )
+    })
+}
+
+/// Pushes a text field into the active Kome view build.
+///
+/// # Safety
+///
+/// Each non-null string pointer must address its corresponding readable byte
+/// length for the duration of the call.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn vk_kome_push_text_field_utf8(
+    value_pointer: *const u8,
+    value_length: usize,
+    placeholder_pointer: *const u8,
+    placeholder_length: usize,
+    size: u32,
+    radius: f32,
+    enabled: u8,
+    invalid: u8,
+) -> i32 {
+    with_kome_node(|runtime, node_id| unsafe {
+        vk_push_text_field_utf8(
+            runtime,
+            node_id,
+            0,
+            value_pointer,
+            value_length,
+            placeholder_pointer,
+            placeholder_length,
+            size,
+            radius,
+            enabled,
+            invalid,
         )
     })
 }

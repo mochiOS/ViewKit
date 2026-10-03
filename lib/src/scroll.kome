@@ -1,4 +1,34 @@
 extern "C" from "viewkit" {
 	// Begins a scroll container.
-	fn vk_begin_scroll(runtime: *mut VkRuntime, node_id: u64, state_id: u64, axis: u32, scrollbar: u32) -> i32
+	fn vk_begin_scroll(runtime: *mut VkRuntime, node_id: u64, state_id: u64, axis: ScrollAxis, scrollbar: ScrollBarVisibility) -> i32
+	// Begins a scroll container in the active Kome view build.
+	fn vk_kome_begin_scroll(axis: ScrollAxis, scrollbar: ScrollBarVisibility) -> i32
+}
+
+/// 内容を指定した方向へスクロールできる領域にします。
+///
+/// ## Parameters
+///
+/// - `axis`: スクロールできる方向です。
+/// - `scrollbar`: スクロールバーの表示方法です。
+///
+/// ## Example
+///
+/// ```kome
+/// Scroll(axis: .vertical) {
+/// 	Text("長い内容")
+/// }
+/// ```
+///
+/// @since 27.0-dp.1
+pub component Scroll(axis: ScrollAxis = .vertical, scrollbar: ScrollBarVisibility = .automatic) {
+	@beforeChildren
+	recipe beginChildren {
+		vk_kome_begin_scroll(axis, scrollbar)
+	}
+
+	@afterChildren
+	recipe endChildren {
+		vk_kome_end_node()
+	}
 }

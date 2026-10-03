@@ -1,0 +1,166 @@
+/// スタック内の子要素間隔を表します。
+///
+/// ## Example
+///
+/// ```kome
+/// VStack(gap: .large) { Text("Kome") }
+/// ```
+///
+/// @since 27.0-dp.1
+pub enum StackGap {
+	none,
+	extraSmall,
+	small,
+	medium,
+	large,
+	extraLarge,
+	doubleExtraLarge,
+}
+
+/// スタックの交差方向における配置を表します。
+///
+/// ## Example
+///
+/// ```kome
+/// VStack(alignment: .center) { Text("Kome") }
+/// ```
+///
+/// @since 27.0-dp.1
+pub enum StackAlignment {
+	start,
+	center,
+	end,
+	stretch,
+}
+
+/// スタックの主方向における配置を表します。
+///
+/// ## Example
+///
+/// ```kome
+/// HStack(distribution: .spaceBetween) { Text("左") Text("右") }
+/// ```
+///
+/// @since 27.0-dp.1
+pub enum StackDistribution {
+	start,
+	center,
+	end,
+	spaceBetween,
+	spaceAround,
+	spaceEvenly,
+}
+
+/// 文字列の水平方向の配置を表します。
+///
+/// ## Example
+///
+/// ```kome
+/// Text("Kome", alignment: .center)
+/// ```
+///
+/// @since 27.0-dp.1
+pub enum TextAlignment {
+	start,
+	center,
+	end,
+	justified,
+}
+
+/// 文字列が画面内で担う役割を表します。
+///
+/// ## Example
+///
+/// ```kome
+/// Text("設定", role: .titleLarge)
+/// ```
+///
+/// @since 27.0-dp.1
+pub enum TextRole {
+	displayLarge,
+	displayMedium,
+	titleLarge,
+	titleMedium,
+	titleSmall,
+	body,
+	label,
+	caption,
+	code,
+}
+
+/// 文字色の意味上の役割を表します。
+///
+/// ## Example
+///
+/// ```kome
+/// Text("注意", tone: .destructive)
+/// ```
+///
+/// @since 27.0-dp.1
+pub enum TextTone {
+	primary,
+	secondary,
+	tertiary,
+	disabled,
+	accent,
+	destructive,
+}
+
+/// ボタンの色の役割を表します。
+///
+/// ## Example
+///
+/// ```kome
+/// Button("削除", color: .destructive) {}
+/// ```
+///
+/// @since 27.0-dp.1
+pub enum ButtonColor {
+	accent,
+	destructive,
+}
+
+/// スクロールできる方向を表します。
+///
+/// ## Example
+///
+/// ```kome
+/// Scroll(axis: .vertical) { Text("内容") }
+/// ```
+///
+/// @since 27.0-dp.1
+pub enum ScrollAxis {
+	horizontal,
+	vertical,
+	both,
+}
+
+/// スクロールバーの表示方法を表します。
+///
+/// ## Example
+///
+/// ```kome
+/// Scroll(scrollbar: .automatic) { Text("内容") }
+/// ```
+///
+/// @since 27.0-dp.1
+pub enum ScrollBarVisibility {
+	hidden,
+	automatic,
+	always,
+}
+
+/// テキスト入力欄の大きさを表します。
+///
+/// ## Example
+///
+/// ```kome
+/// TextField("", size: .medium)
+/// ```
+///
+/// @since 27.0-dp.1
+pub enum TextFieldSize {
+	small,
+	medium,
+	large,
+}

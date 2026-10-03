@@ -1,4 +1,25 @@
 extern "C" from "viewkit" {
 	// Pushes a flexible spacer.
 	fn vk_push_spacer(runtime: *mut VkRuntime, node_id: u64) -> i32
+	// Pushes a flexible spacer into the active Kome view build.
+	fn vk_kome_push_spacer() -> i32
+}
+
+/// スタック内の空間を埋める可変長の余白を追加します。
+///
+/// ## Example
+///
+/// ```kome
+/// HStack {
+/// 	Text("左")
+/// 	Spacer()
+/// 	Text("右")
+/// }
+/// ```
+///
+/// @since 27.0-dp.1
+pub component Spacer() {
+	recipe view {
+		vk_kome_push_spacer()
+	}
 }

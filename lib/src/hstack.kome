@@ -1,8 +1,8 @@
 extern "C" from "viewkit" {
 	// Begins a horizontal stack container.
-	fn vk_begin_hstack(runtime: *mut VkRuntime, node_id: u64, gap: u32, alignment: u32, distribution: u32) -> i32
+	fn vk_begin_hstack(runtime: *mut VkRuntime, node_id: u64, gap: StackGap, alignment: StackAlignment, distribution: StackDistribution) -> i32
 	// Begins a horizontal stack in the active Kome view build.
-	fn vk_kome_begin_hstack(gap: u32, alignment: u32, distribution: u32) -> i32
+	fn vk_kome_begin_hstack(gap: StackGap, alignment: StackAlignment, distribution: StackDistribution) -> i32
 }
 
 /// 子の表示内容を水平方向へ並べます。
@@ -23,7 +23,7 @@ extern "C" from "viewkit" {
 /// ```
 ///
 /// @since 27.0-dp.1
-pub component HStack(gap: u32 = 3, alignment: u32 = 1, distribution: u32 = 0) {
+pub component HStack(gap: StackGap = .medium, alignment: StackAlignment = .center, distribution: StackDistribution = .start) {
 	@beforeChildren
 	recipe beginChildren {
 		vk_kome_begin_hstack(gap, alignment, distribution)
@@ -56,6 +56,6 @@ pub component HStack(gap: u32 = 3, alignment: u32 = 1, distribution: u32 = 0) {
 /// ```
 ///
 /// @since 27.0-dp.1
-pub fn beginViewHStack(runtime: *mut VkRuntime, node_id: u64, gap: u32, alignment: u32, distribution: u32) -> i32 {
+pub fn beginViewHStack(runtime: *mut VkRuntime, node_id: u64, gap: StackGap, alignment: StackAlignment, distribution: StackDistribution) -> i32 {
 	return vk_begin_hstack(runtime, node_id, gap, alignment, distribution)
 }

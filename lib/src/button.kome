@@ -1,10 +1,10 @@
 extern "C" from "viewkit" {
 	// Pushes a button from a borrowed UTF-8 title.
-	fn vk_push_button_utf8(runtime: *mut VkRuntime, node_id: u64, title: *const u8, title_length: usize, color: u32, radius: f32, action_id: u64) -> i32
+	fn vk_push_button_utf8(runtime: *mut VkRuntime, node_id: u64, title: *const u8, title_length: usize, color: ButtonColor, radius: f32, action_id: u64) -> i32
 	// Pushes a button that retains and invokes a Kome closure.
-	fn vk_push_button_action_utf8(runtime: *mut VkRuntime, node_id: u64, title: *const u8, title_length: usize, color: u32, radius: f32, action: () -> Void) -> i32
+	fn vk_push_button_action_utf8(runtime: *mut VkRuntime, node_id: u64, title: *const u8, title_length: usize, color: ButtonColor, radius: f32, action: () -> Void) -> i32
 	// Pushes a button into the active Kome view build.
-	fn vk_kome_push_button_action_utf8(title: *const u8, title_length: usize, color: u32, radius: f32, action: () -> Void) -> i32
+	fn vk_kome_push_button_action_utf8(title: *const u8, title_length: usize, color: ButtonColor, radius: f32, action: () -> Void) -> i32
 	// Pushes a semantic button from a borrowed UTF-8 title.
 	fn vk_push_button_semantic_utf8(runtime: *mut VkRuntime, node_id: u64, title: *const u8, title_length: usize, style: u32, size: u32, action_id: u64) -> i32
 }
@@ -31,7 +31,7 @@ extern "C" from "viewkit" {
 /// ```
 ///
 /// @since 27.0-dp.1
-pub fn pushViewButton(runtime: *mut VkRuntime, node_id: u64, title: String, color: u32, radius: f32, action_id: u64) -> i32 {
+pub fn pushViewButton(runtime: *mut VkRuntime, node_id: u64, title: String, color: ButtonColor, radius: f32, action_id: u64) -> i32 {
 	return vk_push_button_utf8(runtime, node_id, __kome_string_data(title), __kome_string_len(title), color, radius, action_id)
 }
 
@@ -59,7 +59,7 @@ pub fn pushViewButton(runtime: *mut VkRuntime, node_id: u64, title: String, colo
 /// ```
 ///
 /// @since 27.0-dp.1
-pub fn Button(title: String, action: () -> Void, color: u32 = 0, radius: f32 = 8) -> i32 {
+pub fn Button(title: String, action: () -> Void, color: ButtonColor = .accent, radius: f32 = 8) -> i32 {
 	return vk_kome_push_button_action_utf8(__kome_string_data(title), __kome_string_len(title), color, radius, action)
 }
 

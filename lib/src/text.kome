@@ -2,9 +2,9 @@ extern "C" from "viewkit" {
 	// Pushes a text node from borrowed UTF-8 bytes.
 	fn vk_push_text_utf8(runtime: *mut VkRuntime, node_id: u64, content: *const u8, content_length: usize, font_size: f32, line_height: f32, weight: u16, alignment: u32, color: u32) -> i32
 	// Pushes semantic text from borrowed UTF-8 bytes.
-	fn vk_push_text_role_utf8(runtime: *mut VkRuntime, node_id: u64, content: *const u8, content_length: usize, role: u32, tone: u32, alignment: u32) -> i32
+	fn vk_push_text_role_utf8(runtime: *mut VkRuntime, node_id: u64, content: *const u8, content_length: usize, role: TextRole, tone: TextTone, alignment: TextAlignment) -> i32
 	// Pushes semantic text into the active Kome view build.
-	fn vk_kome_push_text_role_utf8(content: *const u8, content_length: usize, role: u32, tone: u32, alignment: u32) -> i32
+	fn vk_kome_push_text_role_utf8(content: *const u8, content_length: usize, role: TextRole, tone: TextTone, alignment: TextAlignment) -> i32
 }
 
 /// 文字列を表示します。
@@ -23,7 +23,7 @@ extern "C" from "viewkit" {
 /// ```
 ///
 /// @since 27.0-dp.1
-pub component Text(content: String, role: u32 = 5, tone: u32 = 0, alignment: u32 = 0) {
+pub component Text(content: String, role: TextRole = .body, tone: TextTone = .primary, alignment: TextAlignment = .start) {
 	recipe view {
 		vk_kome_push_text_role_utf8(__kome_string_data(content), __kome_string_len(content), role, tone, alignment)
 	}
@@ -79,6 +79,6 @@ pub fn pushViewText(runtime: *mut VkRuntime, node_id: u64, content: String, font
 /// ```
 ///
 /// @since 27.0-dp.1
-pub fn pushViewTextRole(runtime: *mut VkRuntime, node_id: u64, content: String, role: u32, tone: u32, alignment: u32) -> i32 {
+pub fn pushViewTextRole(runtime: *mut VkRuntime, node_id: u64, content: String, role: TextRole, tone: TextTone, alignment: TextAlignment) -> i32 {
 	return vk_push_text_role_utf8(runtime, node_id, __kome_string_data(content), __kome_string_len(content), role, tone, alignment)
 }

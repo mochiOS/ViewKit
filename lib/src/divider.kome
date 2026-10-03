@@ -1,4 +1,25 @@
 extern "C" from "viewkit" {
 	// Pushes a divider.
 	fn vk_push_divider(runtime: *mut VkRuntime, node_id: u64) -> i32
+	// Pushes a divider into the active Kome view build.
+	fn vk_kome_push_divider() -> i32
+}
+
+/// 隣接する内容を区切る線を追加します。
+///
+/// ## Example
+///
+/// ```kome
+/// VStack {
+/// 	Text("上")
+/// 	Divider()
+/// 	Text("下")
+/// }
+/// ```
+///
+/// @since 27.0-dp.1
+pub component Divider() {
+	recipe view {
+		vk_kome_push_divider()
+	}
 }

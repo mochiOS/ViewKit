@@ -1,4 +1,33 @@
 extern "C" from "viewkit" {
 	// Begins a padding container.
 	fn vk_begin_padding(runtime: *mut VkRuntime, node_id: u64, top: f32, right: f32, bottom: f32, left: f32) -> i32
+	// Begins a padding container in the active Kome view build.
+	fn vk_kome_begin_padding(top: f32, right: f32, bottom: f32, left: f32) -> i32
+}
+
+/// 内容の周囲へ余白を追加します。
+///
+/// ## Parameters
+///
+/// - `value`: 上下左右へ追加する余白です。
+///
+/// ## Example
+///
+/// ```kome
+/// Padding(16) {
+/// 	Text("Kome")
+/// }
+/// ```
+///
+/// @since 27.0-dp.1
+pub component Padding(value: f32 = 0) {
+	@beforeChildren
+	recipe beginChildren {
+		vk_kome_begin_padding(value, value, value, value)
+	}
+
+	@afterChildren
+	recipe endChildren {
+		vk_kome_end_node()
+	}
 }

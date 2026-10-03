@@ -12,6 +12,7 @@ name = "viewKit"
 source = "src/lib.kome"
 sources = [
 	"src/runtime.kome",
+	"src/styles.kome",
 	"src/state.kome",
 	"src/window.kome",
 	"src/vstack.kome",
