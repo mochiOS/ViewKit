@@ -3,6 +3,30 @@ extern "C" from "viewkit" {
 	fn vk_push_text_utf8(runtime: *mut VkRuntime, node_id: u64, content: *const u8, content_length: usize, font_size: f32, line_height: f32, weight: u16, alignment: u32, color: u32) -> i32
 	// Pushes semantic text from borrowed UTF-8 bytes.
 	fn vk_push_text_role_utf8(runtime: *mut VkRuntime, node_id: u64, content: *const u8, content_length: usize, role: u32, tone: u32, alignment: u32) -> i32
+	// Pushes semantic text into the active Kome view build.
+	fn vk_kome_push_text_role_utf8(content: *const u8, content_length: usize, role: u32, tone: u32, alignment: u32) -> i32
+}
+
+/// 文字列を表示します。
+///
+/// ## Parameters
+///
+/// - `content`: 表示する文字列です。
+/// - `role`: 文字列の意味上の役割です。
+/// - `tone`: 文字色の役割です。
+/// - `alignment`: 文字列の配置です。
+///
+/// ## Example
+///
+/// ```kome
+/// Text("こんにちは")
+/// ```
+///
+/// @since 27.0-dp.1
+pub component Text(content: String, role: u32 = 5, tone: u32 = 0, alignment: u32 = 0) {
+	recipe view {
+		vk_kome_push_text_role_utf8(__kome_string_data(content), __kome_string_len(content), role, tone, alignment)
+	}
 }
 
 /// 内容、書式、配置、色を指定してテキストノードを追加します。

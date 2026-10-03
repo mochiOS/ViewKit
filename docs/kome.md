@@ -137,6 +137,25 @@ pub struct VkRuntime {
 }
 ```
 
+Komeアプリケーションでは、通常は実行環境やノード識別子を直接扱いません。
+
+```kome
+use viewKit::*
+
+fn main() {
+	Window("Kome") {
+		VStack {
+			Text("こんにちは")
+			Button("保存") {
+				save()
+			}
+		}
+	}
+}
+```
+
+`Window`がViewツリーの構築状態を用意し、各部品のノード識別子を自動的に割り当てます。
+
 Kome側ではopaque pointerとして保持します。
 
 ```c

@@ -1,6 +1,38 @@
 extern "C" from "viewkit" {
 	// Begins a horizontal stack container.
 	fn vk_begin_hstack(runtime: *mut VkRuntime, node_id: u64, gap: u32, alignment: u32, distribution: u32) -> i32
+	// Begins a horizontal stack in the active Kome view build.
+	fn vk_kome_begin_hstack(gap: u32, alignment: u32, distribution: u32) -> i32
+}
+
+/// 子の表示内容を水平方向へ並べます。
+///
+/// ## Parameters
+///
+/// - `gap`: 子の間隔です。
+/// - `alignment`: 交差方向の配置です。
+/// - `distribution`: 主方向の配置です。
+///
+/// ## Example
+///
+/// ```kome
+/// HStack {
+/// 	Text("左")
+/// 	Text("右")
+/// }
+/// ```
+///
+/// @since 27.0-dp.1
+pub component HStack(gap: u32 = 3, alignment: u32 = 1, distribution: u32 = 0) {
+	@beforeChildren
+	recipe beginChildren {
+		vk_kome_begin_hstack(gap, alignment, distribution)
+	}
+
+	@afterChildren
+	recipe endChildren {
+		vk_kome_end_node()
+	}
 }
 
 /// 水平方向へ子ノードを並べるコンテナを開始します。
