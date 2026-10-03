@@ -182,20 +182,6 @@ pub(super) fn ipc_call_raw(
     Ok((msg & 0xffff_ffff) as usize)
 }
 
-pub(super) fn ipc_wait_raw(
-    endpoint: u64,
-    buf_ptr: *mut u8,
-    buf_len: usize,
-) -> Result<usize, MochiOsBackendError> {
-    let msg = syscall_result(syscall::call3(
-        syscall::SyscallNumber::IpcWait,
-        buf_ptr as u64,
-        buf_len as u64,
-        endpoint,
-    ))?;
-    Ok((msg & 0xffff_ffff) as usize)
-}
-
 pub(super) fn ipc_wait_handles_raw(
     endpoint: u64,
     buf_ptr: *mut u8,
@@ -303,13 +289,6 @@ pub(super) struct ReceivedHandles {
 }
 
 impl ReceivedHandles {
-    fn empty() -> Self {
-        Self {
-            count: 0,
-            handles: core::array::from_fn(|_| PlatformFileHandle::default()),
-        }
-    }
-
     fn from_raw(
         raw: mochi_user_platform::ipc::IpcFileHandles,
     ) -> Result<Self, MochiOsBackendError> {
@@ -332,17 +311,19 @@ impl ReceivedHandles {
 pub(super) fn try_recv_event()
 -> Result<Option<(usize, [u8; EVENT_BUFFER_SIZE], ReceivedHandles)>, MochiOsBackendError> {
     let event = core::ptr::addr_of_mut!(EVENT_BUF).cast::<u8>();
-    let (len, handles) = match ipc_wait_raw(0, event, EVENT_BUFFER_SIZE) {
-        Ok(len) => (len, ReceivedHandles::empty()),
-        Err(MochiOsBackendError::Syscall(errno)) if errno == mochi_user_syscall::EMSGSIZE => {
-            let raw_handles = core::ptr::addr_of_mut!(EVENT_FILE_HANDLES);
-            let len =
-                ipc_wait_handles_raw(0, event, EVENT_BUFFER_SIZE, unsafe { &mut *raw_handles })?;
-            (len, ReceivedHandles::from_raw(unsafe { *raw_handles })?)
-        }
+    // The handle-aware receive is a strict superset of the legacy receive: it
+    // also accepts ordinary messages and reports an empty handle list.  Use it
+    // for the first dequeue so a delegated document cannot escape the event
+    // loop as EMSGSIZE between two separate receive attempts.
+    let raw_handles = core::ptr::addr_of_mut!(EVENT_FILE_HANDLES);
+    let len = match ipc_wait_handles_raw(0, event, EVENT_BUFFER_SIZE, unsafe {
+        &mut *raw_handles
+    }) {
+        Ok(len) => len,
         Err(MochiOsBackendError::Syscall(ERRNO_EAGAIN)) => return Ok(None),
         Err(err) => return Err(err),
     };
+    let handles = ReceivedHandles::from_raw(unsafe { *raw_handles })?;
     if len < 16 {
         return Err(MochiOsBackendError::InvalidEvent);
     }
@@ -358,18 +339,15 @@ pub(super) fn read_event_blocking(
     endpoint: u64,
 ) -> Result<Option<(usize, [u8; EVENT_BUFFER_SIZE], ReceivedHandles)>, MochiOsBackendError> {
     let event = core::ptr::addr_of_mut!(EVENT_BUF).cast::<u8>();
-    let (len, handles) = match ipc_wait_raw(endpoint, event, EVENT_BUFFER_SIZE) {
-        Ok(len) => (len, ReceivedHandles::empty()),
-        Err(MochiOsBackendError::Syscall(errno)) if errno == mochi_user_syscall::EMSGSIZE => {
-            let raw_handles = core::ptr::addr_of_mut!(EVENT_FILE_HANDLES);
-            let len = ipc_wait_handles_raw(endpoint, event, EVENT_BUFFER_SIZE, unsafe {
-                &mut *raw_handles
-            })?;
-            (len, ReceivedHandles::from_raw(unsafe { *raw_handles })?)
-        }
+    let raw_handles = core::ptr::addr_of_mut!(EVENT_FILE_HANDLES);
+    let len = match ipc_wait_handles_raw(endpoint, event, EVENT_BUFFER_SIZE, unsafe {
+        &mut *raw_handles
+    }) {
+        Ok(len) => len,
         Err(MochiOsBackendError::Syscall(ERRNO_EAGAIN)) => return Ok(None),
         Err(err) => return Err(err),
     };
+    let handles = ReceivedHandles::from_raw(unsafe { *raw_handles })?;
     if len < 16 {
         return Err(MochiOsBackendError::InvalidEvent);
     }
