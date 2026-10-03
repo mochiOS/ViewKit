@@ -19,8 +19,8 @@ use crate::font::{create_font_system, resolve_font_family};
 use crate::geometry::{Rect, Size};
 use crate::image::ImageData;
 use crate::platform::{
-    ButtonState, CursorIcon, Key, KeyModifiers, PlatformApplication, PlatformEvent,
-    PlatformFileHandle, PlatformWindow, PlatformWindowCommand, PointerButton, WindowConfig,
+    ButtonState, CursorIcon, Key, KeyModifiers, PlatformApplication, PlatformEvent, PlatformWindow,
+    PlatformWindowCommand, PointerButton, WindowConfig,
 };
 use crate::renderer::Viewport;
 use crate::svg::SvgData;
@@ -522,7 +522,6 @@ where
             }
             while let Some((len, event, handles)) = try_recv_event()? {
                 if is_application_reopen_message(len, &event) {
-                    close_received_handles(handles.as_slice());
                     if let Some(state) = windows.last() {
                         let _ = simple_token_request(
                             compositor,
@@ -742,7 +741,6 @@ where
                         .map_or(application_endpoint, |state| state.event_endpoint);
                     if let Some((len, event, handles)) = read_event_blocking(endpoint)? {
                         if is_application_reopen_message(len, &event) {
-                            close_received_handles(handles.as_slice());
                             if let Some(state) = windows.last() {
                                 let _ = simple_token_request(
                                     compositor,
@@ -766,21 +764,20 @@ where
         &mut self,
         len: usize,
         event: [u8; EVENT_BUFFER_SIZE],
-        handles: ReceivedHandles,
+        mut handles: ReceivedHandles,
         windows: &mut [MochiWindowState],
     ) -> Result<(), MochiOsBackendError> {
         let message_len = len.min(event.len());
         if self
             .app
-            .handle_platform_message_with_handles(&event[..message_len], handles.as_slice())
+            .handle_platform_message_with_handles(&event[..message_len], handles.as_mut_slice())
         {
             for state in windows {
                 state.window.request_redraw();
             }
             return Ok(());
         }
-        if !handles.as_slice().is_empty() {
-            close_received_handles(handles.as_slice());
+        if !handles.as_mut_slice().is_empty() {
             return Ok(());
         }
 
@@ -1359,14 +1356,6 @@ where
 
 fn is_application_reopen_message(len: usize, event: &[u8; EVENT_BUFFER_SIZE]) -> bool {
     len == 16 && event.get(..16) == Some(b"MAPPREOPEN\0\0\0\0\0\0")
-}
-
-fn close_received_handles(handles: &[PlatformFileHandle]) {
-    for handle in handles {
-        if handle.fd >= 0 {
-            let _ = syscall::call1(syscall::SyscallNumber::FileClose, handle.fd as u64);
-        }
-    }
 }
 
 fn scaled_viewport(width: u32, height: u32, scale_factor: f64) -> Viewport {

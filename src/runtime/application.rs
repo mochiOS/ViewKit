@@ -491,7 +491,7 @@ where
     fn handle_platform_message_with_handles(
         &mut self,
         message: &[u8],
-        handles: &[crate::platform::PlatformFileHandle],
+        handles: &mut [crate::platform::PlatformFileHandle],
     ) -> bool {
         let handled = self
             .app

@@ -39,10 +39,50 @@ pub enum PlatformWindowCommand {
     Redraw { id: WindowId },
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct PlatformFileHandle {
-    pub fd: i32,
-    pub rights: u32,
+    fd: i32,
+    rights: u32,
+}
+
+impl PlatformFileHandle {
+    pub(crate) const fn from_raw(fd: i32, rights: u32) -> Self {
+        Self { fd, rights }
+    }
+
+    pub const fn fd(&self) -> i32 {
+        self.fd
+    }
+
+    pub const fn rights(&self) -> u32 {
+        self.rights
+    }
+
+    /// Moves this received handle out of its delivery batch.
+    ///
+    /// Handles left in the batch are closed automatically when dispatch ends.
+    pub fn take(&mut self) -> Option<Self> {
+        (self.fd >= 0).then(|| core::mem::take(self))
+    }
+}
+
+impl Default for PlatformFileHandle {
+    fn default() -> Self {
+        Self { fd: -1, rights: 0 }
+    }
+}
+
+impl Drop for PlatformFileHandle {
+    fn drop(&mut self) {
+        if self.fd < 0 {
+            return;
+        }
+        #[cfg(target_os = "mochios")]
+        {
+            let _ = mochi_user_platform::file::close(self.fd as u64);
+        }
+        self.fd = -1;
+    }
 }
 
 impl Default for WindowConfig {
@@ -110,7 +150,7 @@ pub trait PlatformApplication {
     fn handle_platform_message_with_handles(
         &mut self,
         message: &[u8],
-        _handles: &[PlatformFileHandle],
+        _handles: &mut [PlatformFileHandle],
     ) -> bool {
         self.handle_platform_message(message)
     }

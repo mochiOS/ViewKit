@@ -335,7 +335,7 @@ pub trait App: Sized + 'static {
     fn handle_platform_message_with_handles(
         &mut self,
         message: &[u8],
-        _handles: &[crate::platform::PlatformFileHandle],
+        _handles: &mut [crate::platform::PlatformFileHandle],
     ) -> bool {
         self.handle_platform_message(message)
     }
