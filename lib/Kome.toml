@@ -10,6 +10,25 @@ name = "viewKit"
 
 [lib]
 source = "src/lib.kome"
+sources = [
+	"src/runtime.kome",
+	"src/state.kome",
+	"src/window.kome",
+	"src/vstack.kome",
+	"src/hstack.kome",
+	"src/zstack.kome",
+	"src/text.kome",
+	"src/button.kome",
+	"src/padding.kome",
+	"src/spacer.kome",
+	"src/divider.kome",
+	"src/context_menu.kome",
+	"src/group.kome",
+	"src/overlay.kome",
+	"src/scroll.kome",
+	"src/text_field.kome",
+	"src/menu.kome",
+]
 
 [resources]
 files = []

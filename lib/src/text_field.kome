@@ -1,0 +1,33 @@
+extern "C" from "viewkit" {
+	// Pushes a text field from borrowed UTF-8 strings.
+	fn vk_push_text_field_utf8(runtime: *mut VkRuntime, node_id: u64, state_id: u64, value: *const u8, value_length: usize, placeholder: *const u8, placeholder_length: usize, size: u32, radius: f32, enabled: u8, invalid: u8) -> i32
+}
+
+/// 入力値と案内文を持つテキスト入力ノードを追加します。
+///
+/// ## Parameters
+///
+/// - `runtime`: 対象のViewKit実行環境です。
+/// - `node_id`: ノードの識別子です。
+/// - `state_id`: 入力値を保持する状態の識別子です。
+/// - `value`: 現在の入力値です。
+/// - `placeholder`: 未入力時に表示する案内文です。
+/// - `size`: 入力欄の大きさです。
+/// - `radius`: 角の半径です。
+/// - `enabled`: 入力できる場合は`1`、できない場合は`0`です。
+/// - `invalid`: 入力が不正な場合は`1`、正常な場合は`0`です。
+///
+/// ## Returns
+///
+/// 操作結果を表すステータスコードを返します。`0`は成功を表します。
+///
+/// ## Example
+///
+/// ```kome
+/// let status = pushViewTextField(runtime, 1, 1, "", "名前", 0, 8, 1, 0)
+/// ```
+///
+/// @since 27.0-dp.1
+pub fn pushViewTextField(runtime: *mut VkRuntime, node_id: u64, state_id: u64, value: String, placeholder: String, size: u32, radius: f32, enabled: u8, invalid: u8) -> i32 {
+	return vk_push_text_field_utf8(runtime, node_id, state_id, __kome_string_data(value), __kome_string_len(value), __kome_string_data(placeholder), __kome_string_len(placeholder), size, radius, enabled, invalid)
+}

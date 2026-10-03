@@ -1,0 +1,37 @@
+extern "C" from "viewkit" {
+	// Creates a ViewKit runtime for a component instance.
+	fn vk_runtime_create(component_instance_id: u64) -> *mut VkRuntime
+	// Destroys a ViewKit runtime.
+	fn vk_runtime_destroy(runtime: *mut VkRuntime) -> i32
+	// Starts building a view tree.
+	fn vk_tree_begin(runtime: *mut VkRuntime, root_node_id: u64) -> i32
+	// Aborts the active view-tree build.
+	fn vk_tree_abort(runtime: *mut VkRuntime) -> i32
+	// Closes the current container node.
+	fn vk_end_node(runtime: *mut VkRuntime) -> i32
+	// Commits the active view tree.
+	fn vk_tree_commit(runtime: *mut VkRuntime) -> i32
+	// Collects pending UI actions.
+	fn vk_runtime_collect_actions(runtime: *mut VkRuntime) -> i32
+}
+
+/// 現在のコンテナノードを終了します。
+///
+/// ## Parameters
+///
+/// - `runtime`: 対象のViewKit実行環境です。
+///
+/// ## Returns
+///
+/// 操作結果を表すステータスコードを返します。`0`は成功を表します。
+///
+/// ## Example
+///
+/// ```kome
+/// let status = endViewNode(runtime)
+/// ```
+///
+/// @since 27.0-dp.1
+pub fn endViewNode(runtime: *mut VkRuntime) -> i32 {
+	return vk_end_node(runtime)
+}

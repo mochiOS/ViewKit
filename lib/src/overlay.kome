@@ -1,0 +1,4 @@
+extern "C" from "viewkit" {
+	// Begins an overlay container.
+	fn vk_begin_overlay(runtime: *mut VkRuntime, node_id: u64, alignment: u32) -> i32
+}

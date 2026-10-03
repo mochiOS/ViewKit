@@ -1,0 +1,4 @@
+extern "C" from "viewkit" {
+	// Begins a depth stack container.
+	fn vk_begin_zstack(runtime: *mut VkRuntime, node_id: u64, alignment: u32) -> i32
+}

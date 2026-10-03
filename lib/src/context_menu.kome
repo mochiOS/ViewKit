@@ -1,0 +1,4 @@
+extern "C" from "viewkit" {
+	// Begins a context-menu container.
+	fn vk_begin_context_menu(runtime: *mut VkRuntime, node_id: u64) -> i32
+}

@@ -1,0 +1,60 @@
+extern "C" from "viewkit" {
+	// Pushes a text node from borrowed UTF-8 bytes.
+	fn vk_push_text_utf8(runtime: *mut VkRuntime, node_id: u64, content: *const u8, content_length: usize, font_size: f32, line_height: f32, weight: u16, alignment: u32, color: u32) -> i32
+	// Pushes semantic text from borrowed UTF-8 bytes.
+	fn vk_push_text_role_utf8(runtime: *mut VkRuntime, node_id: u64, content: *const u8, content_length: usize, role: u32, tone: u32, alignment: u32) -> i32
+}
+
+/// 内容、書式、配置、色を指定してテキストノードを追加します。
+///
+/// ## Parameters
+///
+/// - `runtime`: 対象のViewKit実行環境です。
+/// - `node_id`: ノードの識別子です。
+/// - `content`: 表示する文字列です。
+/// - `font_size`: 文字の大きさです。
+/// - `line_height`: 行の高さです。
+/// - `weight`: 文字の太さです。
+/// - `alignment`: 文字の配置です。
+/// - `color`: 文字色です。
+///
+/// ## Returns
+///
+/// 操作結果を表すステータスコードを返します。`0`は成功を表します。
+///
+/// ## Example
+///
+/// ```kome
+/// let status = pushViewText(runtime, 1, "Kome", 16, 20, 400, 0, 0)
+/// ```
+///
+/// @since 27.0-dp.1
+pub fn pushViewText(runtime: *mut VkRuntime, node_id: u64, content: String, font_size: f32, line_height: f32, weight: u16, alignment: u32, color: u32) -> i32 {
+	return vk_push_text_utf8(runtime, node_id, __kome_string_data(content), __kome_string_len(content), font_size, line_height, weight, alignment, color)
+}
+
+/// 意味上の役割、色調、配置を指定してテキストノードを追加します。
+///
+/// ## Parameters
+///
+/// - `runtime`: 対象のViewKit実行環境です。
+/// - `node_id`: ノードの識別子です。
+/// - `content`: 表示する文字列です。
+/// - `role`: テキストの役割です。
+/// - `tone`: テキストの色調です。
+/// - `alignment`: 文字の配置です。
+///
+/// ## Returns
+///
+/// 操作結果を表すステータスコードを返します。`0`は成功を表します。
+///
+/// ## Example
+///
+/// ```kome
+/// let status = pushViewTextRole(runtime, 1, "Kome", 0, 0, 0)
+/// ```
+///
+/// @since 27.0-dp.1
+pub fn pushViewTextRole(runtime: *mut VkRuntime, node_id: u64, content: String, role: u32, tone: u32, alignment: u32) -> i32 {
+	return vk_push_text_role_utf8(runtime, node_id, __kome_string_data(content), __kome_string_len(content), role, tone, alignment)
+}

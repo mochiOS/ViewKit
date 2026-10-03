@@ -1,0 +1,4 @@
+extern "C" from "viewkit" {
+	// Begins a scroll container.
+	fn vk_begin_scroll(runtime: *mut VkRuntime, node_id: u64, state_id: u64, axis: u32, scrollbar: u32) -> i32
+}

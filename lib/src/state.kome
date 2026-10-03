@@ -1,0 +1,33 @@
+extern "C" from "viewkit" {
+	// Stores a boolean state value.
+	fn vk_state_set_bool(runtime: *mut VkRuntime, state_id: u64, value: u8) -> i32
+	// Stores a floating-point state value.
+	fn vk_state_set_f32(runtime: *mut VkRuntime, state_id: u64, value: f32) -> i32
+	// Stores an unsigned integer state value.
+	fn vk_state_set_u64(runtime: *mut VkRuntime, state_id: u64, value: u64) -> i32
+	// Stores a string state value from borrowed UTF-8 bytes.
+	fn vk_state_set_string_utf8(runtime: *mut VkRuntime, state_id: u64, pointer: *const u8, length: usize) -> i32
+}
+
+/// 文字列をViewKitの状態へ保存します。
+///
+/// ## Parameters
+///
+/// - `runtime`: 対象のViewKit実行環境です。
+/// - `state_id`: 更新する状態の識別子です。
+/// - `value`: 保存する文字列です。
+///
+/// ## Returns
+///
+/// 操作結果を表すステータスコードを返します。`0`は成功を表します。
+///
+/// ## Example
+///
+/// ```kome
+/// let status = setViewString(runtime, 1, "Kome")
+/// ```
+///
+/// @since 27.0-dp.1
+pub fn setViewString(runtime: *mut VkRuntime, state_id: u64, value: String) -> i32 {
+	return vk_state_set_string_utf8(runtime, state_id, __kome_string_data(value), __kome_string_len(value))
+}

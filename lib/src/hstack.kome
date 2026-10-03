@@ -1,0 +1,29 @@
+extern "C" from "viewkit" {
+	// Begins a horizontal stack container.
+	fn vk_begin_hstack(runtime: *mut VkRuntime, node_id: u64, gap: u32, alignment: u32, distribution: u32) -> i32
+}
+
+/// 水平方向へ子ノードを並べるコンテナを開始します。
+///
+/// ## Parameters
+///
+/// - `runtime`: 対象のViewKit実行環境です。
+/// - `node_id`: ノードの識別子です。
+/// - `gap`: 子ノード間の間隔です。
+/// - `alignment`: 交差方向の配置です。
+/// - `distribution`: 主方向の配置です。
+///
+/// ## Returns
+///
+/// 操作結果を表すステータスコードを返します。`0`は成功を表します。
+///
+/// ## Example
+///
+/// ```kome
+/// let status = beginViewHStack(runtime, 1, 8, 0, 0)
+/// ```
+///
+/// @since 27.0-dp.1
+pub fn beginViewHStack(runtime: *mut VkRuntime, node_id: u64, gap: u32, alignment: u32, distribution: u32) -> i32 {
+	return vk_begin_hstack(runtime, node_id, gap, alignment, distribution)
+}

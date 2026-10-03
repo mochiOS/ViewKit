@@ -1,0 +1,31 @@
+extern "C" from "viewkit" {
+	// Pushes a menu item from borrowed UTF-8 strings.
+	fn vk_push_menu_item_utf8(runtime: *mut VkRuntime, node_id: u64, label: *const u8, label_length: usize, shortcut: *const u8, shortcut_length: usize, enabled: u8, danger: u8, action_id: u64) -> i32
+}
+
+/// ラベル、ショートカット、状態、操作識別子を指定してメニュー項目を追加します。
+///
+/// ## Parameters
+///
+/// - `runtime`: 対象のViewKit実行環境です。
+/// - `node_id`: ノードの識別子です。
+/// - `label`: 項目に表示する文字列です。
+/// - `shortcut`: キーボードショートカットです。
+/// - `enabled`: 選択できる場合は`1`、できない場合は`0`です。
+/// - `danger`: 破壊的な操作の場合は`1`、それ以外は`0`です。
+/// - `action_id`: 選択時に通知する操作の識別子です。
+///
+/// ## Returns
+///
+/// 操作結果を表すステータスコードを返します。`0`は成功を表します。
+///
+/// ## Example
+///
+/// ```kome
+/// let status = pushViewMenuItem(runtime, 1, "削除", "", 1, 1, 1)
+/// ```
+///
+/// @since 27.0-dp.1
+pub fn pushViewMenuItem(runtime: *mut VkRuntime, node_id: u64, label: String, shortcut: String, enabled: u8, danger: u8, action_id: u64) -> i32 {
+	return vk_push_menu_item_utf8(runtime, node_id, __kome_string_data(label), __kome_string_len(label), __kome_string_data(shortcut), __kome_string_len(shortcut), enabled, danger, action_id)
+}

@@ -1,0 +1,4 @@
+extern "C" from "viewkit" {
+	// Begins a padding container.
+	fn vk_begin_padding(runtime: *mut VkRuntime, node_id: u64, top: f32, right: f32, bottom: f32, left: f32) -> i32
+}

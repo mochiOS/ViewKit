@@ -1,0 +1,90 @@
+extern "C" from "viewkit" {
+	// Pushes a button from a borrowed UTF-8 title.
+	fn vk_push_button_utf8(runtime: *mut VkRuntime, node_id: u64, title: *const u8, title_length: usize, color: u32, radius: f32, action_id: u64) -> i32
+	// Pushes a button that retains and invokes a Kome closure.
+	fn vk_push_button_action_utf8(runtime: *mut VkRuntime, node_id: u64, title: *const u8, title_length: usize, color: u32, radius: f32, action: () -> Void) -> i32
+	// Pushes a semantic button from a borrowed UTF-8 title.
+	fn vk_push_button_semantic_utf8(runtime: *mut VkRuntime, node_id: u64, title: *const u8, title_length: usize, style: u32, size: u32, action_id: u64) -> i32
+}
+
+/// タイトル、色、角の半径、操作識別子を指定してボタンノードを追加します。
+///
+/// ## Parameters
+///
+/// - `runtime`: 対象のViewKit実行環境です。
+/// - `node_id`: ノードの識別子です。
+/// - `title`: ボタンのタイトルです。
+/// - `color`: ボタンの色です。
+/// - `radius`: 角の半径です。
+/// - `action_id`: 押下時に通知する操作の識別子です。
+///
+/// ## Returns
+///
+/// 操作結果を表すステータスコードを返します。`0`は成功を表します。
+///
+/// ## Example
+///
+/// ```kome
+/// let status = pushViewButton(runtime, 1, "保存", 0, 8, 1)
+/// ```
+///
+/// @since 27.0-dp.1
+pub fn pushViewButton(runtime: *mut VkRuntime, node_id: u64, title: String, color: u32, radius: f32, action_id: u64) -> i32 {
+	return vk_push_button_utf8(runtime, node_id, __kome_string_data(title), __kome_string_len(title), color, radius, action_id)
+}
+
+/// 押したときに指定された処理を実行するボタンノードを追加します。
+///
+/// ViewKitはボタンがViewツリーに存在する間、処理とその捕捉値を保持します。
+///
+/// ## Parameters
+///
+/// - `runtime`: 対象のViewKit実行環境です。
+/// - `nodeId`: ノードの識別子です。
+/// - `title`: ボタンのタイトルです。
+/// - `action`: ボタンを押したときに実行する処理です。
+/// - `color`: ボタンの色です。
+/// - `radius`: 角の半径です。
+///
+/// ## Returns
+///
+/// 操作結果を表すステータスコードを返します。`0`は成功を表します。
+///
+/// ## Example
+///
+/// ```kome
+/// Button(runtime, 1, "保存") {
+/// 	save()
+/// }
+/// ```
+///
+/// @since 27.0-dp.1
+pub fn Button(runtime: *mut VkRuntime, nodeId: u64, title: String, action: () -> Void, color: u32 = 0, radius: f32 = 8) -> i32 {
+	return vk_push_button_action_utf8(runtime, nodeId, __kome_string_data(title), __kome_string_len(title), color, radius, action)
+}
+
+/// 種類、大きさ、操作識別子を指定してボタンノードを追加します。
+///
+/// ## Parameters
+///
+/// - `runtime`: 対象のViewKit実行環境です。
+/// - `node_id`: ノードの識別子です。
+/// - `title`: ボタンのタイトルです。
+/// - `style`: ボタンの種類です。
+/// - `size`: ボタンの大きさです。
+/// - `action_id`: 押下時に通知する操作の識別子です。
+///
+/// ## Returns
+///
+/// 操作結果を表すステータスコードを返します。`0`は成功を表します。
+///
+/// ## Example
+///
+/// ```kome
+/// let status = pushViewButtonSemantic(runtime, 1, "保存", 0, 0, 1)
+/// ```
+///
+/// @since 27.0-dp.1
+pub fn pushViewButtonSemantic(runtime: *mut VkRuntime, node_id: u64, title: String, style: u32, size: u32, action_id: u64) -> i32 {
+	return vk_push_button_semantic_utf8(runtime, node_id, __kome_string_data(title), __kome_string_len(title), style, size, action_id)
+}
