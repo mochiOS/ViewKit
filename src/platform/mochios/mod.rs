@@ -481,6 +481,7 @@ where
         let mut windows = vec![state];
 
         let mut display_list = DisplayList::new();
+        let mut first_frame_presented = false;
         'event_loop: loop {
             let mut handled_work = false;
             for command in self.app.take_window_commands() {
@@ -673,6 +674,10 @@ where
                         .map_err(|error| error.at("surface damage"))?;
                     simple_token_request(compositor, OP_COMMIT, token)
                         .map_err(|error| error.at("surface commit"))?;
+                    if !first_frame_presented {
+                        self.app.first_frame_presented();
+                        first_frame_presented = true;
+                    }
                     if cursor_position_dirty {
                         let scale = state.window.viewport().scale_factor as f32;
                         set_cursor_position(

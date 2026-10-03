@@ -507,6 +507,10 @@ where
         handled
     }
 
+    fn first_frame_presented(&mut self) {
+        self.app.first_frame_presented();
+    }
+
     fn take_window_commands(&mut self) -> Vec<PlatformWindowCommand> {
         // A dialog action may open a blocking system panel. Run it only after
         // the backend has consumed the dialog's Close command and destroyed

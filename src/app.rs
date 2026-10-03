@@ -340,6 +340,9 @@ pub trait App: Sized + 'static {
         self.handle_platform_message(message)
     }
 
+    /// Called once after the platform successfully presents the first frame.
+    fn first_frame_presented(&mut self) {}
+
     /// ウィンドウを閉じる要求を受け入れるか返します。
     ///
     /// 未保存のDocumentなどがあるアプリケーションは`false`を返し、確認UIを

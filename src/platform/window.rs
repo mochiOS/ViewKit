@@ -155,6 +155,8 @@ pub trait PlatformApplication {
         self.handle_platform_message(message)
     }
 
+    fn first_frame_presented(&mut self) {}
+
     /// Reopens the application's main window after external activation.
     fn reopen(&mut self) {}
 
