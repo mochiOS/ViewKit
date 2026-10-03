@@ -488,6 +488,25 @@ where
         handled
     }
 
+    fn handle_platform_message_with_handles(
+        &mut self,
+        message: &[u8],
+        handles: &[crate::platform::PlatformFileHandle],
+    ) -> bool {
+        let handled = self
+            .app
+            .handle_platform_message_with_handles(message, handles);
+        if handled && take_state_changed() {
+            for (&id, state) in &mut self.windows {
+                state.root = None;
+                state.pending_redraw = RedrawRequest::Full;
+                self.pending_window_commands
+                    .push(PlatformWindowCommand::Redraw { id });
+            }
+        }
+        handled
+    }
+
     fn take_window_commands(&mut self) -> Vec<PlatformWindowCommand> {
         // A dialog action may open a blocking system panel. Run it only after
         // the backend has consumed the dialog's Close command and destroyed

@@ -39,6 +39,12 @@ pub enum PlatformWindowCommand {
     Redraw { id: WindowId },
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PlatformFileHandle {
+    pub fd: i32,
+    pub rights: u32,
+}
+
 impl Default for WindowConfig {
     fn default() -> Self {
         Self {
@@ -99,6 +105,14 @@ pub trait PlatformApplication {
 
     fn handle_platform_message(&mut self, _message: &[u8]) -> bool {
         false
+    }
+
+    fn handle_platform_message_with_handles(
+        &mut self,
+        message: &[u8],
+        _handles: &[PlatformFileHandle],
+    ) -> bool {
+        self.handle_platform_message(message)
     }
 
     /// Reopens the application's main window after external activation.

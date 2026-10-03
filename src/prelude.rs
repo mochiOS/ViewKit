@@ -17,7 +17,7 @@ pub use crate::layout::{
     IntoStackChild, IntoStackChildren, LayoutLength, StackAlignment, StackChild, StackDistribution,
     StackGap, ViewExt,
 };
-pub use crate::platform::{CursorIcon, Key, KeyModifiers};
+pub use crate::platform::{CursorIcon, Key, KeyModifiers, PlatformFileHandle};
 pub use crate::runtime::{
     ViewKitError, close_window, key_window, main_window, request_alert_window,
     request_close_key_window, request_close_window, request_document_confirmation_window,

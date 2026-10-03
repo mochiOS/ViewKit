@@ -195,6 +195,23 @@ pub(super) fn ipc_wait_raw(
     Ok((msg & 0xffff_ffff) as usize)
 }
 
+pub(super) fn ipc_wait_handles_raw(
+    endpoint: u64,
+    buf_ptr: *mut u8,
+    buf_len: usize,
+    handles: &mut mochi_user_platform::ipc::IpcFileHandles,
+) -> Result<usize, MochiOsBackendError> {
+    *handles = mochi_user_platform::ipc::IpcFileHandles::default();
+    let msg = syscall_result(syscall::call4(
+        syscall::SyscallNumber::IpcRecvHandles,
+        buf_ptr as u64,
+        buf_len as u64,
+        handles as *mut mochi_user_platform::ipc::IpcFileHandles as u64,
+        endpoint,
+    ))?;
+    Ok((msg & 0xffff_ffff) as usize)
+}
+
 pub(super) fn alloc_shared_page_count(page_count: usize) -> Result<u64, MochiOsBackendError> {
     let virt = syscall_result(syscall::call4(
         syscall::SyscallNumber::AllocSharedPages,
@@ -278,11 +295,56 @@ pub(super) fn status_from_raw(ptr: *const u8, len: usize) -> Result<(), MochiOsB
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(super) struct ReceivedHandles {
+    count: usize,
+    handles: [PlatformFileHandle; 4],
+}
+
+impl ReceivedHandles {
+    fn empty() -> Self {
+        Self {
+            count: 0,
+            handles: [PlatformFileHandle::default(); 4],
+        }
+    }
+
+    fn from_raw(
+        raw: mochi_user_platform::ipc::IpcFileHandles,
+    ) -> Result<Self, MochiOsBackendError> {
+        let count = raw.count as usize;
+        if count > raw.handles.len() || count > 4 {
+            return Err(MochiOsBackendError::InvalidEvent);
+        }
+        let mut handles = [PlatformFileHandle::default(); 4];
+        for (output, input) in handles.iter_mut().zip(raw.handles).take(count) {
+            *output = PlatformFileHandle {
+                fd: input.fd,
+                rights: input.rights,
+            };
+        }
+        Ok(Self { count, handles })
+    }
+
+    pub(super) fn as_slice(&self) -> &[PlatformFileHandle] {
+        &self.handles[..self.count]
+    }
+}
+
 pub(super) fn try_recv_event()
--> Result<Option<(usize, [u8; EVENT_BUFFER_SIZE])>, MochiOsBackendError> {
+-> Result<Option<(usize, [u8; EVENT_BUFFER_SIZE], ReceivedHandles)>, MochiOsBackendError> {
     let event = core::ptr::addr_of_mut!(EVENT_BUF).cast::<u8>();
-    let len = match ipc_wait_raw(0, event, EVENT_BUFFER_SIZE) {
-        Ok(len) => len,
+    let (len, handles) = match ipc_wait_raw(0, event, EVENT_BUFFER_SIZE) {
+        Ok(len) => (len, ReceivedHandles::empty()),
+        Err(MochiOsBackendError::Syscall(errno))
+            if errno == mochi_user_syscall::EMSGSIZE =>
+        {
+            let raw_handles = core::ptr::addr_of_mut!(EVENT_FILE_HANDLES);
+            let len = ipc_wait_handles_raw(0, event, EVENT_BUFFER_SIZE, unsafe {
+                &mut *raw_handles
+            })?;
+            (len, ReceivedHandles::from_raw(unsafe { *raw_handles })?)
+        }
         Err(MochiOsBackendError::Syscall(ERRNO_EAGAIN)) => return Ok(None),
         Err(err) => return Err(err),
     };
@@ -294,15 +356,24 @@ pub(super) fn try_recv_event()
     unsafe {
         core::ptr::copy_nonoverlapping(event, out.as_mut_ptr(), copy_len);
     }
-    Ok(Some((len, out)))
+    Ok(Some((len, out, handles)))
 }
 
 pub(super) fn read_event_blocking(
     endpoint: u64,
-) -> Result<Option<(usize, [u8; EVENT_BUFFER_SIZE])>, MochiOsBackendError> {
+) -> Result<Option<(usize, [u8; EVENT_BUFFER_SIZE], ReceivedHandles)>, MochiOsBackendError> {
     let event = core::ptr::addr_of_mut!(EVENT_BUF).cast::<u8>();
-    let len = match ipc_wait_raw(endpoint, event, EVENT_BUFFER_SIZE) {
-        Ok(len) => len,
+    let (len, handles) = match ipc_wait_raw(endpoint, event, EVENT_BUFFER_SIZE) {
+        Ok(len) => (len, ReceivedHandles::empty()),
+        Err(MochiOsBackendError::Syscall(errno))
+            if errno == mochi_user_syscall::EMSGSIZE =>
+        {
+            let raw_handles = core::ptr::addr_of_mut!(EVENT_FILE_HANDLES);
+            let len = ipc_wait_handles_raw(endpoint, event, EVENT_BUFFER_SIZE, unsafe {
+                &mut *raw_handles
+            })?;
+            (len, ReceivedHandles::from_raw(unsafe { *raw_handles })?)
+        }
         Err(MochiOsBackendError::Syscall(ERRNO_EAGAIN)) => return Ok(None),
         Err(err) => return Err(err),
     };
@@ -314,5 +385,5 @@ pub(super) fn read_event_blocking(
     unsafe {
         core::ptr::copy_nonoverlapping(event, out.as_mut_ptr(), copy_len);
     }
-    Ok(Some((len, out)))
+    Ok(Some((len, out, handles)))
 }

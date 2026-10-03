@@ -331,6 +331,15 @@ pub trait App: Sized + 'static {
         false
     }
 
+    /// Handles a platform message carrying explicitly delegated file handles.
+    fn handle_platform_message_with_handles(
+        &mut self,
+        message: &[u8],
+        _handles: &[crate::platform::PlatformFileHandle],
+    ) -> bool {
+        self.handle_platform_message(message)
+    }
+
     /// ウィンドウを閉じる要求を受け入れるか返します。
     ///
     /// 未保存のDocumentなどがあるアプリケーションは`false`を返し、確認UIを
@@ -367,9 +376,7 @@ mod tests {
         assert!(!modal.is_secure_overlay());
         assert!(!modal.is_fullscreen());
 
-        let fullscreen = WindowOptions::default()
-            .system_modal(true)
-            .fullscreen(true);
+        let fullscreen = WindowOptions::default().system_modal(true).fullscreen(true);
         assert!(fullscreen.is_fullscreen());
         assert!(!fullscreen.is_system_modal());
     }
