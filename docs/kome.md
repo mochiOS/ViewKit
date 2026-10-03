@@ -115,6 +115,18 @@ Rustのクロージャ
 
 ABIでは固定幅整数、浮動小数点、ポインター、長さ、opaque handleのみを使用します。
 
+Komeクロージャは、実行関数、捕捉環境、所有権関数を持つ安定したC ABIのポインターとして渡します。
+ViewKitは保持するクロージャを`retain`し、Viewツリーから破棄するときに`release`します。
+
+```c
+typedef struct KomeClosure {
+    uint64_t code;
+    uint64_t environment;
+    void (*retain)(uint64_t closure);
+    void (*release)(uint64_t closure);
+} KomeClosure;
+```
+
 ## Runtime handle
 
 Kome側は`VkRuntime`の内部構造へアクセスできません。
@@ -546,6 +558,17 @@ pub extern "C" fn vk_push_button(
 Button Nodeを現在開いているコンテナへ追加します。
 
 Buttonはleaf Nodeなので、`vk_end_node`は必要ありません。
+
+Komeクロージャを直接渡す場合は`vk_push_button_action_utf8`を使用します。
+
+```kome
+Button(runtime, 103, "increment") {
+	counter += 1
+}
+```
+
+クロージャはボタンを含むViewツリーが保持し、クリック時に実行します。Viewツリーの置き換えまたは
+実行環境の破棄時に解放されます。
 
 ### color
 

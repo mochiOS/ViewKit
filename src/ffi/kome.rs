@@ -1,6 +1,50 @@
 //! Flat UTF-8 C entry points used by language bindings.
 
-use super::{VkRuntime, VkString};
+use super::tree::{FfiBuiltView, FfiNode, FfiViewFactory, expect_no_children};
+use super::{VkRuntime, VkStatus, VkString};
+
+type KomeClosureOwnership = unsafe extern "C" fn(u64);
+
+/// Stable prefix of a Kome closure passed through the C ABI.
+#[repr(C)]
+pub struct KomeClosure {
+    pub code: u64,
+    pub environment: u64,
+    pub retain: KomeClosureOwnership,
+    pub release: KomeClosureOwnership,
+}
+
+struct OwnedKomeAction {
+    closure: *const KomeClosure,
+}
+
+impl OwnedKomeAction {
+    unsafe fn retain(closure: *const KomeClosure) -> Result<Self, VkStatus> {
+        if closure.is_null() {
+            return Err(VkStatus::NullPointer);
+        }
+        let value = unsafe { &*closure };
+        if value.code == 0 {
+            return Err(VkStatus::InvalidValue);
+        }
+        unsafe { (value.retain)(closure as u64) };
+        Ok(Self { closure })
+    }
+
+    fn invoke(&mut self) {
+        let closure = unsafe { &*self.closure };
+        let function: unsafe extern "C" fn(u64) =
+            unsafe { std::mem::transmute(closure.code as usize) };
+        unsafe { function(closure.environment) };
+    }
+}
+
+impl Drop for OwnedKomeAction {
+    fn drop(&mut self) {
+        let closure = unsafe { &*self.closure };
+        unsafe { (closure.release)(self.closure as u64) };
+    }
+}
 
 unsafe fn borrowed_string(pointer: *const u8, length: usize) -> VkString {
     VkString { pointer, length }
@@ -132,6 +176,46 @@ pub unsafe extern "C" fn vk_push_button_utf8(
     )
 }
 
+/// Pushes a button that owns and invokes a Kome closure when clicked.
+///
+/// # Safety
+///
+/// `title_pointer` must address `title_length` readable bytes for the duration
+/// of the call. `action` must point to a live Kome closure with the signature
+/// `() -> Void`. ViewKit retains it before returning.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn vk_push_button_action_utf8(
+    runtime: *mut VkRuntime,
+    node_id: u64,
+    title_pointer: *const u8,
+    title_length: usize,
+    color: u32,
+    radius: f32,
+    action: *const KomeClosure,
+) -> i32 {
+    super::ffi_status(|| {
+        let title = super::copy_string(unsafe { borrowed_string(title_pointer, title_length) })?;
+        let color = super::decode_button_color(color)?;
+        let radius = super::sanitize_length(radius);
+        let action = unsafe { OwnedKomeAction::retain(action) }?;
+        let factory: FfiViewFactory = Box::new(move |_node_id, children, _context| {
+            expect_no_children(children)?;
+            let mut action = action;
+            let button = crate::components::Button::new(title)
+                .color(color)
+                .radius(crate::theme::CornerRadius::Custom(radius))
+                .on_click(move || action.invoke());
+            Ok(FfiBuiltView::View(Box::new(button)))
+        });
+        let runtime = super::runtime_mut(runtime)?;
+        let builder = super::active_builder(runtime)?;
+        let node = FfiNode::component(node_id, factory);
+        builder.leaf(node);
+        Ok(())
+    })
+}
+
 /// Pushes a semantic button whose title is supplied as borrowed UTF-8 bytes.
 ///
 /// # Safety
@@ -221,4 +305,47 @@ pub unsafe extern "C" fn vk_push_menu_item_utf8(
         danger,
         action_id,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{KomeClosure, OwnedKomeAction};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static INVOCATIONS: AtomicUsize = AtomicUsize::new(0);
+    static RETAINS: AtomicUsize = AtomicUsize::new(0);
+    static RELEASES: AtomicUsize = AtomicUsize::new(0);
+
+    unsafe extern "C" fn invoke(environment: u64) {
+        INVOCATIONS.fetch_add(environment as usize, Ordering::SeqCst);
+    }
+
+    unsafe extern "C" fn retain(_closure: u64) {
+        RETAINS.fetch_add(1, Ordering::SeqCst);
+    }
+
+    unsafe extern "C" fn release(_closure: u64) {
+        RELEASES.fetch_add(1, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn retains_invokes_and_releases_a_kome_action() {
+        INVOCATIONS.store(0, Ordering::SeqCst);
+        RETAINS.store(0, Ordering::SeqCst);
+        RELEASES.store(0, Ordering::SeqCst);
+        let closure = KomeClosure {
+            code: invoke as *const () as usize as u64,
+            environment: 3,
+            retain,
+            release,
+        };
+
+        let mut action = unsafe { OwnedKomeAction::retain(&closure) }.unwrap();
+        action.invoke();
+        drop(action);
+
+        assert_eq!(INVOCATIONS.load(Ordering::SeqCst), 3);
+        assert_eq!(RETAINS.load(Ordering::SeqCst), 1);
+        assert_eq!(RELEASES.load(Ordering::SeqCst), 1);
+    }
 }

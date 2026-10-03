@@ -29,7 +29,7 @@
 
 #define VK_ABI_VERSION_MAJOR 1
 
-#define VK_ABI_VERSION_MINOR 2
+#define VK_ABI_VERSION_MINOR 3
 
 #define VK_ABI_VERSION_PATCH 0
 
@@ -250,8 +250,6 @@ typedef struct RadiusTokens RadiusTokens;
 
 typedef struct SpacingTokens SpacingTokens;
 
-typedef struct TextStyle TextStyle;
-
 typedef struct Theme Theme;
 
 typedef struct Typography Typography;
@@ -321,6 +319,18 @@ typedef struct VkBytes {
   const uint8_t *pointer;
   size_t length;
 } VkBytes;
+
+typedef void (*KomeClosureOwnership)(uint64_t);
+
+/**
+ * Stable prefix of a Kome closure passed through the C ABI.
+ */
+typedef struct KomeClosure {
+  uint64_t code;
+  uint64_t environment;
+  KomeClosureOwnership retain;
+  KomeClosureOwnership release;
+} KomeClosure;
 
 
 
@@ -644,11 +654,26 @@ int32_t vk_push_svg(struct VkRuntime *runtime,
                     uint8_t tint_enabled,
                     struct VkColor tint);
 
+/**
+ * Sets a string state value from borrowed UTF-8 bytes.
+ *
+ * # Safety
+ *
+ * `pointer` must address `length` readable bytes for the duration of the call.
+ */
 int32_t vk_state_set_string_utf8(struct VkRuntime *runtime,
                                  uint64_t state_id,
                                  const uint8_t *pointer,
                                  size_t length);
 
+/**
+ * Runs a ViewKit window whose title is supplied as borrowed UTF-8 bytes.
+ *
+ * # Safety
+ *
+ * `title_pointer` must address `title_length` readable bytes for the duration
+ * of the call.
+ */
 int32_t vk_runtime_run_window_utf8(struct VkRuntime *runtime,
                                    const uint8_t *title_pointer,
                                    size_t title_length,
@@ -656,6 +681,14 @@ int32_t vk_runtime_run_window_utf8(struct VkRuntime *runtime,
                                    float height,
                                    uint8_t resizable);
 
+/**
+ * Pushes a text node whose content is supplied as borrowed UTF-8 bytes.
+ *
+ * # Safety
+ *
+ * `content_pointer` must address `content_length` readable bytes for the
+ * duration of the call.
+ */
 int32_t vk_push_text_utf8(struct VkRuntime *runtime,
                           uint64_t node_id,
                           const uint8_t *content_pointer,
@@ -666,6 +699,14 @@ int32_t vk_push_text_utf8(struct VkRuntime *runtime,
                           uint32_t alignment,
                           uint32_t color);
 
+/**
+ * Pushes a semantic text node from borrowed UTF-8 bytes.
+ *
+ * # Safety
+ *
+ * `content_pointer` must address `content_length` readable bytes for the
+ * duration of the call.
+ */
 int32_t vk_push_text_role_utf8(struct VkRuntime *runtime,
                                uint64_t node_id,
                                const uint8_t *content_pointer,
@@ -674,6 +715,14 @@ int32_t vk_push_text_role_utf8(struct VkRuntime *runtime,
                                uint32_t tone,
                                uint32_t alignment);
 
+/**
+ * Pushes a button whose title is supplied as borrowed UTF-8 bytes.
+ *
+ * # Safety
+ *
+ * `title_pointer` must address `title_length` readable bytes for the duration
+ * of the call.
+ */
 int32_t vk_push_button_utf8(struct VkRuntime *runtime,
                             uint64_t node_id,
                             const uint8_t *title_pointer,
@@ -682,6 +731,31 @@ int32_t vk_push_button_utf8(struct VkRuntime *runtime,
                             float radius,
                             uint64_t action_id);
 
+/**
+ * Pushes a button that owns and invokes a Kome closure when clicked.
+ *
+ * # Safety
+ *
+ * `title_pointer` must address `title_length` readable bytes for the duration
+ * of the call. `action` must point to a live Kome closure with the signature
+ * `() -> Void`. ViewKit retains it before returning.
+ */
+int32_t vk_push_button_action_utf8(struct VkRuntime *runtime,
+                                   uint64_t node_id,
+                                   const uint8_t *title_pointer,
+                                   size_t title_length,
+                                   uint32_t color,
+                                   float radius,
+                                   const struct KomeClosure *action);
+
+/**
+ * Pushes a semantic button whose title is supplied as borrowed UTF-8 bytes.
+ *
+ * # Safety
+ *
+ * `title_pointer` must address `title_length` readable bytes for the duration
+ * of the call.
+ */
 int32_t vk_push_button_semantic_utf8(struct VkRuntime *runtime,
                                      uint64_t node_id,
                                      const uint8_t *title_pointer,
@@ -690,6 +764,14 @@ int32_t vk_push_button_semantic_utf8(struct VkRuntime *runtime,
                                      uint32_t size,
                                      uint64_t action_id);
 
+/**
+ * Pushes a text field using borrowed UTF-8 value and placeholder bytes.
+ *
+ * # Safety
+ *
+ * Each non-null string pointer must address its corresponding readable byte
+ * length for the duration of the call.
+ */
 int32_t vk_push_text_field_utf8(struct VkRuntime *runtime,
                                 uint64_t node_id,
                                 uint64_t state_id,
@@ -702,6 +784,14 @@ int32_t vk_push_text_field_utf8(struct VkRuntime *runtime,
                                 uint8_t enabled,
                                 uint8_t invalid);
 
+/**
+ * Pushes a menu item using borrowed UTF-8 label and shortcut bytes.
+ *
+ * # Safety
+ *
+ * Each non-null string pointer must address its corresponding readable byte
+ * length for the duration of the call.
+ */
 int32_t vk_push_menu_item_utf8(struct VkRuntime *runtime,
                                uint64_t node_id,
                                const uint8_t *label_pointer,
