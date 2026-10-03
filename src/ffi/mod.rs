@@ -17,7 +17,7 @@ use crate::platform::{PlatformApplication, PlatformEvent, PlatformWindow, Window
 use crate::theme::{Color, CornerRadius, Theme};
 use crate::typography::{TextAlignment, TextMeasurer, TextRole};
 use crate::view::{PaintContext, RedrawSchedule, View};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
@@ -32,7 +32,7 @@ mod tree;
 
 use crate::ffi::tree::{
     FfiBuildContext, FfiStateStore, FfiTreeBuilder, FfiTreeBuilderError, SharedActionQueue,
-    SharedStateStore,
+    SharedInvalidation, SharedStateStore,
 };
 use crate::image::ImageData;
 use crate::svg::SvgData;
@@ -438,6 +438,10 @@ pub struct VkRuntime {
 
     actions: SharedActionQueue,
     states: SharedStateStore,
+
+    invalidation: SharedInvalidation,
+
+    kome_content: Option<kome::OwnedKomeContent>,
 }
 
 impl VkRuntime {
@@ -448,6 +452,8 @@ impl VkRuntime {
             builder: None,
             actions: Rc::new(RefCell::new(VecDeque::new())),
             states: Rc::new(RefCell::new(FfiStateStore::default())),
+            invalidation: Rc::new(Cell::new(false)),
+            kome_content: None,
         }
     }
 }
@@ -512,7 +518,13 @@ impl PlatformApplication for VkWindowApplication<'_> {
             context.redraw_request()
         };
 
-        if redraw_request.is_requested() {
+        let rebuilt = if self.runtime.invalidation.replace(false) {
+            kome::rebuild_kome_tree(self.runtime).is_ok()
+        } else {
+            false
+        };
+
+        if redraw_request.is_requested() || rebuilt {
             window.request_redraw();
         }
     }
@@ -695,6 +707,7 @@ pub extern "C" fn vk_tree_commit(runtime: *mut VkRuntime) -> i32 {
             runtime.component_instance_id,
             Rc::clone(&runtime.actions),
             Rc::clone(&runtime.states),
+            Rc::clone(&runtime.invalidation),
         );
 
         let root = tree.build(&mut context)?;

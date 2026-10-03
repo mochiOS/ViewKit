@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 
@@ -11,6 +11,8 @@ use crate::view::View;
 pub(crate) type SharedActionQueue = Rc<RefCell<VecDeque<VkActionEvent>>>;
 
 pub(crate) type SharedStateStore = Rc<RefCell<FfiStateStore>>;
+
+pub(crate) type SharedInvalidation = Rc<Cell<bool>>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FfiStateKind {
@@ -289,6 +291,8 @@ pub(crate) struct FfiBuildContext {
     actions: SharedActionQueue,
     states: SharedStateStore,
 
+    invalidation: SharedInvalidation,
+
     active_state_ids: HashSet<u64>,
 }
 
@@ -297,12 +301,14 @@ impl FfiBuildContext {
         component_instance_id: u64,
         actions: SharedActionQueue,
         states: SharedStateStore,
+        invalidation: SharedInvalidation,
     ) -> Self {
         Self {
             component_instance_id,
 
             actions,
             states,
+            invalidation,
 
             active_state_ids: HashSet::new(),
         }
@@ -405,6 +411,10 @@ impl FfiBuildContext {
                 event_kind: VK_EVENT_BUTTON_CLICKED,
             });
         }
+    }
+
+    pub(crate) fn invalidation(&self) -> SharedInvalidation {
+        Rc::clone(&self.invalidation)
     }
 }
 

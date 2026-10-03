@@ -152,18 +152,49 @@ fn status_result(status: i32) -> Result<(), VkStatus> {
     }
 }
 
-unsafe fn build_kome_tree(action: *const KomeClosure) -> Result<Box<VkRuntime>, VkStatus> {
-    let action = unsafe { action.as_ref() }.ok_or(VkStatus::NullPointer)?;
-    action.validate()?;
-    let mut runtime = Box::new(VkRuntime::new(1));
-    let runtime_pointer = runtime.as_mut() as *mut VkRuntime;
+pub(crate) fn rebuild_kome_tree(runtime: &mut VkRuntime) -> Result<bool, VkStatus> {
+    let content = runtime
+        .kome_content
+        .as_ref()
+        .ok_or(VkStatus::InvalidValue)?
+        .closure;
+    let runtime_pointer = runtime as *mut VkRuntime;
     status_result(super::vk_tree_begin(runtime_pointer, 1))?;
     let guard = KomeBuildGuard::begin(runtime_pointer)?;
-    unsafe { action.invoke_null() };
+    let content = unsafe { &*content };
+    unsafe { content.invoke_null() };
     let state = guard.finish();
     status_result(state.status)?;
     status_result(super::vk_tree_commit(runtime_pointer))?;
+    Ok(true)
+}
+
+unsafe fn build_kome_tree(action: *const KomeClosure) -> Result<Box<VkRuntime>, VkStatus> {
+    let content = unsafe { OwnedKomeContent::retain(action) }?;
+    let mut runtime = Box::new(VkRuntime::new(1));
+    runtime.kome_content = Some(content);
+    rebuild_kome_tree(&mut runtime)?;
     Ok(runtime)
+}
+
+pub(crate) struct OwnedKomeContent {
+    closure: *const KomeClosure,
+}
+
+impl OwnedKomeContent {
+    unsafe fn retain(closure: *const KomeClosure) -> Result<Self, VkStatus> {
+        let value = unsafe { closure.as_ref() }.ok_or(VkStatus::NullPointer)?;
+        value.validate()?;
+        unsafe { (value.retain)(closure as u64) };
+        Ok(Self { closure })
+    }
+}
+
+impl Drop for OwnedKomeContent {
+    fn drop(&mut self) {
+        let closure = unsafe { &*self.closure };
+        unsafe { (closure.release)(self.closure as u64) };
+    }
 }
 
 struct OwnedKomeAction {
@@ -457,10 +488,14 @@ pub unsafe extern "C" fn vk_push_button_action_utf8(
         let factory: FfiViewFactory = Box::new(move |_node_id, children, _context| {
             expect_no_children(children)?;
             let mut action = action;
+            let invalidation = _context.invalidation();
             let button = crate::components::Button::new(title)
                 .color(color)
                 .radius(crate::theme::CornerRadius::Custom(radius))
-                .on_click(move || action.invoke());
+                .on_click(move || {
+                    action.invoke();
+                    invalidation.set(true);
+                });
             Ok(FfiBuiltView::View(Box::new(button)))
         });
         let runtime = super::runtime_mut(runtime)?;
@@ -568,12 +603,14 @@ mod tests {
         KomeClosure, OwnedKomeAction, build_kome_tree, vk_kome_begin_vstack, vk_kome_end_node,
         vk_kome_push_text_role_utf8,
     };
+    use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     static INVOCATIONS: AtomicUsize = AtomicUsize::new(0);
     static RETAINS: AtomicUsize = AtomicUsize::new(0);
     static RELEASES: AtomicUsize = AtomicUsize::new(0);
     static BUILD_ERRORS: AtomicUsize = AtomicUsize::new(0);
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     unsafe extern "C" fn invoke(environment: u64) {
         INVOCATIONS.fetch_add(environment as usize, Ordering::SeqCst);
@@ -605,6 +642,7 @@ mod tests {
 
     #[test]
     fn retains_invokes_and_releases_a_kome_action() {
+        let _guard = TEST_LOCK.lock().unwrap();
         INVOCATIONS.store(0, Ordering::SeqCst);
         RETAINS.store(0, Ordering::SeqCst);
         RELEASES.store(0, Ordering::SeqCst);
@@ -626,6 +664,7 @@ mod tests {
 
     #[test]
     fn builds_a_kome_view_without_explicit_runtime_or_node_ids() {
+        let _guard = TEST_LOCK.lock().unwrap();
         BUILD_ERRORS.store(0, Ordering::SeqCst);
         let closure = KomeClosure {
             code: build_view as *const () as usize as u64,
