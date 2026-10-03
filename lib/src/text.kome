@@ -75,7 +75,7 @@ pub fn pushViewText(runtime: *mut VkRuntime, node_id: u64, content: String, font
 /// ## Example
 ///
 /// ```kome
-/// let status = pushViewTextRole(runtime, 1, "Kome", 0, 0, 0)
+/// let status = pushViewTextRole(runtime, 1, "Kome", .body, .primary, .start)
 /// ```
 ///
 /// @since 27.0-dp.1

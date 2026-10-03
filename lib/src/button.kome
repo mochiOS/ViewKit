@@ -6,7 +6,7 @@ extern "C" from "viewkit" {
 	// Pushes a button into the active Kome view build.
 	fn vk_kome_push_button_action_utf8(title: *const u8, title_length: usize, color: ButtonColor, radius: f32, action: () -> Void) -> i32
 	// Pushes a semantic button from a borrowed UTF-8 title.
-	fn vk_push_button_semantic_utf8(runtime: *mut VkRuntime, node_id: u64, title: *const u8, title_length: usize, style: u32, size: u32, action_id: u64) -> i32
+	fn vk_push_button_semantic_utf8(runtime: *mut VkRuntime, node_id: u64, title: *const u8, title_length: usize, style: ButtonStyle, size: ButtonSize, action_id: u64) -> i32
 }
 
 /// タイトル、色、角の半径、操作識別子を指定してボタンノードを追加します。
@@ -27,7 +27,7 @@ extern "C" from "viewkit" {
 /// ## Example
 ///
 /// ```kome
-/// let status = pushViewButton(runtime, 1, "保存", 0, 8, 1)
+/// let status = pushViewButton(runtime, 1, "保存", .accent, 8, 1)
 /// ```
 ///
 /// @since 27.0-dp.1
@@ -81,10 +81,10 @@ pub fn Button(title: String, action: () -> Void, color: ButtonColor = .accent, r
 /// ## Example
 ///
 /// ```kome
-/// let status = pushViewButtonSemantic(runtime, 1, "保存", 0, 0, 1)
+/// let status = pushViewButtonSemantic(runtime, 1, "保存", .primary, .medium, 1)
 /// ```
 ///
 /// @since 27.0-dp.1
-pub fn pushViewButtonSemantic(runtime: *mut VkRuntime, node_id: u64, title: String, style: u32, size: u32, action_id: u64) -> i32 {
+pub fn pushViewButtonSemantic(runtime: *mut VkRuntime, node_id: u64, title: String, style: ButtonStyle, size: ButtonSize, action_id: u64) -> i32 {
 	return vk_push_button_semantic_utf8(runtime, node_id, __kome_string_data(title), __kome_string_len(title), style, size, action_id)
 }

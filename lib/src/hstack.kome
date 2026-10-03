@@ -52,7 +52,7 @@ pub component HStack(gap: StackGap = .medium, alignment: StackAlignment = .cente
 /// ## Example
 ///
 /// ```kome
-/// let status = beginViewHStack(runtime, 1, 8, 0, 0)
+/// let status = beginViewHStack(runtime, 1, .medium, .start, .start)
 /// ```
 ///
 /// @since 27.0-dp.1

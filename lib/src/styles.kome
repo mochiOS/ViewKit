@@ -120,6 +120,38 @@ pub enum ButtonColor {
 	destructive,
 }
 
+/// ボタンの視覚上の種類を表します。
+///
+/// ## Example
+///
+/// ```kome
+/// pushViewButtonSemantic(runtime, 1, "保存", .primary, .medium, 1)
+/// ```
+///
+/// @since 27.0-dp.1
+pub enum ButtonStyle {
+	standard,
+	primary,
+	accent,
+	ghost,
+	danger,
+}
+
+/// ボタンの大きさを表します。
+///
+/// ## Example
+///
+/// ```kome
+/// pushViewButtonSemantic(runtime, 1, "保存", .primary, .large, 1)
+/// ```
+///
+/// @since 27.0-dp.1
+pub enum ButtonSize {
+	small,
+	medium,
+	large,
+}
+
 /// スクロールできる方向を表します。
 ///
 /// ## Example

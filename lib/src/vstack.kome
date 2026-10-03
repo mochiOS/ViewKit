@@ -52,7 +52,7 @@ pub component VStack(gap: StackGap = .medium, alignment: StackAlignment = .cente
 /// ## Example
 ///
 /// ```kome
-/// let status = beginViewVStack(runtime, 1, 8, 0, 0)
+/// let status = beginViewVStack(runtime, 1, .medium, .start, .start)
 /// ```
 ///
 /// @since 27.0-dp.1
