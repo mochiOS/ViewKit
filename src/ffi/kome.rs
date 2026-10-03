@@ -2,6 +2,7 @@
 
 use super::tree::{FfiBuiltView, FfiNode, FfiViewFactory, expect_no_children};
 use super::{VkRuntime, VkStatus, VkString};
+use std::cell::RefCell;
 
 type KomeClosureOwnership = unsafe extern "C" fn(u64);
 
@@ -12,6 +13,157 @@ pub struct KomeClosure {
     pub environment: u64,
     pub retain: KomeClosureOwnership,
     pub release: KomeClosureOwnership,
+}
+
+impl KomeClosure {
+    fn validate(&self) -> Result<(), VkStatus> {
+        if self.code == 0 {
+            Err(VkStatus::InvalidValue)
+        } else {
+            Ok(())
+        }
+    }
+
+    unsafe fn invoke(&self) {
+        let function: unsafe extern "C" fn(u64) =
+            unsafe { std::mem::transmute(self.code as usize) };
+        unsafe { function(self.environment) };
+    }
+
+    unsafe fn invoke_null(&self) {
+        let function: unsafe extern "C" fn(u64) -> u8 =
+            unsafe { std::mem::transmute(self.code as usize) };
+        let _ = unsafe { function(self.environment) };
+    }
+}
+
+#[derive(Clone, Copy)]
+struct KomeBuildState {
+    runtime: *mut VkRuntime,
+    next_node_id: u64,
+    status: i32,
+}
+
+thread_local! {
+    static KOME_BUILD_STATE: RefCell<Option<KomeBuildState>> = const { RefCell::new(None) };
+}
+
+struct KomeBuildGuard;
+
+impl KomeBuildGuard {
+    fn begin(runtime: *mut VkRuntime) -> Result<Self, VkStatus> {
+        KOME_BUILD_STATE.with(|slot| {
+            let mut state = slot.borrow_mut();
+            if state.is_some() {
+                return Err(VkStatus::BuilderAlreadyActive);
+            }
+            *state = Some(KomeBuildState {
+                runtime,
+                next_node_id: 2,
+                status: VkStatus::Ok as i32,
+            });
+            Ok(Self)
+        })
+    }
+
+    fn finish(self) -> KomeBuildState {
+        KOME_BUILD_STATE.with(|slot| slot.borrow_mut().take().expect("Kome build state exists"))
+    }
+}
+
+impl Drop for KomeBuildGuard {
+    fn drop(&mut self) {
+        KOME_BUILD_STATE.with(|slot| {
+            slot.borrow_mut().take();
+        });
+    }
+}
+
+fn remember_kome_status(status: i32) -> i32 {
+    if status != VkStatus::Ok as i32 {
+        KOME_BUILD_STATE.with(|slot| {
+            if let Some(state) = slot.borrow_mut().as_mut()
+                && state.status == VkStatus::Ok as i32
+            {
+                state.status = status;
+            }
+        });
+    }
+    status
+}
+
+fn with_kome_node(operation: impl FnOnce(*mut VkRuntime, u64) -> i32) -> i32 {
+    let Some((runtime, node_id, status)) = KOME_BUILD_STATE.with(|slot| {
+        let mut state = slot.borrow_mut();
+        let state = state.as_mut()?;
+        let node_id = state.next_node_id;
+        state.next_node_id = state.next_node_id.saturating_add(1);
+        Some((state.runtime, node_id, state.status))
+    }) else {
+        return VkStatus::NoActiveBuilder as i32;
+    };
+    if status != VkStatus::Ok as i32 {
+        return status;
+    }
+    remember_kome_status(operation(runtime, node_id))
+}
+
+fn with_kome_runtime(operation: impl FnOnce(*mut VkRuntime) -> i32) -> i32 {
+    let Some((runtime, status)) = KOME_BUILD_STATE.with(|slot| {
+        let state = slot.borrow();
+        let state = state.as_ref()?;
+        Some((state.runtime, state.status))
+    }) else {
+        return VkStatus::NoActiveBuilder as i32;
+    };
+    if status != VkStatus::Ok as i32 {
+        return status;
+    }
+    remember_kome_status(operation(runtime))
+}
+
+fn status_result(status: i32) -> Result<(), VkStatus> {
+    if status == VkStatus::Ok as i32 {
+        Ok(())
+    } else {
+        Err(match status {
+            value if value == VkStatus::NullPointer as i32 => VkStatus::NullPointer,
+            value if value == VkStatus::InvalidUtf8 as i32 => VkStatus::InvalidUtf8,
+            value if value == VkStatus::BuilderAlreadyActive as i32 => {
+                VkStatus::BuilderAlreadyActive
+            }
+            value if value == VkStatus::NoActiveBuilder as i32 => VkStatus::NoActiveBuilder,
+            value if value == VkStatus::NoOpenNode as i32 => VkStatus::NoOpenNode,
+            value if value == VkStatus::UnclosedNodes as i32 => VkStatus::UnclosedNodes,
+            value if value == VkStatus::MultipleRoots as i32 => VkStatus::MultipleRoots,
+            value if value == VkStatus::MissingRoot as i32 => VkStatus::MissingRoot,
+            value if value == VkStatus::InvalidEnumValue as i32 => VkStatus::InvalidEnumValue,
+            value if value == VkStatus::UnsupportedEvent as i32 => VkStatus::UnsupportedEvent,
+            value if value == VkStatus::PlatformError as i32 => VkStatus::PlatformError,
+            value if value == VkStatus::UnsupportedPlatform as i32 => VkStatus::UnsupportedPlatform,
+            value if value == VkStatus::InvalidChildCount as i32 => VkStatus::InvalidChildCount,
+            value if value == VkStatus::InvalidTreeNode as i32 => VkStatus::InvalidTreeNode,
+            value if value == VkStatus::StateNotFound as i32 => VkStatus::StateNotFound,
+            value if value == VkStatus::StateTypeMismatch as i32 => VkStatus::StateTypeMismatch,
+            value if value == VkStatus::BufferTooSmall as i32 => VkStatus::BufferTooSmall,
+            value if value == VkStatus::InvalidValue as i32 => VkStatus::InvalidValue,
+            _ => VkStatus::Panic,
+        })
+    }
+}
+
+unsafe fn build_kome_tree(action: *const KomeClosure) -> Result<Box<VkRuntime>, VkStatus> {
+    let action = unsafe { action.as_ref() }.ok_or(VkStatus::NullPointer)?;
+    action.validate()?;
+    let mut runtime = Box::new(VkRuntime::new(1));
+    let runtime_pointer = runtime.as_mut() as *mut VkRuntime;
+    status_result(super::vk_tree_begin(runtime_pointer, 1))?;
+    let guard = KomeBuildGuard::begin(runtime_pointer)?;
+    unsafe { action.invoke_null() };
+    let state = guard.finish();
+    status_result(state.status)?;
+    status_result(super::vk_tree_commit(runtime_pointer))?;
+    Ok(runtime)
 }
 
 struct OwnedKomeAction {
@@ -33,10 +185,113 @@ impl OwnedKomeAction {
 
     fn invoke(&mut self) {
         let closure = unsafe { &*self.closure };
-        let function: unsafe extern "C" fn(u64) =
-            unsafe { std::mem::transmute(closure.code as usize) };
-        unsafe { function(closure.environment) };
+        unsafe { closure.invoke() };
     }
+}
+
+/// Runs a window built by a Kome closure without exposing runtime or node identifiers.
+///
+/// # Safety
+///
+/// `title_pointer` must address `title_length` readable bytes for the duration of the call.
+/// `content` must point to a live Kome closure with the signature `() -> Null`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn vk_kome_run_window_action_utf8(
+    title_pointer: *const u8,
+    title_length: usize,
+    width: f32,
+    height: f32,
+    resizable: u8,
+    content: *const KomeClosure,
+) -> i32 {
+    super::ffi_status(|| {
+        let mut runtime = unsafe { build_kome_tree(content) }?;
+        status_result(unsafe {
+            vk_runtime_run_window_utf8(
+                runtime.as_mut(),
+                title_pointer,
+                title_length,
+                width,
+                height,
+                resizable,
+            )
+        })
+    })
+}
+
+/// Begins a vertical stack in the active Kome view build.
+#[unsafe(no_mangle)]
+pub extern "C" fn vk_kome_begin_vstack(gap: u32, alignment: u32, distribution: u32) -> i32 {
+    with_kome_node(|runtime, node_id| {
+        super::vk_begin_vstack(runtime, node_id, gap, alignment, distribution)
+    })
+}
+
+/// Begins a horizontal stack in the active Kome view build.
+#[unsafe(no_mangle)]
+pub extern "C" fn vk_kome_begin_hstack(gap: u32, alignment: u32, distribution: u32) -> i32 {
+    with_kome_node(|runtime, node_id| {
+        super::vk_begin_hstack(runtime, node_id, gap, alignment, distribution)
+    })
+}
+
+/// Ends the current container in the active Kome view build.
+#[unsafe(no_mangle)]
+pub extern "C" fn vk_kome_end_node() -> i32 {
+    with_kome_runtime(|runtime| super::vk_end_node(runtime))
+}
+
+/// Pushes semantic text into the active Kome view build.
+///
+/// # Safety
+///
+/// `content_pointer` must address `content_length` readable bytes for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn vk_kome_push_text_role_utf8(
+    content_pointer: *const u8,
+    content_length: usize,
+    role: u32,
+    tone: u32,
+    alignment: u32,
+) -> i32 {
+    with_kome_node(|runtime, node_id| unsafe {
+        vk_push_text_role_utf8(
+            runtime,
+            node_id,
+            content_pointer,
+            content_length,
+            role,
+            tone,
+            alignment,
+        )
+    })
+}
+
+/// Pushes a closure-backed button into the active Kome view build.
+///
+/// # Safety
+///
+/// `title_pointer` must address `title_length` readable bytes for the duration of the call.
+/// `action` must point to a live Kome closure with the signature `() -> Void`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn vk_kome_push_button_action_utf8(
+    title_pointer: *const u8,
+    title_length: usize,
+    color: u32,
+    radius: f32,
+    action: *const KomeClosure,
+) -> i32 {
+    with_kome_node(|runtime, node_id| unsafe {
+        vk_push_button_action_utf8(
+            runtime,
+            node_id,
+            title_pointer,
+            title_length,
+            color,
+            radius,
+            action,
+        )
+    })
 }
 
 impl Drop for OwnedKomeAction {
@@ -309,12 +564,16 @@ pub unsafe extern "C" fn vk_push_menu_item_utf8(
 
 #[cfg(test)]
 mod tests {
-    use super::{KomeClosure, OwnedKomeAction};
+    use super::{
+        KomeClosure, OwnedKomeAction, build_kome_tree, vk_kome_begin_vstack, vk_kome_end_node,
+        vk_kome_push_text_role_utf8,
+    };
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     static INVOCATIONS: AtomicUsize = AtomicUsize::new(0);
     static RETAINS: AtomicUsize = AtomicUsize::new(0);
     static RELEASES: AtomicUsize = AtomicUsize::new(0);
+    static BUILD_ERRORS: AtomicUsize = AtomicUsize::new(0);
 
     unsafe extern "C" fn invoke(environment: u64) {
         INVOCATIONS.fetch_add(environment as usize, Ordering::SeqCst);
@@ -326,6 +585,22 @@ mod tests {
 
     unsafe extern "C" fn release(_closure: u64) {
         RELEASES.fetch_add(1, Ordering::SeqCst);
+    }
+
+    unsafe extern "C" fn build_view(_environment: u64) -> u8 {
+        let mut errors = 0;
+        if vk_kome_begin_vstack(2, 1, 0) != 0 {
+            errors += 1;
+        }
+        let content = "Kome";
+        if unsafe { vk_kome_push_text_role_utf8(content.as_ptr(), content.len(), 5, 0, 0) } != 0 {
+            errors += 1;
+        }
+        if vk_kome_end_node() != 0 {
+            errors += 1;
+        }
+        BUILD_ERRORS.store(errors, Ordering::SeqCst);
+        0
     }
 
     #[test]
@@ -347,5 +622,22 @@ mod tests {
         assert_eq!(INVOCATIONS.load(Ordering::SeqCst), 3);
         assert_eq!(RETAINS.load(Ordering::SeqCst), 1);
         assert_eq!(RELEASES.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn builds_a_kome_view_without_explicit_runtime_or_node_ids() {
+        BUILD_ERRORS.store(0, Ordering::SeqCst);
+        let closure = KomeClosure {
+            code: build_view as *const () as usize as u64,
+            environment: 0,
+            retain,
+            release,
+        };
+
+        let runtime = unsafe { build_kome_tree(&closure) }.unwrap();
+
+        assert_eq!(BUILD_ERRORS.load(Ordering::SeqCst), 0);
+        assert!(runtime.root.is_some());
+        assert!(runtime.builder.is_none());
     }
 }

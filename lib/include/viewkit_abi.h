@@ -29,7 +29,7 @@
 
 #define VK_ABI_VERSION_MAJOR 1
 
-#define VK_ABI_VERSION_MINOR 3
+#define VK_ABI_VERSION_MINOR 4
 
 #define VK_ABI_VERSION_PATCH 0
 
@@ -653,6 +653,63 @@ int32_t vk_push_svg(struct VkRuntime *runtime,
                     float opacity,
                     uint8_t tint_enabled,
                     struct VkColor tint);
+
+/**
+ * Runs a window built by a Kome closure without exposing runtime or node identifiers.
+ *
+ * # Safety
+ *
+ * `title_pointer` must address `title_length` readable bytes for the duration of the call.
+ * `content` must point to a live Kome closure with the signature `() -> Null`.
+ */
+int32_t vk_kome_run_window_action_utf8(const uint8_t *title_pointer,
+                                       size_t title_length,
+                                       float width,
+                                       float height,
+                                       uint8_t resizable,
+                                       const struct KomeClosure *content);
+
+/**
+ * Begins a vertical stack in the active Kome view build.
+ */
+int32_t vk_kome_begin_vstack(uint32_t gap, uint32_t alignment, uint32_t distribution);
+
+/**
+ * Begins a horizontal stack in the active Kome view build.
+ */
+int32_t vk_kome_begin_hstack(uint32_t gap, uint32_t alignment, uint32_t distribution);
+
+/**
+ * Ends the current container in the active Kome view build.
+ */
+int32_t vk_kome_end_node(void);
+
+/**
+ * Pushes semantic text into the active Kome view build.
+ *
+ * # Safety
+ *
+ * `content_pointer` must address `content_length` readable bytes for the duration of the call.
+ */
+int32_t vk_kome_push_text_role_utf8(const uint8_t *content_pointer,
+                                    size_t content_length,
+                                    uint32_t role,
+                                    uint32_t tone,
+                                    uint32_t alignment);
+
+/**
+ * Pushes a closure-backed button into the active Kome view build.
+ *
+ * # Safety
+ *
+ * `title_pointer` must address `title_length` readable bytes for the duration of the call.
+ * `action` must point to a live Kome closure with the signature `() -> Void`.
+ */
+int32_t vk_kome_push_button_action_utf8(const uint8_t *title_pointer,
+                                        size_t title_length,
+                                        uint32_t color,
+                                        float radius,
+                                        const struct KomeClosure *action);
 
 /**
  * Sets a string state value from borrowed UTF-8 bytes.

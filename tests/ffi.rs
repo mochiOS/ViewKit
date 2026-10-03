@@ -505,13 +505,13 @@ fn ffi_builds_rectangle_and_background() {
 fn ffi_reports_abi_version() {
     assert_eq!(VK_ABI_VERSION_MAJOR, 1,);
 
-    assert_eq!(VK_ABI_VERSION_MINOR, 2,);
+    assert_eq!(VK_ABI_VERSION_MINOR, 4,);
 
     assert_eq!(VK_ABI_VERSION_PATCH, 0,);
 
     assert_eq!(vk_abi_version(), VK_ABI_VERSION,);
 
-    assert_eq!(vk_abi_version(), 0x0001_0200,);
+    assert_eq!(vk_abi_version(), 0x0001_0400,);
 }
 
 #[test]

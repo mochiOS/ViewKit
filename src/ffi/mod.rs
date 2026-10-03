@@ -50,7 +50,7 @@ pub const VK_Z_ALIGNMENT_BOTTOM: u32 = 7;
 pub const VK_Z_ALIGNMENT_BOTTOM_TRAILING: u32 = 8;
 
 pub const VK_ABI_VERSION_MAJOR: u32 = 1;
-pub const VK_ABI_VERSION_MINOR: u32 = 3;
+pub const VK_ABI_VERSION_MINOR: u32 = 4;
 pub const VK_ABI_VERSION_PATCH: u32 = 0;
 
 pub const VK_IMAGE_CONTENT_MODE_FIT: u32 = 0;
