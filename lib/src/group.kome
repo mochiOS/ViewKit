@@ -1,4 +1,30 @@
 extern "C" from "viewkit" {
 	// Begins a transparent group container.
 	fn vk_begin_group(runtime: *mut VkRuntime, node_id: u64) -> i32
+	// Begins a transparent group in the active Kome view build.
+	fn vk_kome_begin_group() -> i32
+}
+
+/// 見た目や配置を変えずに複数の子要素をまとめます。
+///
+/// ## Example
+///
+/// ```kome
+/// Group {
+/// 	Text("1")
+/// 	Text("2")
+/// }
+/// ```
+///
+/// @since 27.0-dp.1
+pub component Group() {
+	@beforeChildren
+	recipe beginChildren {
+		vk_kome_begin_group()
+	}
+
+	@afterChildren
+	recipe endChildren {
+		vk_kome_end_node()
+	}
 }

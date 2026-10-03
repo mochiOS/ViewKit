@@ -51,6 +51,27 @@ pub enum StackDistribution {
 	spaceEvenly,
 }
 
+/// 重なった子要素を配置する位置を表します。
+///
+/// ## Example
+///
+/// ```kome
+/// ZStack(alignment: .bottomTrailing) { Text("Kome") }
+/// ```
+///
+/// @since 27.0-dp.1
+pub enum ZStackAlignment {
+	topLeading,
+	top,
+	topTrailing,
+	leading,
+	center,
+	trailing,
+	bottomLeading,
+	bottom,
+	bottomTrailing,
+}
+
 /// 文字列の水平方向の配置を表します。
 ///
 /// ## Example

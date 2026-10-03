@@ -266,6 +266,30 @@ pub extern "C" fn vk_kome_begin_hstack(gap: u32, alignment: u32, distribution: u
     })
 }
 
+/// Begins a depth stack in the active Kome view build.
+#[unsafe(no_mangle)]
+pub extern "C" fn vk_kome_begin_zstack(alignment: u32) -> i32 {
+    with_kome_node(|runtime, node_id| super::vk_begin_zstack(runtime, node_id, alignment))
+}
+
+/// Begins a transparent group in the active Kome view build.
+#[unsafe(no_mangle)]
+pub extern "C" fn vk_kome_begin_group() -> i32 {
+    with_kome_node(|runtime, node_id| super::vk_begin_group(runtime, node_id))
+}
+
+/// Begins an overlay in the active Kome view build.
+#[unsafe(no_mangle)]
+pub extern "C" fn vk_kome_begin_overlay(alignment: u32) -> i32 {
+    with_kome_node(|runtime, node_id| super::vk_begin_overlay(runtime, node_id, alignment))
+}
+
+/// Begins a context menu in the active Kome view build.
+#[unsafe(no_mangle)]
+pub extern "C" fn vk_kome_begin_context_menu() -> i32 {
+    with_kome_node(|runtime, node_id| super::vk_begin_context_menu(runtime, node_id))
+}
+
 /// Begins a padding container in the active Kome view build.
 #[unsafe(no_mangle)]
 pub extern "C" fn vk_kome_begin_padding(top: f32, right: f32, bottom: f32, left: f32) -> i32 {
@@ -346,6 +370,39 @@ pub unsafe extern "C" fn vk_kome_push_button_action_utf8(
             title_length,
             color,
             radius,
+            action,
+        )
+    })
+}
+
+/// Pushes a closure-backed menu item into the active Kome view build.
+///
+/// # Safety
+///
+/// Each non-null string pointer must address its corresponding readable byte
+/// length for the duration of the call. `action` must point to a live Kome
+/// closure with the signature `() -> Void`.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn vk_kome_push_menu_item_action_utf8(
+    label_pointer: *const u8,
+    label_length: usize,
+    shortcut_pointer: *const u8,
+    shortcut_length: usize,
+    enabled: u8,
+    danger: u8,
+    action: *const KomeClosure,
+) -> i32 {
+    with_kome_node(|runtime, node_id| unsafe {
+        vk_push_menu_item_action_utf8(
+            runtime,
+            node_id,
+            label_pointer,
+            label_length,
+            shortcut_pointer,
+            shortcut_length,
+            enabled,
+            danger,
             action,
         )
     })
@@ -656,6 +713,55 @@ pub unsafe extern "C" fn vk_push_menu_item_utf8(
         danger,
         action_id,
     )
+}
+
+/// Pushes a menu item that owns and invokes a Kome closure when selected.
+///
+/// # Safety
+///
+/// Each non-null string pointer must address its corresponding readable byte
+/// length for the duration of the call. `action` must point to a live Kome
+/// closure with the signature `() -> Void`. ViewKit retains it before returning.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn vk_push_menu_item_action_utf8(
+    runtime: *mut VkRuntime,
+    node_id: u64,
+    label_pointer: *const u8,
+    label_length: usize,
+    shortcut_pointer: *const u8,
+    shortcut_length: usize,
+    enabled: u8,
+    danger: u8,
+    action: *const KomeClosure,
+) -> i32 {
+    super::ffi_status(|| {
+        let label = super::copy_string(unsafe { borrowed_string(label_pointer, label_length) })?;
+        let shortcut =
+            super::copy_string(unsafe { borrowed_string(shortcut_pointer, shortcut_length) })?;
+        let action = unsafe { OwnedKomeAction::retain(action) }?;
+        let factory: FfiViewFactory = Box::new(move |_node_id, children, context| {
+            expect_no_children(children)?;
+            let mut action = action;
+            let invalidation = context.invalidation();
+            let mut item = crate::components::MenuItem::new(label)
+                .enabled(enabled != 0)
+                .danger(danger != 0)
+                .on_select(move || {
+                    action.invoke();
+                    invalidation.set(true);
+                });
+            if !shortcut.is_empty() {
+                item = item.shortcut(shortcut);
+            }
+            Ok(FfiBuiltView::View(Box::new(item)))
+        });
+        let runtime = super::runtime_mut(runtime)?;
+        let builder = super::active_builder(runtime)?;
+        let node = FfiNode::component(node_id, factory);
+        builder.leaf(node);
+        Ok(())
+    })
 }
 
 #[cfg(test)]

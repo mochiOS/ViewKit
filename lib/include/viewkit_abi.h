@@ -29,7 +29,7 @@
 
 #define VK_ABI_VERSION_MAJOR 1
 
-#define VK_ABI_VERSION_MINOR 5
+#define VK_ABI_VERSION_MINOR 6
 
 #define VK_ABI_VERSION_PATCH 0
 
@@ -680,6 +680,26 @@ int32_t vk_kome_begin_vstack(uint32_t gap, uint32_t alignment, uint32_t distribu
 int32_t vk_kome_begin_hstack(uint32_t gap, uint32_t alignment, uint32_t distribution);
 
 /**
+ * Begins a depth stack in the active Kome view build.
+ */
+int32_t vk_kome_begin_zstack(uint32_t alignment);
+
+/**
+ * Begins a transparent group in the active Kome view build.
+ */
+int32_t vk_kome_begin_group(void);
+
+/**
+ * Begins an overlay in the active Kome view build.
+ */
+int32_t vk_kome_begin_overlay(uint32_t alignment);
+
+/**
+ * Begins a context menu in the active Kome view build.
+ */
+int32_t vk_kome_begin_context_menu(void);
+
+/**
  * Begins a padding container in the active Kome view build.
  */
 int32_t vk_kome_begin_padding(float top, float right, float bottom, float left);
@@ -730,6 +750,23 @@ int32_t vk_kome_push_button_action_utf8(const uint8_t *title_pointer,
                                         uint32_t color,
                                         float radius,
                                         const struct KomeClosure *action);
+
+/**
+ * Pushes a closure-backed menu item into the active Kome view build.
+ *
+ * # Safety
+ *
+ * Each non-null string pointer must address its corresponding readable byte
+ * length for the duration of the call. `action` must point to a live Kome
+ * closure with the signature `() -> Void`.
+ */
+int32_t vk_kome_push_menu_item_action_utf8(const uint8_t *label_pointer,
+                                           size_t label_length,
+                                           const uint8_t *shortcut_pointer,
+                                           size_t shortcut_length,
+                                           uint8_t enabled,
+                                           uint8_t danger,
+                                           const struct KomeClosure *action);
 
 /**
  * Pushes a text field into the active Kome view build.
@@ -895,5 +932,24 @@ int32_t vk_push_menu_item_utf8(struct VkRuntime *runtime,
                                uint8_t enabled,
                                uint8_t danger,
                                uint64_t action_id);
+
+/**
+ * Pushes a menu item that owns and invokes a Kome closure when selected.
+ *
+ * # Safety
+ *
+ * Each non-null string pointer must address its corresponding readable byte
+ * length for the duration of the call. `action` must point to a live Kome
+ * closure with the signature `() -> Void`. ViewKit retains it before returning.
+ */
+int32_t vk_push_menu_item_action_utf8(struct VkRuntime *runtime,
+                                      uint64_t node_id,
+                                      const uint8_t *label_pointer,
+                                      size_t label_length,
+                                      const uint8_t *shortcut_pointer,
+                                      size_t shortcut_length,
+                                      uint8_t enabled,
+                                      uint8_t danger,
+                                      const struct KomeClosure *action);
 
 #endif  /* VIEWKIT_ABI_H */

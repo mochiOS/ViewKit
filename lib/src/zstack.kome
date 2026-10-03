@@ -1,4 +1,34 @@
 extern "C" from "viewkit" {
 	// Begins a depth stack container.
 	fn vk_begin_zstack(runtime: *mut VkRuntime, node_id: u64, alignment: u32) -> i32
+	// Begins a depth stack in the active Kome view build.
+	fn vk_kome_begin_zstack(alignment: ZStackAlignment) -> i32
+}
+
+/// 子の表示内容を奥行き方向へ重ねます。
+///
+/// ## Parameters
+///
+/// - `alignment`: 子を揃える位置です。
+///
+/// ## Example
+///
+/// ```kome
+/// ZStack(alignment: .bottomTrailing) {
+/// 	Text("背景")
+/// 	Text("前面")
+/// }
+/// ```
+///
+/// @since 27.0-dp.1
+pub component ZStack(alignment: ZStackAlignment = .center) {
+	@beforeChildren
+	recipe beginChildren {
+		vk_kome_begin_zstack(alignment)
+	}
+
+	@afterChildren
+	recipe endChildren {
+		vk_kome_end_node()
+	}
 }

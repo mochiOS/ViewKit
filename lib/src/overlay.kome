@@ -1,4 +1,36 @@
 extern "C" from "viewkit" {
 	// Begins an overlay container.
 	fn vk_begin_overlay(runtime: *mut VkRuntime, node_id: u64, alignment: u32) -> i32
+	// Begins an overlay in the active Kome view build.
+	fn vk_kome_begin_overlay(alignment: ZStackAlignment) -> i32
+}
+
+/// 1つ目の子要素の前面へ2つ目の子要素を重ねます。
+///
+/// 子要素は必ず2つ指定します。
+///
+/// ## Parameters
+///
+/// - `alignment`: 前面の子を揃える位置です。
+///
+/// ## Example
+///
+/// ```kome
+/// Overlay(alignment: .bottomTrailing) {
+/// 	Text("内容")
+/// 	Text("状態")
+/// }
+/// ```
+///
+/// @since 27.0-dp.1
+pub component Overlay(alignment: ZStackAlignment = .center) {
+	@beforeChildren
+	recipe beginChildren {
+		vk_kome_begin_overlay(alignment)
+	}
+
+	@afterChildren
+	recipe endChildren {
+		vk_kome_end_node()
+	}
 }

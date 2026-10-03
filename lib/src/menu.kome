@@ -1,6 +1,35 @@
 extern "C" from "viewkit" {
 	// Pushes a menu item from borrowed UTF-8 strings.
 	fn vk_push_menu_item_utf8(runtime: *mut VkRuntime, node_id: u64, label: *const u8, label_length: usize, shortcut: *const u8, shortcut_length: usize, enabled: u8, danger: u8, action_id: u64) -> i32
+	// Pushes a closure-backed menu item into the active Kome view build.
+	fn vk_kome_push_menu_item_action_utf8(label: *const u8, label_length: usize, shortcut: *const u8, shortcut_length: usize, enabled: bool, danger: bool, action: () -> Void) -> i32
+}
+
+/// 選択したときに指定された処理を実行するメニュー項目を追加します。
+///
+/// ## Parameters
+///
+/// - `label`: 項目に表示する文字列です。
+/// - `action`: 項目を選択したときに実行する処理です。
+/// - `shortcut`: 表示するキーボードショートカットです。
+/// - `enabled`: 項目を選択できるかどうかです。
+/// - `danger`: 破壊的な操作として表示するかどうかです。
+///
+/// ## Returns
+///
+/// 操作結果を表すステータスコードを返します。`0`は成功を表します。
+///
+/// ## Example
+///
+/// ```kome
+/// MenuItem("コピー", shortcut: "Ctrl+C") {
+/// 	copy()
+/// }
+/// ```
+///
+/// @since 27.0-dp.1
+pub fn MenuItem(label: String, action: () -> Void, shortcut: String = "", enabled: bool = true, danger: bool = false) -> i32 {
+	return vk_kome_push_menu_item_action_utf8(__kome_string_data(label), __kome_string_len(label), __kome_string_data(shortcut), __kome_string_len(shortcut), enabled, danger, action)
 }
 
 /// ラベル、ショートカット、状態、操作識別子を指定してメニュー項目を追加します。

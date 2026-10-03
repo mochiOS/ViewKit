@@ -1,4 +1,32 @@
 extern "C" from "viewkit" {
 	// Begins a context-menu container.
 	fn vk_begin_context_menu(runtime: *mut VkRuntime, node_id: u64) -> i32
+	// Begins a context menu in the active Kome view build.
+	fn vk_kome_begin_context_menu() -> i32
+}
+
+/// 1つ目の子要素へ2つ目の子要素によるコンテキストメニューを追加します。
+///
+/// 子要素は通常表示する内容、メニューの順で必ず2つ指定します。
+///
+/// ## Example
+///
+/// ```kome
+/// ContextMenu {
+/// 	Text("右クリックしてください")
+/// 	VStack { MenuItem("コピー") {} }
+/// }
+/// ```
+///
+/// @since 27.0-dp.1
+pub component ContextMenu() {
+	@beforeChildren
+	recipe beginChildren {
+		vk_kome_begin_context_menu()
+	}
+
+	@afterChildren
+	recipe endChildren {
+		vk_kome_end_node()
+	}
 }
