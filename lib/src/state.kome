@@ -1,3 +1,28 @@
+/// 画面の再構築をまたいで共有する値を保持します。
+///
+/// `State`は参照として共有されるため、画面本体と操作処理から同じ値を読み書きできます。
+///
+/// ## Example
+///
+/// ```kome
+/// fn increment(count: State<Number>) {
+/// 	count.value += 1
+/// }
+///
+/// let count = State<Number> { value: 0 }
+/// Window("カウンター") {
+/// 	VStack {
+/// 		Text("{count.value}")
+/// 		Button("増やす") { increment(count) }
+/// 	}
+/// }
+/// ```
+///
+/// @since 27.0-dp.1
+pub struct State<T> {
+	pub value: T,
+}
+
 extern "C" from "viewkit" {
 	// Stores a boolean state value.
 	fn vk_state_set_bool(runtime: *mut VkRuntime, state_id: u64, value: u8) -> i32
