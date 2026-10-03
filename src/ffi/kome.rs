@@ -661,8 +661,8 @@ pub unsafe extern "C" fn vk_push_menu_item_utf8(
 #[cfg(test)]
 mod tests {
     use super::{
-        KomeClosure, OwnedKomeAction, build_kome_tree, vk_kome_begin_vstack, vk_kome_end_node,
-        vk_kome_push_text_role_utf8,
+        KomeClosure, OwnedKomeAction, build_kome_tree, rebuild_kome_tree, vk_kome_begin_vstack,
+        vk_kome_end_node, vk_kome_push_text_field_utf8, vk_kome_push_text_role_utf8,
     };
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -698,6 +698,25 @@ mod tests {
             errors += 1;
         }
         BUILD_ERRORS.store(errors, Ordering::SeqCst);
+        0
+    }
+
+    unsafe extern "C" fn build_text_field(_environment: u64) -> u8 {
+        let value = "initial";
+        let placeholder = "name";
+        let status = unsafe {
+            vk_kome_push_text_field_utf8(
+                value.as_ptr(),
+                value.len(),
+                placeholder.as_ptr(),
+                placeholder.len(),
+                1,
+                8.0,
+                1,
+                0,
+            )
+        };
+        BUILD_ERRORS.store(usize::from(status != 0), Ordering::SeqCst);
         0
     }
 
@@ -739,5 +758,28 @@ mod tests {
         assert_eq!(BUILD_ERRORS.load(Ordering::SeqCst), 0);
         assert!(runtime.root.is_some());
         assert!(runtime.builder.is_none());
+    }
+
+    #[test]
+    fn preserves_node_state_across_kome_rebuilds() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        BUILD_ERRORS.store(0, Ordering::SeqCst);
+        let closure = KomeClosure {
+            code: build_text_field as *const () as usize as u64,
+            environment: 0,
+            retain,
+            release,
+        };
+        let mut runtime = unsafe { build_kome_tree(&closure) }.unwrap();
+
+        runtime
+            .states
+            .borrow_mut()
+            .set_string(2, "edited".into())
+            .unwrap();
+        rebuild_kome_tree(&mut runtime).unwrap();
+
+        assert_eq!(BUILD_ERRORS.load(Ordering::SeqCst), 0);
+        assert_eq!(runtime.states.borrow().get_string(2).unwrap(), "edited");
     }
 }
