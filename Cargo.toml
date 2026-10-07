@@ -8,7 +8,7 @@ categories = ["gui"]
 license = "Apache-2.0"
 version = "2.0.0"
 edition = "2024"
-autoexamples = false
+autoexamples = true
 build = "build.rs"
 
 [dependencies]
@@ -78,35 +78,3 @@ crate-type = ["cdylib", "rlib"]
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("mochios"))'] }
-
-[[example]]
-name = "button"
-path = "examples/button.rs"
-
-[[example]]
-name = "text"
-path = "examples/text.rs"
-
-[[example]]
-name = "scroll"
-path = "examples/scroll.rs"
-
-[[example]]
-name = "border"
-path = "examples/border.rs"
-
-[[example]]
-name = "text_field"
-path = "examples/text_field.rs"
-
-[[example]]
-name = "all"
-path = "examples/all.rs"
-
-[[example]]
-name = "image"
-path = "examples/image.rs"
-
-[[example]]
-name = "svg"
-path = "examples/svg.rs"
