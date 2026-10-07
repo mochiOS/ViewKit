@@ -4,8 +4,7 @@ use viewkit::draw_command::DrawCommand;
 use viewkit::event::{EventContext, EventResult, ViewEvent};
 use viewkit::geometry::{Point, Rect, Size};
 use viewkit::omochi::{
-    DEFAULT_BURGERS, DEFAULT_MATERIAL, OmochiMaterial, OmochiSurface, PullMode,
-    rounded_rect_points, smooth_closed_points,
+    DEFAULT_BURGERS, DEFAULT_MATERIAL, OmochiMaterial, OmochiSurface, PullMode, rounded_rect_points,
 };
 use viewkit::platform::PointerButton;
 use viewkit::prelude::{
@@ -79,9 +78,9 @@ impl View for OmochiPreview {
         let now = Instant::now();
         let sample = self.surface.sample(&self.base_points, now);
         let center = Self::center(bounds);
-        let smoothed = smooth_closed_points(&sample.points, 0.68, 4);
 
-        let points = smoothed
+        let points = sample
+            .points
             .into_iter()
             .map(|point| Point::new(center.x + point.x, center.y + point.y))
             .collect();

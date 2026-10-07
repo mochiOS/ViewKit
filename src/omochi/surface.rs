@@ -87,6 +87,7 @@ impl OmochiSurface {
         inner.last_pointer_at = Some(now);
         inner.target_pull = Point::new(0.0, 0.0);
         inner.pointer_velocity = Point::new(0.0, 0.0);
+        inner.current_press_depth = inner.material.press_depth * 0.78;
     }
 
     pub fn move_press(&self, point: Point, now: Instant) {
@@ -267,12 +268,12 @@ fn update_active(inner: &mut OmochiSurfaceInner, now: Instant, delta_time: f32) 
         + (inner.material.fast_viscous_follow_time - inner.material.viscous_follow_time)
             * speed_mix;
 
-    let alpha = 1.0 - (-delta_time.max(0.0) / follow_time.max(0.001)).exp();
-
-    inner.current_pull.x += (inner.target_pull.x - inner.current_pull.x) * alpha;
-    inner.current_pull.y += (inner.target_pull.y - inner.current_pull.y) * alpha;
-
-    inner.current_press_depth = inner.material.press_depth * gain;
+    let pull_alpha = 1.0 - (-delta_time.max(0.0) / follow_time.max(0.001)).exp();
+    inner.current_pull.x += (inner.target_pull.x - inner.current_pull.x) * pull_alpha;
+    inner.current_pull.y += (inner.target_pull.y - inner.current_pull.y) * pull_alpha;
+    let press_target = inner.material.press_depth * (0.78 + 0.22 * gain);
+    let press_alpha = 1.0 - (-delta_time.max(1.0 / 240.0) / 0.018).exp();
+    inner.current_press_depth += (press_target - inner.current_press_depth) * press_alpha;
 }
 
 fn update_recovery(inner: &mut OmochiSurfaceInner, now: Instant) {
@@ -288,9 +289,12 @@ fn update_recovery(inner: &mut OmochiSurfaceInner, now: Instant) {
         inner.release_pull.x * envelope,
         inner.release_pull.y * envelope,
     );
-    inner.current_press_depth = inner.release_press_depth * envelope;
 
-    if envelope < 0.0008 {
+    let press_recovery_time = (inner.material.spring_recovery_time * 1.6).max(0.016);
+    let press_envelope = (-elapsed / press_recovery_time).exp();
+    inner.current_press_depth = inner.release_press_depth * press_envelope;
+    let pull_remaining = inner.current_pull.x.hypot(inner.current_pull.y);
+    if pull_remaining < 0.001 && inner.current_press_depth.abs() < 0.001 {
         inner.current_pull = Point::new(0.0, 0.0);
         inner.current_press_depth = 0.0;
         inner.released_at = None;
