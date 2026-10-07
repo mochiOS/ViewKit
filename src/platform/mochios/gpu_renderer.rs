@@ -1356,19 +1356,29 @@ fn rounded_points(rect: Rect, radius: f32) -> Vec<(f32, f32)> {
 }
 
 fn triangulate_polygon(points: &[Point]) -> Vec<[Point; 3]> {
+    const EPSILON: f32 = 0.00001;
+
     if points.len() < 3 {
         return Vec::new();
     }
 
+    let mut points = remove_duplicate_points(points, EPSILON);
+
+    if points.len() < 3 {
+        return Vec::new();
+    }
+
+    remove_collinear_points(&mut points, EPSILON);
+
+    if points.len() < 3 {
+        return Vec::new();
+    }
+
+    let counter_clockwise = polygon_signed_area(&points) > 0.0;
     let mut indices: Vec<usize> = (0..points.len()).collect();
     let mut triangles = Vec::with_capacity(points.len().saturating_sub(2));
 
-    let counter_clockwise = polygon_signed_area(points) > 0.0;
-
-    let mut attempts = 0;
-    let maximum_attempts = points.len() * points.len();
-
-    while indices.len() > 3 && attempts < maximum_attempts {
+    while indices.len() > 3 {
         let mut clipped = false;
 
         for index in 0..indices.len() {
@@ -1380,7 +1390,19 @@ fn triangulate_polygon(points: &[Point]) -> Vec<[Point; 3]> {
             let b = points[current];
             let c = points[next];
 
-            if !is_convex(a, b, c, counter_clockwise) {
+            let cross = cross_product(a, b, c);
+
+            if cross.abs() <= EPSILON {
+                indices.remove(index);
+                clipped = true;
+                break;
+            }
+
+            if counter_clockwise {
+                if cross < 0.0 {
+                    continue;
+                }
+            } else if cross > 0.0 {
                 continue;
             }
 
@@ -1389,7 +1411,7 @@ fn triangulate_polygon(points: &[Point]) -> Vec<[Point; 3]> {
                     return false;
                 }
 
-                point_in_triangle(points[candidate], a, b, c)
+                point_strictly_in_triangle(points[candidate], a, b, c, EPSILON)
             });
 
             if contains_point {
@@ -1405,8 +1427,6 @@ fn triangulate_polygon(points: &[Point]) -> Vec<[Point; 3]> {
         if !clipped {
             break;
         }
-
-        attempts += 1;
     }
 
     if indices.len() == 3 {
@@ -1414,6 +1434,72 @@ fn triangulate_polygon(points: &[Point]) -> Vec<[Point; 3]> {
     }
 
     triangles
+}
+
+fn remove_duplicate_points(points: &[Point], epsilon: f32) -> Vec<Point> {
+    let epsilon_squared = epsilon * epsilon;
+    let mut output = Vec::with_capacity(points.len());
+
+    for &point in points {
+        let duplicate = output.last().is_some_and(|previous: &Point| {
+            let dx = point.x - previous.x;
+            let dy = point.y - previous.y;
+
+            dx * dx + dy * dy <= epsilon_squared
+        });
+
+        if !duplicate {
+            output.push(point);
+        }
+    }
+
+    if output.len() > 1 {
+        let first = output[0];
+        let last = output[output.len() - 1];
+        let dx = first.x - last.x;
+        let dy = first.y - last.y;
+
+        if dx * dx + dy * dy <= epsilon_squared {
+            output.pop();
+        }
+    }
+
+    output
+}
+
+fn remove_collinear_points(points: &mut Vec<Point>, epsilon: f32) {
+    loop {
+        if points.len() <= 3 {
+            return;
+        }
+
+        let mut removed = false;
+
+        for index in 0..points.len() {
+            let previous = points[(index + points.len() - 1) % points.len()];
+            let current = points[index];
+            let next = points[(index + 1) % points.len()];
+
+            if cross_product(previous, current, next).abs() <= epsilon {
+                points.remove(index);
+                removed = true;
+                break;
+            }
+        }
+
+        if !removed {
+            return;
+        }
+    }
+}
+
+fn point_strictly_in_triangle(point: Point, a: Point, b: Point, c: Point, epsilon: f32) -> bool {
+    let first = cross_product(a, b, point);
+    let second = cross_product(b, c, point);
+    let third = cross_product(c, a, point);
+
+    (first > epsilon && second > epsilon && third > epsilon)
+        || (first < -epsilon && second < -epsilon && third < -epsilon)
 }
 
 fn polygon_signed_area(points: &[Point]) -> f32 {
@@ -1427,29 +1513,6 @@ fn polygon_signed_area(points: &[Point]) -> f32 {
     }
 
     area * 0.5
-}
-
-fn is_convex(a: Point, b: Point, c: Point, counter_clockwise: bool) -> bool {
-    let cross = cross_product(a, b, c);
-
-    if counter_clockwise {
-        cross > 0.000001
-    } else {
-        cross < -0.000001
-    }
-}
-
-fn point_in_triangle(point: Point, a: Point, b: Point, c: Point) -> bool {
-    const EPSILON: f32 = 0.0001;
-
-    let first = cross_product(a, b, point);
-    let second = cross_product(b, c, point);
-    let third = cross_product(c, a, point);
-
-    let all_positive = first > EPSILON && second > EPSILON && third > EPSILON;
-    let all_negative = first < -EPSILON && second < -EPSILON && third < -EPSILON;
-
-    all_positive || all_negative
 }
 
 fn cross_product(a: Point, b: Point, c: Point) -> f32 {
