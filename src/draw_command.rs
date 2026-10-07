@@ -1,6 +1,6 @@
 //! レンダラーへ渡す描画命令を定義
 
-use crate::geometry::Rect;
+use crate::geometry::{Point, Rect};
 use crate::image::ImageData;
 use crate::svg::SvgData;
 use crate::theme::Color;
@@ -25,6 +25,11 @@ pub enum DrawCommand {
 
     FillEllipse {
         rect: Rect,
+        color: Color,
+    },
+
+    FillPolygon {
+        points: Vec<Point>,
         color: Color,
     },
 
