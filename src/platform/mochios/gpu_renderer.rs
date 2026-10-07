@@ -1,5 +1,6 @@
 use super::renderer::valid_scale_factor;
 use super::*;
+use crate::geometry::Point;
 use crate::gpu_clip::{ClipRegion, ClipShape, ClipVertex, clip_polygon, premultiplied_color};
 use cosmic_text::{CacheKey, SwashContent, SwashImage};
 
@@ -177,6 +178,9 @@ impl GpuSceneRenderer {
                 }
                 DrawCommand::FillEllipse { rect, color } => {
                     self.ellipse(*rect, *color, viewport);
+                }
+                DrawCommand::FillPolygon { points, color } => {
+                    self.polygon(points, *color, viewport);
                 }
                 DrawCommand::StrokeRect { rect, color, width } => {
                     self.stroke_rect(*rect, *width, *color, viewport);
@@ -388,6 +392,36 @@ impl GpuSceneRenderer {
             viewport,
             true,
         );
+    }
+
+    fn polygon(&mut self, points: &[Point], color: Color, viewport: Viewport) {
+        if points.len() < 3 {
+            return;
+        }
+
+        let triangles = triangulate_polygon(points);
+
+        let white = AtlasRect {
+            x: 0,
+            y: 0,
+            width: 1,
+            height: 1,
+        };
+
+        let uv = self.uv_center(white);
+
+        for triangle in triangles {
+            self.push_triangle(
+                [
+                    (triangle[0].x, triangle[0].y),
+                    (triangle[1].x, triangle[1].y),
+                    (triangle[2].x, triangle[2].y),
+                ],
+                [uv; 3],
+                color,
+                viewport,
+            );
+        }
     }
 
     fn fan(&mut self, rect: Rect, radius: f32, color: Color, viewport: Viewport, ellipse: bool) {
@@ -1289,4 +1323,103 @@ fn rounded_points(rect: Rect, radius: f32) -> Vec<(f32, f32)> {
         }
     }
     points
+}
+
+fn triangulate_polygon(points: &[Point]) -> Vec<[Point; 3]> {
+    if points.len() < 3 {
+        return Vec::new();
+    }
+
+    let mut indices: Vec<usize> = (0..points.len()).collect();
+    let mut triangles = Vec::with_capacity(points.len().saturating_sub(2));
+
+    let counter_clockwise = polygon_signed_area(points) > 0.0;
+
+    let mut attempts = 0;
+    let maximum_attempts = points.len() * points.len();
+
+    while indices.len() > 3 && attempts < maximum_attempts {
+        let mut clipped = false;
+
+        for index in 0..indices.len() {
+            let previous = indices[(index + indices.len() - 1) % indices.len()];
+            let current = indices[index];
+            let next = indices[(index + 1) % indices.len()];
+
+            let a = points[previous];
+            let b = points[current];
+            let c = points[next];
+
+            if !is_convex(a, b, c, counter_clockwise) {
+                continue;
+            }
+
+            let contains_point = indices.iter().copied().any(|candidate| {
+                if candidate == previous || candidate == current || candidate == next {
+                    return false;
+                }
+
+                point_in_triangle(points[candidate], a, b, c)
+            });
+
+            if contains_point {
+                continue;
+            }
+
+            triangles.push([a, b, c]);
+            indices.remove(index);
+            clipped = true;
+            break;
+        }
+
+        if !clipped {
+            break;
+        }
+
+        attempts += 1;
+    }
+
+    if indices.len() == 3 {
+        triangles.push([points[indices[0]], points[indices[1]], points[indices[2]]]);
+    }
+
+    triangles
+}
+
+fn polygon_signed_area(points: &[Point]) -> f32 {
+    let mut area = 0.0;
+
+    for index in 0..points.len() {
+        let current = points[index];
+        let next = points[(index + 1) % points.len()];
+
+        area += current.x * next.y - next.x * current.y;
+    }
+
+    area * 0.5
+}
+
+fn is_convex(a: Point, b: Point, c: Point, counter_clockwise: bool) -> bool {
+    let cross = cross_product(a, b, c);
+
+    if counter_clockwise {
+        cross > 0.0001
+    } else {
+        cross < -0.0001
+    }
+}
+
+fn point_in_triangle(point: Point, a: Point, b: Point, c: Point) -> bool {
+    let first = cross_product(a, b, point);
+    let second = cross_product(b, c, point);
+    let third = cross_product(c, a, point);
+
+    let has_negative = first < -0.0001 || second < -0.0001 || third < -0.0001;
+    let has_positive = first > 0.0001 || second > 0.0001 || third > 0.0001;
+
+    !(has_negative && has_positive)
+}
+
+fn cross_product(a: Point, b: Point, c: Point) -> f32 {
+    (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
 }
