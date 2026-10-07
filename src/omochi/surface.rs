@@ -5,7 +5,7 @@ use std::time::Instant;
 use crate::geometry::Point;
 
 use super::burgers::{normalized_creep_gain, recovery_envelope};
-use super::deform::{clamp_vector, deform_points};
+use super::deform::{clamp_vector, deform_points, smoothstep};
 use super::material::{BurgersParameters, OmochiMaterial};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -229,7 +229,6 @@ fn update_active(inner: &mut OmochiSurfaceInner, now: Instant, delta_time: f32) 
 
             clamp_vector(drag.x * gain, drag.y * gain, inner.material.max_pull)
         }
-
         PullMode::Velocity {
             direction,
             axis_scale,
@@ -260,19 +259,32 @@ fn update_active(inner: &mut OmochiSurfaceInner, now: Instant, delta_time: f32) 
     };
 
     let speed = inner.pointer_velocity.x.hypot(inner.pointer_velocity.y);
-
     let speed_range = (inner.material.max_speed - inner.material.fast_speed).max(1.0);
     let speed_mix = ((speed - inner.material.fast_speed) / speed_range).clamp(0.0, 1.0);
 
     let follow_time = inner.material.viscous_follow_time
         + (inner.material.fast_viscous_follow_time - inner.material.viscous_follow_time)
             * speed_mix;
-
     let pull_alpha = 1.0 - (-delta_time.max(0.0) / follow_time.max(0.001)).exp();
+
     inner.current_pull.x += (inner.target_pull.x - inner.current_pull.x) * pull_alpha;
     inner.current_pull.y += (inner.target_pull.y - inner.current_pull.y) * pull_alpha;
-    let press_target = inner.material.press_depth * (0.78 + 0.22 * gain);
-    let press_alpha = 1.0 - (-delta_time.max(1.0 / 240.0) / 0.018).exp();
+
+    let pull_length = inner.current_pull.x.hypot(inner.current_pull.y);
+    let release_range =
+        (inner.material.press_release_end - inner.material.press_release_start).max(0.001);
+    let release_raw = (pull_length - inner.material.press_release_start) / release_range;
+    let drag_release = smoothstep(release_raw);
+
+    let pressed_depth = inner.material.press_depth * (0.78 + 0.22 * gain);
+    let press_target = pressed_depth * (1.0 - drag_release);
+    let press_follow_time = if press_target >= inner.current_press_depth {
+        0.018
+    } else {
+        0.045
+    };
+    let press_alpha = 1.0 - (-delta_time.max(1.0 / 240.0) / press_follow_time).exp();
+
     inner.current_press_depth += (press_target - inner.current_press_depth) * press_alpha;
 }
 

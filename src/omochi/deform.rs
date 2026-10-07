@@ -131,11 +131,7 @@ pub fn deform_points(
             let anchor_distance = anchor_distance_squared.sqrt();
             let press_influence = gaussian(anchor_distance_squared, material.press_radius);
 
-            let release_range =
-                (material.press_release_end - material.press_release_start).max(0.001);
-            let release_raw = (pull_length - material.press_release_start) / release_range;
-            let drag_release = smoothstep(release_raw);
-            let effective_press_depth = press_depth * (1.0 - drag_release);
+            let effective_press_depth = press_depth;
 
             if anchor_distance > 0.001 && effective_press_depth > 0.001 {
                 x += to_anchor_x / anchor_distance * effective_press_depth * press_influence;
