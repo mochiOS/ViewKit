@@ -1433,21 +1433,23 @@ fn is_convex(a: Point, b: Point, c: Point, counter_clockwise: bool) -> bool {
     let cross = cross_product(a, b, c);
 
     if counter_clockwise {
-        cross > 0.0001
+        cross > 0.000001
     } else {
-        cross < -0.0001
+        cross < -0.000001
     }
 }
 
 fn point_in_triangle(point: Point, a: Point, b: Point, c: Point) -> bool {
+    const EPSILON: f32 = 0.0001;
+
     let first = cross_product(a, b, point);
     let second = cross_product(b, c, point);
     let third = cross_product(c, a, point);
 
-    let has_negative = first < -0.0001 || second < -0.0001 || third < -0.0001;
-    let has_positive = first > 0.0001 || second > 0.0001 || third > 0.0001;
+    let all_positive = first > EPSILON && second > EPSILON && third > EPSILON;
+    let all_negative = first < -EPSILON && second < -EPSILON && third < -EPSILON;
 
-    !(has_negative && has_positive)
+    all_positive || all_negative
 }
 
 fn cross_product(a: Point, b: Point, c: Point) -> f32 {
