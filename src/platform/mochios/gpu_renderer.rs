@@ -399,7 +399,9 @@ impl GpuSceneRenderer {
             return;
         }
 
-        let triangles = triangulate_polygon(points);
+        let inner = offset_polygon(points, -0.5);
+        let outer = offset_polygon(points, 0.5);
+        let triangles = triangulate_polygon(&inner);
 
         let white = AtlasRect {
             x: 0,
@@ -419,6 +421,34 @@ impl GpuSceneRenderer {
                 ],
                 [uv; 3],
                 color,
+                viewport,
+            );
+        }
+
+        let clear = transparent(color);
+
+        for index in 0..inner.len() {
+            let next = (index + 1) % inner.len();
+
+            self.push_triangle_colors(
+                [
+                    (inner[index].x, inner[index].y),
+                    (outer[index].x, outer[index].y),
+                    (outer[next].x, outer[next].y),
+                ],
+                [uv; 3],
+                [color, clear, clear],
+                viewport,
+            );
+
+            self.push_triangle_colors(
+                [
+                    (inner[index].x, inner[index].y),
+                    (outer[next].x, outer[next].y),
+                    (inner[next].x, inner[next].y),
+                ],
+                [uv; 3],
+                [color, clear, color],
                 viewport,
             );
         }
@@ -1422,4 +1452,67 @@ fn point_in_triangle(point: Point, a: Point, b: Point, c: Point) -> bool {
 
 fn cross_product(a: Point, b: Point, c: Point) -> f32 {
     (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+}
+
+fn offset_polygon(points: &[Point], distance: f32) -> Vec<Point> {
+    if points.len() < 3 {
+        return points.to_vec();
+    }
+
+    let orientation = if polygon_signed_area(points) >= 0.0 {
+        1.0
+    } else {
+        -1.0
+    };
+
+    let count = points.len();
+    let mut output = Vec::with_capacity(count);
+
+    for index in 0..count {
+        let previous = points[(index + count - 1) % count];
+        let current = points[index];
+        let next = points[(index + 1) % count];
+
+        let previous_normal = edge_outward_normal(previous, current, orientation);
+        let next_normal = edge_outward_normal(current, next, orientation);
+
+        let mut normal = Point::new(
+            previous_normal.x + next_normal.x,
+            previous_normal.y + next_normal.y,
+        );
+
+        let length = normal.x.hypot(normal.y);
+
+        if length < 0.0001 {
+            normal = next_normal;
+        } else {
+            normal.x /= length;
+            normal.y /= length;
+        }
+
+        let alignment = (normal.x * next_normal.x + normal.y * next_normal.y)
+            .abs()
+            .max(0.5);
+
+        let scale = distance / alignment;
+
+        output.push(Point::new(
+            current.x + normal.x * scale,
+            current.y + normal.y * scale,
+        ));
+    }
+
+    output
+}
+
+fn edge_outward_normal(start: Point, end: Point, orientation: f32) -> Point {
+    let dx = end.x - start.x;
+    let dy = end.y - start.y;
+    let length = dx.hypot(dy);
+
+    if length < 0.0001 {
+        return Point::new(0.0, 0.0);
+    }
+
+    Point::new(dy / length * orientation, -dx / length * orientation)
 }
