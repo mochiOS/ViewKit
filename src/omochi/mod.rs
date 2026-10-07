@@ -1,3 +1,7 @@
+//! mochi design language
+//!
+//! see it: (todo)
+
 mod burgers;
 mod material;
 
