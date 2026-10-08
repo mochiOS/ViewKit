@@ -88,12 +88,23 @@ impl ButtonTokens {
                 primary_pressed,
                 primary_foreground,
             ),
-            accent: solid_palette(
-                colors.accent,
-                colors.accent_hovered,
-                colors.accent_pressed,
-                Color::WHITE,
-            ),
+            accent: ButtonPalette {
+                rest: ControlAppearance {
+                    background: colors.accent_soft,
+                    border: transparent,
+                    foreground: colors.accent,
+                },
+                hovered: ControlAppearance {
+                    background: colors.accent.with_alpha(if dark { 54 } else { 30 }),
+                    border: transparent,
+                    foreground: colors.accent,
+                },
+                pressed: ControlAppearance {
+                    background: colors.accent.with_alpha(if dark { 76 } else { 46 }),
+                    border: transparent,
+                    foreground: colors.accent,
+                },
+            },
             ghost: ButtonPalette {
                 rest: ControlAppearance {
                     background: transparent,
@@ -111,12 +122,23 @@ impl ButtonTokens {
                     foreground: colors.text_primary,
                 },
             },
-            danger: solid_palette(
-                colors.destructive,
-                colors.destructive_hovered,
-                colors.destructive,
-                Color::WHITE,
-            ),
+            danger: ButtonPalette {
+                rest: ControlAppearance {
+                    background: colors.destructive_soft,
+                    border: transparent,
+                    foreground: colors.destructive,
+                },
+                hovered: ControlAppearance {
+                    background: colors.destructive.with_alpha(if dark { 54 } else { 28 }),
+                    border: transparent,
+                    foreground: colors.destructive,
+                },
+                pressed: ControlAppearance {
+                    background: colors.destructive.with_alpha(if dark { 76 } else { 44 }),
+                    border: transparent,
+                    foreground: colors.destructive,
+                },
+            },
             horizontal_padding: 14.0,
             height: 32.0,
             radius: CornerRadius::Small,
@@ -562,10 +584,10 @@ impl BadgeTokens {
             neutral_foreground: colors.text_secondary,
             accent_background: colors.accent_soft,
             accent_foreground: colors.accent,
-            success_background: colors.success,
-            warning_background: colors.warning,
-            error_background: colors.destructive,
-            semantic_foreground: Color::WHITE,
+            success_background: colors.success_soft,
+            warning_background: colors.warning_soft,
+            error_background: colors.destructive_soft,
+            semantic_foreground: colors.text_primary,
             horizontal_padding: FigmaTokens::SPACING.space_8,
             vertical_padding: FigmaTokens::SPACING.space_2,
             radius: CornerRadius::Small,
