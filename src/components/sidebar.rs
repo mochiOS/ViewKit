@@ -135,9 +135,7 @@ impl SidebarSection {
             content: VStack::new()
                 .alignment(StackAlignment::Stretch)
                 .gap(StackGap::ExtraSmall)
-                .child(
-                    Text::caption(title.into()).color(Theme::current().colors.text_secondary),
-                ),
+                .child(Text::caption(title.into()).color(Theme::current().colors.text_secondary)),
         }
     }
 

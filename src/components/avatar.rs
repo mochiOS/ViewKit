@@ -68,7 +68,6 @@ impl Avatar {
         self.accessibility_label = Some(label.into());
         self
     }
-
 }
 
 impl View for Avatar {

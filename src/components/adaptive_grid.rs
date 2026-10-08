@@ -107,17 +107,16 @@ impl View for AdaptiveGrid {
         context: &mut EventContext<'_>,
     ) -> EventResult {
         if event.requires_broadcast() {
-            return self
-                .children
-                .iter()
-                .enumerate()
-                .fold(EventResult::Ignored, |result, (index, child)| {
+            return self.children.iter().enumerate().fold(
+                EventResult::Ignored,
+                |result, (index, child)| {
                     result.merge(child.handle_event(
                         self.child_bounds(bounds, index),
                         event,
                         context,
                     ))
-                });
+                },
+            );
         }
         let Some(position) = event.position() else {
             return EventResult::Ignored;

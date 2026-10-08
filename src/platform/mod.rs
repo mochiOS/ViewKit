@@ -1,8 +1,8 @@
+pub(crate) mod clipboard;
 mod event;
 mod font;
 pub mod input_method;
 mod window;
-pub(crate) mod clipboard;
 
 #[cfg(target_os = "linux")]
 pub mod linux;

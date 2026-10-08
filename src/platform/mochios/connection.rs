@@ -316,9 +316,8 @@ pub(super) fn try_recv_event()
     // for the first dequeue so a delegated document cannot escape the event
     // loop as EMSGSIZE between two separate receive attempts.
     let raw_handles = core::ptr::addr_of_mut!(EVENT_FILE_HANDLES);
-    let len = match ipc_wait_handles_raw(0, event, EVENT_BUFFER_SIZE, unsafe {
-        &mut *raw_handles
-    }) {
+    let len = match ipc_wait_handles_raw(0, event, EVENT_BUFFER_SIZE, unsafe { &mut *raw_handles })
+    {
         Ok(len) => len,
         Err(MochiOsBackendError::Syscall(ERRNO_EAGAIN)) => return Ok(None),
         Err(err) => return Err(err),

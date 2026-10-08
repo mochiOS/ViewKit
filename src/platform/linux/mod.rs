@@ -1,6 +1,6 @@
 mod backend;
-mod gpu_scene;
 mod gpu_renderer;
+mod gpu_scene;
 
 pub use backend::{LinuxBackend, LinuxBackendError};
 pub use gpu_renderer::{GpuRenderer, GpuRendererError};

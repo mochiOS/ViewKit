@@ -172,7 +172,10 @@ impl Text {
             weight: style.weight.0.clamp(1, 1000),
             alignment: self.alignment,
         });
-        if let Some(size) = cache_key.as_ref().and_then(|key| measurer.cached_measurement(key)) {
+        if let Some(size) = cache_key
+            .as_ref()
+            .and_then(|key| measurer.cached_measurement(key))
+        {
             return size;
         }
         let metrics = Metrics::new(font_size, line_height);
@@ -208,7 +211,10 @@ impl Text {
             if let Some(maximum_width) = maximum_width {
                 measured_width = measured_width.min(maximum_width);
             }
-            Size::new(measured_width.max(0.0).ceil(), measured_height.max(0.0).ceil())
+            Size::new(
+                measured_width.max(0.0).ceil(),
+                measured_height.max(0.0).ceil(),
+            )
         };
         if let Some(key) = cache_key {
             measurer.cache_measurement(key, measured);

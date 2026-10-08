@@ -5,9 +5,7 @@ use cosmic_text::{
 };
 use tiny_skia::{Pixmap, Transform};
 
-use crate::draw_command::{
-    DisplayList, DrawCommand, ImageCommand, SvgCommand, TextCommand,
-};
+use crate::draw_command::{DisplayList, DrawCommand, ImageCommand, SvgCommand, TextCommand};
 use crate::font::resolve_font_family;
 use crate::geometry::Rect;
 use crate::image::ImageData;
@@ -69,7 +67,11 @@ pub(super) mod renderer {
     }
 
     fn canonical_f32_bits(value: f32) -> u32 {
-        if value == 0.0 { 0.0_f32.to_bits() } else { value.to_bits() }
+        if value == 0.0 {
+            0.0_f32.to_bits()
+        } else {
+            value.to_bits()
+        }
     }
 
     pub(super) fn valid_scale_factor(scale_factor: f64) -> f32 {

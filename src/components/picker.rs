@@ -3,9 +3,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::accessibility::AccessibilityRole;
-use crate::event::{
-    ContextMenuItem, ContextMenuRequest, EventContext, EventResult, ViewEvent,
-};
+use crate::event::{ContextMenuItem, ContextMenuRequest, EventContext, EventResult, ViewEvent};
 use crate::geometry::{Point, Rect, Size};
 use crate::layout::{StackAlignment, StackGap, ViewExt};
 use crate::platform::PointerButton;
@@ -59,11 +57,7 @@ impl Picker {
     }
 
     /// Adds a selectable value to the picker menu.
-    pub fn option(
-        mut self,
-        label: impl Into<String>,
-        on_select: impl FnMut() + 'static,
-    ) -> Self {
+    pub fn option(mut self, label: impl Into<String>, on_select: impl FnMut() + 'static) -> Self {
         self.options.push(PickerOption {
             label: label.into(),
             enabled: true,
@@ -237,11 +231,8 @@ mod tests {
         let bounds = Rect::new(20.0, 30.0, 264.0, 32.0);
         let position = Point::new(40.0, 45.0);
         let mut text_measurer = TextMeasurer::new();
-        let mut context = EventContext::new(
-            &Theme::LIGHT,
-            &Typography::DEFAULT,
-            &mut text_measurer,
-        );
+        let mut context =
+            EventContext::new(&Theme::LIGHT, &Typography::DEFAULT, &mut text_measurer);
 
         picker.handle_event(
             bounds,

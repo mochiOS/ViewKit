@@ -38,9 +38,8 @@ impl PageHeader {
             .gap(StackGap::ExtraSmall)
             .child(Text::styled(self.title.clone(), TextRole::TitleLarge));
         if let Some(subtitle) = &self.subtitle {
-            content = content.child(
-                Text::styled(subtitle.clone(), TextRole::Body).tone(TextTone::Secondary),
-            );
+            content = content
+                .child(Text::styled(subtitle.clone(), TextRole::Body).tone(TextTone::Secondary));
         }
         content
     }
@@ -79,16 +78,11 @@ mod tests {
             typography: &Typography::DEFAULT,
             text_measurer: &mut text_measurer,
         };
-        let without_subtitle = PageHeader::new("General").measure(
-            Constraints::loose(Size::new(640.0, 200.0)),
-            &mut context,
-        );
+        let without_subtitle = PageHeader::new("General")
+            .measure(Constraints::loose(Size::new(640.0, 200.0)), &mut context);
         let with_subtitle = PageHeader::new("General")
             .subtitle("Device, language, region, date, and system information")
-            .measure(
-                Constraints::loose(Size::new(640.0, 200.0)),
-                &mut context,
-            );
+            .measure(Constraints::loose(Size::new(640.0, 200.0)), &mut context);
 
         assert!(with_subtitle.height > without_subtitle.height);
         assert!(with_subtitle.width <= 640.0);

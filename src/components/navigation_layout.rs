@@ -144,34 +144,27 @@ impl View for NavigationLayout {
             .navigation_sidebar_width
             .min(bounds.size.width)
             .max(0.0);
-        Rectangle::new()
-            .color(RectangleColor::SubtleSurface)
-            .paint(
-                Rect::new(
-                    bounds.origin.x,
-                    bounds.origin.y,
-                    bounds.size.width,
-                    toolbar_height,
-                ),
-                context,
-            );
-        Rectangle::new()
-            .color(RectangleColor::SubtleSurface)
-            .paint(
-                Rect::new(
-                    bounds.origin.x,
-                    bounds.origin.y + toolbar_height,
-                    sidebar_width,
-                    (bounds.size.height - toolbar_height).max(0.0),
-                ),
-                context,
-            );
+        Rectangle::new().color(RectangleColor::SubtleSurface).paint(
+            Rect::new(
+                bounds.origin.x,
+                bounds.origin.y,
+                bounds.size.width,
+                toolbar_height,
+            ),
+            context,
+        );
+        Rectangle::new().color(RectangleColor::SubtleSurface).paint(
+            Rect::new(
+                bounds.origin.x,
+                bounds.origin.y + toolbar_height,
+                sidebar_width,
+                (bounds.size.height - toolbar_height).max(0.0),
+            ),
+            context,
+        );
 
         let (toolbar, sidebar, detail) = Self::regions(bounds, context);
-        context.record_accessibility(AccessibilityNode::new(
-            AccessibilityRole::Toolbar,
-            toolbar,
-        ));
+        context.record_accessibility(AccessibilityNode::new(AccessibilityRole::Toolbar, toolbar));
         context.record_accessibility(AccessibilityNode::new(
             AccessibilityRole::Navigation,
             sidebar,
@@ -287,20 +280,24 @@ mod tests {
         let corner_index = display_list
             .commands()
             .iter()
-            .position(|command| matches!(
-                command,
-                DrawCommand::DrawSvg { command }
-                    if command.bounds == Rect::new(240.0, 48.0, 10.0, 10.0)
-            ))
+            .position(|command| {
+                matches!(
+                    command,
+                    DrawCommand::DrawSvg { command }
+                        if command.bounds == Rect::new(240.0, 48.0, 10.0, 10.0)
+                )
+            })
             .expect("inner corner");
         let detail_index = display_list
             .commands()
             .iter()
-            .position(|command| matches!(
-                command,
-                DrawCommand::FillRect { rect, .. }
-                    if *rect == Rect::new(240.0, 48.0, 800.0, 652.0)
-            ))
+            .position(|command| {
+                matches!(
+                    command,
+                    DrawCommand::FillRect { rect, .. }
+                        if *rect == Rect::new(240.0, 48.0, 800.0, 652.0)
+                )
+            })
             .expect("detail paint");
         assert!(
             corner_index > detail_index,

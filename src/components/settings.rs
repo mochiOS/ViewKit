@@ -90,7 +90,10 @@ impl<Content: View> View for SettingsPage<Content> {
         let header = self.header().measure(constraints, context);
         let form = self.content.measure(
             Constraints::loose(Size::new(
-                constraints.maximum.width.min(context.theme.layout.form_width),
+                constraints
+                    .maximum
+                    .width
+                    .min(context.theme.layout.form_width),
                 constraints.maximum.height,
             )),
             context,
@@ -113,7 +116,12 @@ impl<Content: View> View for SettingsPage<Content> {
                 .height
         };
         self.header().paint(
-            Rect::new(bounds.origin.x, bounds.origin.y, bounds.size.width, header_height),
+            Rect::new(
+                bounds.origin.x,
+                bounds.origin.y,
+                bounds.size.width,
+                header_height,
+            ),
             context,
         );
         self.content.paint(
@@ -176,10 +184,7 @@ impl SettingsSection {
         self
     }
 
-    pub fn rows<Row: IntoStackChild>(
-        mut self,
-        rows: impl IntoIterator<Item = Row>,
-    ) -> Self {
+    pub fn rows<Row: IntoStackChild>(mut self, rows: impl IntoIterator<Item = Row>) -> Self {
         self.rows
             .extend(rows.into_iter().map(IntoStackChild::into_stack_child));
         self
@@ -220,7 +225,12 @@ impl View for SettingsSection {
                 .height
         };
         self.title().paint(
-            Rect::new(bounds.origin.x, bounds.origin.y, bounds.size.width, title_height),
+            Rect::new(
+                bounds.origin.x,
+                bounds.origin.y,
+                bounds.size.width,
+                title_height,
+            ),
             context,
         );
         let rows_y = bounds.origin.y + title_height + context.theme.spacing.small;
