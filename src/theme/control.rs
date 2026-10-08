@@ -55,18 +55,21 @@ pub struct ButtonTokens {
 impl ButtonTokens {
     pub const fn from_colors(colors: ColorTokens, dark: bool) -> Self {
         let transparent = Color::TRANSPARENT;
+        // `Primary` is the neutral, high-emphasis action. Accent-colored actions
+        // use the separate `accent` palette. Keeping these roles distinct makes
+        // the hierarchy predictable when an application changes its accent.
         let primary_rest = if dark {
-            Color::from_rgb_hex(0x3970DD)
-        } else {
-            Color::from_rgb_hex(0x3970DD)
-        };
-        let primary_hover = if dark {
-            Color::from_rgb_hex(0xffffff)
+            Color::WHITE
         } else {
             Color::from_rgb_hex(0x303236)
         };
+        let primary_hover = if dark {
+            Color::from_rgb_hex(0xe9ebef)
+        } else {
+            Color::from_rgb_hex(0x202226)
+        };
         let primary_pressed = if dark {
-            Color::from_rgb_hex(0xd9dce1)
+            Color::from_rgb_hex(0xd1d4da)
         } else {
             Color::BLACK
         };
@@ -131,7 +134,7 @@ impl ButtonTokens {
             height: 32.0,
             radius: CornerRadius::Medium,
             stroke_width: FigmaTokens::SHAPE.stroke_default,
-            focus_ring: colors.border_strong,
+            focus_ring: colors.focus_ring,
             focus_ring_width: 3.0,
             disabled_opacity: 0.42,
         }
@@ -735,5 +738,29 @@ const fn solid_palette(
             border: pressed,
             foreground,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn primary_buttons_keep_readable_neutral_contrast_in_both_themes() {
+        let light = ButtonTokens::from_colors(super::super::theme::Theme::LIGHT.colors, false);
+        let dark = ButtonTokens::from_colors(super::super::theme::Theme::DARK.colors, true);
+
+        assert_eq!(light.primary.rest.foreground, Color::WHITE);
+        assert_eq!(dark.primary.rest.background, Color::WHITE);
+        assert_eq!(dark.primary.rest.foreground, Color::BLACK);
+    }
+
+    #[test]
+    fn control_focus_ring_uses_the_semantic_focus_color() {
+        let colors = super::super::theme::Theme::LIGHT.colors;
+        assert_eq!(
+            ButtonTokens::from_colors(colors, false).focus_ring,
+            colors.focus_ring
+        );
     }
 }
