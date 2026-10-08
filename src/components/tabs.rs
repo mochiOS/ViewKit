@@ -144,6 +144,7 @@ impl Tabs {
                             .accessibility_hidden(true)
                             .font_size(13.0)
                             .weight(if selected { 600 } else { 500 })
+                            .offset_y(4.0)
                             .color(foreground),
                     ),
             )
