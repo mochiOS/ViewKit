@@ -181,18 +181,18 @@ pub(super) fn ipc_call_raw(
     Ok((msg & 0xffff_ffff) as usize)
 }
 
-pub(super) fn ipc_wait_handles_raw(
+pub(super) fn ipc_wait_object_handles_raw(
     endpoint: u64,
     buf_ptr: *mut u8,
     buf_len: usize,
-    handles: &mut mochi_user_platform::ipc::IpcFileHandles,
+    handles: &mut mochi_user_platform::ipc::IpcObjectHandles,
 ) -> Result<usize, MochiOsBackendError> {
-    *handles = mochi_user_platform::ipc::IpcFileHandles::default();
+    *handles = mochi_user_platform::ipc::IpcObjectHandles::default();
     let msg = syscall_result(syscall::call4(
-        syscall::SyscallNumber::IpcRecvHandles,
+        syscall::SyscallNumber::IpcRecvObjectHandles,
         buf_ptr as u64,
         buf_len as u64,
-        handles as *mut mochi_user_platform::ipc::IpcFileHandles as u64,
+        handles as *mut mochi_user_platform::ipc::IpcObjectHandles as u64,
         endpoint,
     ))?;
     Ok((msg & 0xffff_ffff) as usize)
@@ -289,15 +289,28 @@ pub(super) struct ReceivedHandles {
 
 impl ReceivedHandles {
     fn from_raw(
-        raw: mochi_user_platform::ipc::IpcFileHandles,
+        raw: mochi_user_platform::ipc::IpcObjectHandles,
     ) -> Result<Self, MochiOsBackendError> {
         let count = raw.count as usize;
-        if count > raw.handles.len() || count > 4 {
+        if count > raw.handles.len()
+            || count > 4
+            || raw.reserved != 0
+            || raw
+                .handles
+                .iter()
+                .take(count.min(raw.handles.len()))
+                .any(|handle| handle.handle == 0 || handle.reserved != 0)
+        {
+            for handle in raw.handles.iter().take(count.min(raw.handles.len())) {
+                if handle.handle != 0 {
+                    let _ = mochi_user_platform::handle::close(handle.handle);
+                }
+            }
             return Err(MochiOsBackendError::InvalidEvent);
         }
         let mut handles = core::array::from_fn(|_| PlatformFileHandle::default());
         for (output, input) in handles.iter_mut().zip(raw.handles).take(count) {
-            *output = PlatformFileHandle::from_raw(input.fd, input.rights);
+            *output = PlatformFileHandle::from_raw(input.handle, input.rights);
         }
         Ok(Self { count, handles })
     }
@@ -314,8 +327,8 @@ pub(super) fn try_recv_event()
     // also accepts ordinary messages and reports an empty handle list.  Use it
     // for the first dequeue so a delegated document cannot escape the event
     // loop as EMSGSIZE between two separate receive attempts.
-    let raw_handles = core::ptr::addr_of_mut!(EVENT_FILE_HANDLES);
-    let len = match ipc_wait_handles_raw(0, event, EVENT_BUFFER_SIZE, unsafe {
+    let raw_handles = core::ptr::addr_of_mut!(EVENT_OBJECT_HANDLES);
+    let len = match ipc_wait_object_handles_raw(0, event, EVENT_BUFFER_SIZE, unsafe {
         &mut *raw_handles
     }) {
         Ok(len) => len,
@@ -338,8 +351,8 @@ pub(super) fn read_event_blocking(
     endpoint: u64,
 ) -> Result<Option<(usize, [u8; EVENT_BUFFER_SIZE], ReceivedHandles)>, MochiOsBackendError> {
     let event = core::ptr::addr_of_mut!(EVENT_BUF).cast::<u8>();
-    let raw_handles = core::ptr::addr_of_mut!(EVENT_FILE_HANDLES);
-    let len = match ipc_wait_handles_raw(endpoint, event, EVENT_BUFFER_SIZE, unsafe {
+    let raw_handles = core::ptr::addr_of_mut!(EVENT_OBJECT_HANDLES);
+    let len = match ipc_wait_object_handles_raw(endpoint, event, EVENT_BUFFER_SIZE, unsafe {
         &mut *raw_handles
     }) {
         Ok(len) => len,

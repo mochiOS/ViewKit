@@ -172,11 +172,15 @@ static mut IPC_REPLY: [u8; 16] = [0; 16];
 const EVENT_BUFFER_SIZE: usize = 4096;
 const _: () = assert!(20 + CURSOR_WIDTH as usize * CURSOR_HEIGHT as usize * 4 <= 4128);
 static mut EVENT_BUF: [u8; EVENT_BUFFER_SIZE] = [0; EVENT_BUFFER_SIZE];
-static mut EVENT_FILE_HANDLES: mochi_user_platform::ipc::IpcFileHandles =
-    mochi_user_platform::ipc::IpcFileHandles {
+static mut EVENT_OBJECT_HANDLES: mochi_user_platform::ipc::IpcObjectHandles =
+    mochi_user_platform::ipc::IpcObjectHandles {
         count: 0,
         reserved: 0,
-        handles: [mochi_user_platform::ipc::IpcFileHandle { fd: -1, rights: 0 }; 4],
+        handles: [mochi_user_platform::ipc::IpcObjectHandle {
+            handle: 0,
+            reserved: 0,
+            rights: 0,
+        }; 4],
     };
 static mut DISPLAY_REQ: [u8; 20] = [0; 20];
 static mut DISPLAY_REPLY: [u8; 32] = [0; 32];

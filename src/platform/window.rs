@@ -41,20 +41,20 @@ pub enum PlatformWindowCommand {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct PlatformFileHandle {
-    fd: i32,
-    rights: u32,
+    handle: u32,
+    rights: u64,
 }
 
 impl PlatformFileHandle {
-    pub(crate) const fn from_raw(fd: i32, rights: u32) -> Self {
-        Self { fd, rights }
+    pub(crate) const fn from_raw(handle: u32, rights: u64) -> Self {
+        Self { handle, rights }
     }
 
-    pub const fn fd(&self) -> i32 {
-        self.fd
+    pub const fn handle(&self) -> u32 {
+        self.handle
     }
 
-    pub const fn rights(&self) -> u32 {
+    pub const fn rights(&self) -> u64 {
         self.rights
     }
 
@@ -62,26 +62,29 @@ impl PlatformFileHandle {
     ///
     /// Handles left in the batch are closed automatically when dispatch ends.
     pub fn take(&mut self) -> Option<Self> {
-        (self.fd >= 0).then(|| core::mem::take(self))
+        (self.handle != 0).then(|| core::mem::take(self))
     }
 }
 
 impl Default for PlatformFileHandle {
     fn default() -> Self {
-        Self { fd: -1, rights: 0 }
+        Self {
+            handle: 0,
+            rights: 0,
+        }
     }
 }
 
 impl Drop for PlatformFileHandle {
     fn drop(&mut self) {
-        if self.fd < 0 {
+        if self.handle == 0 {
             return;
         }
         #[cfg(target_os = "mochios")]
         {
-            let _ = mochi_user_platform::file::close(self.fd as u64);
+            let _ = mochi_user_platform::handle::close(self.handle);
         }
-        self.fd = -1;
+        self.handle = 0;
     }
 }
 
