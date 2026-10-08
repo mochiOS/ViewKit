@@ -91,30 +91,40 @@ impl OmochiPreset {
         let mut material = DEFAULT_MATERIAL;
         match self {
             Self::CompactControl => {
-                material.max_pull = 16.0;
-                material.press_depth = 3.4;
+                material.drag_gain = 0.48;
+                material.max_pull = 20.0;
+                material.press_depth = 4.2;
                 material.press_radius = 33.0;
-                material.drag_radius = 42.0;
+                material.drag_radius = 38.0;
+                material.drag_follow = 0.48;
+                material.neck_ratio = 0.11;
+                material.tip_stretch = 0.44;
                 material.tip_long_radius = 12.0;
                 material.tip_cross_radius = 21.0;
             }
             Self::Thumb => {
-                material.max_pull = 14.0;
-                material.press_depth = 3.2;
+                material.max_pull = 17.0;
+                material.press_depth = 3.8;
                 material.press_radius = 22.0;
-                material.drag_radius = 32.0;
+                material.drag_radius = 28.0;
+                material.drag_follow = 0.46;
+                material.neck_ratio = 0.10;
+                material.tip_stretch = 0.42;
                 material.tip_long_radius = 9.0;
                 material.tip_cross_radius = 16.0;
-                material.velocity_pull_scale = 0.016;
+                material.velocity_pull_scale = 0.022;
             }
             Self::SelectionIndicator => {
-                material.max_pull = 18.0;
-                material.press_depth = 3.0;
+                material.max_pull = 22.0;
+                material.press_depth = 3.6;
                 material.press_radius = 54.0;
-                material.drag_radius = 72.0;
+                material.drag_radius = 60.0;
+                material.drag_follow = 0.44;
+                material.neck_ratio = 0.09;
+                material.tip_stretch = 0.40;
                 material.tip_long_radius = 18.0;
                 material.tip_cross_radius = 28.0;
-                material.velocity_pull_scale = 0.014;
+                material.velocity_pull_scale = 0.020;
             }
         }
         material.press_release_start = 0.6;
