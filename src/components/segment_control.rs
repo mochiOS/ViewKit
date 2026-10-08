@@ -1,17 +1,15 @@
-use super::omochi_shape::{OmochiPreset, OmochiShape};
+use super::omochi_shape::{OmochiPreset, OmochiShape, SelectionMotion};
 use super::{BorderStyle, Button, ButtonInteractionState, ButtonStyle, Rectangle, RectangleColor};
 use crate::accessibility::{AccessibilityNode, AccessibilityRole};
-use crate::animation::{Animation, interpolate};
 use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
 use crate::platform::{Key, PointerButton};
 use crate::state::Binding;
-use crate::theme::{CornerRadius, Motion, ShadowStyle};
+use crate::theme::{CornerRadius, ShadowStyle};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::time::Instant;
 
 struct SegmentedItem {
     value: usize,
@@ -27,6 +25,7 @@ pub struct SegmentedControl {
     accessibility_label: Option<String>,
     on_change: Option<Rc<RefCell<Box<dyn FnMut(usize)>>>>,
     indicator_shape: OmochiShape,
+    selection_motion: SelectionMotion,
 }
 
 impl SegmentedControl {
@@ -38,6 +37,7 @@ impl SegmentedControl {
             accessibility_label: None,
             on_change: None,
             indicator_shape: OmochiShape::velocity(OmochiPreset::SelectionIndicator),
+            selection_motion: SelectionMotion::default(),
         }
     }
 
@@ -88,6 +88,9 @@ impl SegmentedControl {
         let selection = self.selection.clone();
         let value = item.value;
         let on_change = self.on_change.clone();
+        let selection_motion = self.selection_motion.clone();
+        let from_index = self.selected_index(self.selection.get()).unwrap_or(0);
+        let to_index = self.selected_index(value).unwrap_or(from_index);
 
         Button::with_interaction_and_label(item.interaction.clone(), item.label.clone())
             .style(ButtonStyle::Ghost)
@@ -99,7 +102,8 @@ impl SegmentedControl {
             .accessibility_selected(self.selection.get() == value)
             .on_click(move || {
                 if selection.get() != value {
-                    selection.set(value);
+                    selection.set_without_notification(value);
+                    selection_motion.start(from_index, to_index);
                     if let Some(on_change) = on_change.as_ref() {
                         (on_change.borrow_mut())(value);
                     }
@@ -139,40 +143,18 @@ impl SegmentedControl {
             .collect()
     }
 
-    fn animated_index(&self, now: Instant, motion: Motion) -> (Option<f32>, Option<Instant>) {
+    fn animated_index(
+        &self,
+        motion: crate::theme::Motion,
+    ) -> (Option<f32>, Option<std::time::Instant>) {
         let current_value = self.selection.get();
 
         let Some(current_index) = self.selected_index(current_value) else {
             return (None, None);
         };
 
-        let Some(transition) = self.selection.transition() else {
-            return (Some(current_index as f32), None);
-        };
-
-        if transition.to != current_value {
-            return (Some(current_index as f32), None);
-        }
-
-        let Some(from_index) = self.selected_index(transition.from) else {
-            return (Some(current_index as f32), None);
-        };
-
-        let Some(to_index) = self.selected_index(transition.to) else {
-            return (Some(current_index as f32), None);
-        };
-
-        if from_index == to_index {
-            return (Some(to_index as f32), None);
-        }
-
-        let sample = Animation::new(transition.started_at, motion.duration)
-            .easing(motion.easing)
-            .sample(now);
-
-        let index = interpolate(from_index as f32, to_index as f32, sample.progress);
-
-        (Some(index), sample.next_redraw_at)
+        let (index, next_redraw) = self.selection_motion.sample(current_index as f32, motion);
+        (Some(index), next_redraw)
     }
 
     fn keyboard_target(&self, event: &ViewEvent) -> Option<usize> {
@@ -272,10 +254,9 @@ impl View for SegmentedControl {
             return;
         }
 
-        let now = Instant::now();
         let motion = context.theme.motion.selection;
 
-        let (animated_index, next_redraw) = self.animated_index(now, motion);
+        let (animated_index, next_redraw) = self.animated_index(motion);
 
         if let Some(next_redraw) = next_redraw {
             context.request_redraw_in_at(bounds.expanded(16.0), next_redraw);
@@ -283,6 +264,18 @@ impl View for SegmentedControl {
 
         if let Some(animated_index) = animated_index {
             let segment_width = segment_bounds[0].size.width;
+
+            if let Some((from, to)) = self.selection_motion.take_launch() {
+                let center = |index: f32| {
+                    crate::geometry::Point::new(
+                        segment_bounds[0].origin.x + segment_width * (index + 0.5),
+                        segment_bounds[0].origin.y + segment_bounds[0].size.height / 2.0,
+                    )
+                };
+                self.indicator_shape.begin(center(from));
+                self.indicator_shape.moved(center(to));
+                self.indicator_shape.end();
+            }
 
             let indicator_bounds = Rect::new(
                 segment_bounds[0].origin.x + segment_width * animated_index,
@@ -319,6 +312,11 @@ impl View for SegmentedControl {
                 ))
                 .paint(indicator_bounds, context);
             context.display_list.push(DrawCommand::PopClip);
+
+            if self.selection_motion.ready_to_commit() && !self.indicator_shape.is_animating() {
+                self.selection_motion.finish();
+                self.selection.commit();
+            }
         }
 
         for (item, item_bounds) in self.items.iter().zip(segment_bounds) {
@@ -360,7 +358,10 @@ impl View for SegmentedControl {
         if let Some(index) = self.keyboard_target(event)
             && let Some(target_bounds) = segment_bounds.get(index).copied()
         {
-            self.selection.set_if_changed(self.items[index].value);
+            let from_index = self.selected_index(self.selection.get()).unwrap_or(index);
+            self.selection
+                .set_without_notification(self.items[index].value);
+            self.selection_motion.start(from_index, index);
             if let Some(on_change) = self.on_change.as_ref() {
                 (on_change.borrow_mut())(self.items[index].value);
             }

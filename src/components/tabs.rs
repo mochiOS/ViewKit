@@ -1,5 +1,4 @@
 use crate::accessibility::{AccessibilityNode, AccessibilityRole};
-use crate::animation::{Animation, interpolate};
 use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
@@ -8,9 +7,8 @@ use crate::platform::{Key, PointerButton};
 use crate::state::Binding;
 use crate::theme::{Color, ShadowStyle, Theme};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
-use std::time::Instant;
 
-use super::omochi_shape::{OmochiPreset, OmochiShape};
+use super::omochi_shape::{OmochiPreset, OmochiShape, SelectionMotion};
 use super::{Button, ButtonInteractionState, ButtonStyle, HStack, Padding, Text, ZStackAlignment};
 
 struct TabItem {
@@ -26,6 +24,7 @@ pub struct Tabs {
     enabled: bool,
     accessibility_label: Option<String>,
     indicator_shape: OmochiShape,
+    selection_motion: SelectionMotion,
 }
 
 impl Tabs {
@@ -36,6 +35,7 @@ impl Tabs {
             enabled: true,
             accessibility_label: None,
             indicator_shape: OmochiShape::velocity(OmochiPreset::SelectionIndicator),
+            selection_motion: SelectionMotion::default(),
         }
     }
 
@@ -74,6 +74,9 @@ impl Tabs {
         let enabled = self.enabled && item.enabled;
         let selection = self.selection.clone();
         let value = item.value;
+        let selection_motion = self.selection_motion.clone();
+        let from_index = self.selected_index(self.selection.get()).unwrap_or(0);
+        let to_index = self.selected_index(value).unwrap_or(from_index);
 
         let foreground = if !enabled {
             theme.tabs.disabled_foreground
@@ -113,7 +116,10 @@ impl Tabs {
                     ),
             )
             .on_click(move || {
-                selection.set_if_changed(value);
+                if selection.get() != value {
+                    selection.set_without_notification(value);
+                    selection_motion.start(from_index, to_index);
+                }
             })
     }
 
@@ -131,30 +137,15 @@ impl Tabs {
         self.items.iter().position(|item| item.value == value)
     }
 
-    fn animated_index(&self, now: Instant, theme: &Theme) -> (Option<f32>, Option<Instant>) {
+    fn animated_index(&self, theme: &Theme) -> (Option<f32>, Option<std::time::Instant>) {
         let value = self.selection.get();
         let Some(current) = self.selected_index(value) else {
             return (None, None);
         };
-        let Some(transition) = self.selection.transition() else {
-            return (Some(current as f32), None);
-        };
-        let (Some(from), Some(to)) = (
-            self.selected_index(transition.from),
-            self.selected_index(transition.to),
-        ) else {
-            return (Some(current as f32), None);
-        };
-        if transition.to != value || from == to {
-            return (Some(current as f32), None);
-        }
-        let sample = Animation::new(transition.started_at, theme.motion.selection.duration)
-            .easing(theme.motion.selection.easing)
-            .sample(now);
-        (
-            Some(interpolate(from as f32, to as f32, sample.progress)),
-            sample.next_redraw_at,
-        )
+        let (index, next_redraw) = self
+            .selection_motion
+            .sample(current as f32, theme.motion.selection);
+        (Some(index), next_redraw)
     }
 
     fn keyboard_target(&self, event: &ViewEvent) -> Option<usize> {
@@ -210,14 +201,24 @@ impl View for Tabs {
         if !self.enabled && self.indicator_shape.is_animating() {
             self.indicator_shape.reset();
         }
-        let now = Instant::now();
-        let (index, next_redraw) = self.animated_index(now, context.theme);
+        let (index, next_redraw) = self.animated_index(context.theme);
         if let Some(next_redraw) = next_redraw {
             context.request_redraw_in_at(bounds.expanded(16.0), next_redraw);
         }
         if let Some(index) = index {
             let gap = StackGap::Small.resolve(&context.theme.spacing);
             let width = context.theme.layout.tab_width;
+            if let Some((from, to)) = self.selection_motion.take_launch() {
+                let center = |index: f32| {
+                    crate::geometry::Point::new(
+                        bounds.origin.x + (width + gap) * index + width / 2.0,
+                        bounds.origin.y + context.theme.layout.compact_control_height / 2.0,
+                    )
+                };
+                self.indicator_shape.begin(center(from));
+                self.indicator_shape.moved(center(to));
+                self.indicator_shape.end();
+            }
             let indicator = Rect::new(
                 bounds.origin.x + (width + gap) * index,
                 bounds.origin.y,
@@ -243,6 +244,10 @@ impl View for Tabs {
                 context,
             );
             context.display_list.push(DrawCommand::PopClip);
+            if self.selection_motion.ready_to_commit() && !self.indicator_shape.is_animating() {
+                self.selection_motion.finish();
+                self.selection.commit();
+            }
         }
         self.stack(context.theme).paint(bounds, context);
     }
@@ -279,7 +284,10 @@ impl View for Tabs {
         if let Some(index) = self.keyboard_target(event) {
             let child_bounds = stack.child_bounds_for_event(bounds, context);
             if let Some(target_bounds) = child_bounds.get(index).copied() {
-                self.selection.set_if_changed(self.items[index].value);
+                let from_index = self.selected_index(self.selection.get()).unwrap_or(index);
+                self.selection
+                    .set_without_notification(self.items[index].value);
+                self.selection_motion.start(from_index, index);
                 context.request_keyboard_focus(target_bounds);
                 context.request_redraw_in(bounds.expanded(16.0));
                 return EventResult::Consumed;
