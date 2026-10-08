@@ -85,6 +85,7 @@ impl<Content: View> View for Dialog<Content> {
         Rectangle::new()
             .color(RectangleColor::Custom(context.theme.dialog.background))
             .radius(context.theme.dialog.radius)
+            .shadow(context.theme.dialog.shadow)
             .border(BorderStyle::custom(
                 context.theme.dialog.border,
                 context.theme.dialog.stroke_width,

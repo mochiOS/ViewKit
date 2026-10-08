@@ -219,6 +219,7 @@ pub struct DialogTokens {
     pub padding: f32,
     pub radius: CornerRadius,
     pub stroke_width: f32,
+    pub shadow: ShadowStyle,
 }
 
 impl DialogTokens {
@@ -229,6 +230,7 @@ impl DialogTokens {
             padding: FigmaTokens::SPACING.space_16,
             radius: CornerRadius::Large,
             stroke_width: FigmaTokens::SHAPE.stroke_default,
+            shadow: ShadowStyle::Window,
         }
     }
 }
@@ -386,6 +388,7 @@ pub struct PopoverTokens {
     pub padding: f32,
     pub radius: CornerRadius,
     pub stroke_width: f32,
+    pub shadow: ShadowStyle,
 }
 
 impl PopoverTokens {
@@ -396,6 +399,7 @@ impl PopoverTokens {
             padding: FigmaTokens::SPACING.space_8,
             radius: CornerRadius::Medium,
             stroke_width: FigmaTokens::SHAPE.stroke_default,
+            shadow: ShadowStyle::Floating,
         }
     }
 }
@@ -445,6 +449,7 @@ pub struct MenuTokens {
     pub item_radius: CornerRadius,
     pub surface_radius: CornerRadius,
     pub surface_stroke_width: f32,
+    pub surface_shadow: ShadowStyle,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -520,6 +525,7 @@ pub struct TooltipTokens {
     pub minimum_height: f32,
     pub radius: CornerRadius,
     pub stroke_width: f32,
+    pub shadow: ShadowStyle,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -664,6 +670,7 @@ impl TooltipTokens {
             minimum_height: 24.0,
             radius: CornerRadius::Small,
             stroke_width: FigmaTokens::SHAPE.stroke_default,
+            shadow: ShadowStyle::Card,
         }
     }
 }
@@ -699,6 +706,7 @@ impl MenuTokens {
             item_radius: CornerRadius::Small,
             surface_radius: CornerRadius::Medium,
             surface_stroke_width: FigmaTokens::SHAPE.stroke_default,
+            surface_shadow: ShadowStyle::Floating,
         }
     }
 }

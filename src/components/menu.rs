@@ -242,7 +242,7 @@ impl Menu {
         Card::new()
             .compact()
             .radius(Theme::current().menu.surface_radius)
-            .shadow(ShadowStyle::Card)
+            .shadow(Theme::current().menu.surface_shadow)
             .border(BorderStyle::Standard {
                 width: Theme::current().menu.surface_stroke_width,
             })

@@ -123,9 +123,10 @@ where
             )))
             .paint(bounds, context);
 
-        context
-            .display_list
-            .push(DrawCommand::PushClip { rect: bounds });
+        context.display_list.push(DrawCommand::PushRoundedClip {
+            rect: bounds,
+            radius: resolved_radius,
+        });
 
         context.push_corner_radius(resolved_radius);
         let inset = self.inset(context.theme);
