@@ -154,32 +154,32 @@ impl ButtonTokens {
             focus_ring_width: 2.0,
             disabled_opacity: 0.42,
             shadow: ShadowStyle::Custom(ShadowSet::single(Shadow::new(
-                Color::rgba(0, 0, 0, if dark { 34 } else { 20 }),
+                Color::rgba(0, 0, 0, if dark { 22 } else { 14 }),
                 0.0,
                 1.0,
                 1.0,
                 0.0,
             ))),
             pressed_shadow: ShadowStyle::Custom(ShadowSet::single(Shadow::new(
-                Color::rgba(0, 0, 0, if dark { 24 } else { 14 }),
+                Color::rgba(0, 0, 0, if dark { 16 } else { 10 }),
                 0.0,
-                1.0,
+                0.5,
                 0.0,
                 0.0,
             ))),
             omochi_shadow: ShadowStyle::Custom(ShadowSet::double(
                 Shadow::new(
-                    Color::rgba(0, 0, 0, if dark { 38 } else { 24 }),
+                    Color::rgba(0, 0, 0, if dark { 24 } else { 16 }),
                     0.0,
                     1.0,
-                    2.0,
+                    1.5,
                     0.0,
                 ),
                 Shadow::new(
-                    Color::rgba(0, 0, 0, if dark { 18 } else { 10 }),
+                    Color::rgba(0, 0, 0, if dark { 12 } else { 7 }),
                     0.0,
-                    2.0,
-                    4.0,
+                    1.5,
+                    3.0,
                     0.0,
                 ),
             )),
@@ -368,8 +368,8 @@ impl SwitchTokens {
             disabled_knob: Color::rgba(255, 255, 255, 170),
             knob_border: colors.border_strong,
             knob_shadow: ShadowStyle::Custom(ShadowSet::double(
-                Shadow::new(Color::rgba(0, 0, 0, 28), 0.0, 1.0, 2.0, 0.0),
-                Shadow::new(Color::rgba(0, 0, 0, 14), 0.0, 2.0, 4.0, 0.0),
+                Shadow::new(Color::rgba(0, 0, 0, 18), 0.0, 1.0, 1.5, 0.0),
+                Shadow::new(Color::rgba(0, 0, 0, 8), 0.0, 1.5, 3.0, 0.0),
             )),
             stroke_width: FigmaTokens::SHAPE.stroke_default,
             disabled_opacity: 0.45,
@@ -414,8 +414,8 @@ impl SliderTokens {
             knob_border: colors.border,
             hovered_knob_border: colors.border_strong,
             knob_shadow: ShadowStyle::Custom(ShadowSet::double(
-                Shadow::new(Color::rgba(0, 0, 0, 24), 0.0, 1.0, 2.0, 0.0),
-                Shadow::new(Color::rgba(0, 0, 0, 10), 0.0, 2.0, 4.0, 0.0),
+                Shadow::new(Color::rgba(0, 0, 0, 16), 0.0, 1.0, 1.5, 0.0),
+                Shadow::new(Color::rgba(0, 0, 0, 7), 0.0, 1.5, 3.0, 0.0),
             )),
             knob_radius: CornerRadius::ExtraLarge,
             focus_ring: colors.focus_ring,
@@ -478,10 +478,10 @@ impl SegmentedControlTokens {
             stroke_width: FigmaTokens::SHAPE.stroke_default,
             focus_ring_width: 3.0,
             indicator_shadow: ShadowStyle::Custom(ShadowSet::single(Shadow::new(
-                Color::rgba(0, 0, 0, if dark { 42 } else { 26 }),
+                Color::rgba(0, 0, 0, if dark { 24 } else { 14 }),
                 0.0,
+                1.0,
                 3.0,
-                8.0,
                 0.0,
             ))),
         }
@@ -926,6 +926,24 @@ mod tests {
         ] {
             let switch = SwitchTokens::from_colors(theme.colors);
             assert_eq!(switch.knob, Color::WHITE);
+        }
+    }
+
+    #[test]
+    fn segmented_indicator_shadow_stays_compact() {
+        for theme in [
+            super::super::theme::Theme::LIGHT,
+            super::super::theme::Theme::DARK,
+        ] {
+            let segmented = SegmentedControlTokens::from_colors(theme.colors);
+            let ShadowStyle::Custom(shadows) = segmented.indicator_shadow else {
+                panic!("segmented indicator should use its compact shadow recipe");
+            };
+            let shadow = shadows.layers[0].expect("indicator shadow should have one layer");
+            assert!(shadow.color.alpha <= 24);
+            assert!(shadow.offset_y <= 1.0);
+            assert!(shadow.blur_radius <= 3.0);
+            assert_eq!(shadows.layers[1], None);
         }
     }
 
