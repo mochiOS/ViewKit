@@ -371,9 +371,9 @@ impl SliderTokens {
             fill: colors.accent,
             hovered_fill: colors.accent_hovered,
             pressed_fill: colors.accent_pressed,
-            knob: colors.surface,
-            hovered_knob: colors.surface_muted,
-            disabled_knob: colors.surface_subtle,
+            knob: Color::WHITE,
+            hovered_knob: Color::WHITE,
+            disabled_knob: Color::rgba(255, 255, 255, 170),
             knob_border: colors.border,
             hovered_knob_border: colors.border_strong,
             knob_shadow: ShadowStyle::Custom(ShadowSet::double(
@@ -809,6 +809,18 @@ mod tests {
             ButtonTokens::from_colors(colors, false).focus_ring,
             colors.focus_ring
         );
+    }
+
+    #[test]
+    fn slider_thumb_stays_white_in_both_appearances() {
+        for theme in [
+            super::super::theme::Theme::LIGHT,
+            super::super::theme::Theme::DARK,
+        ] {
+            let slider = SliderTokens::from_colors(theme.colors);
+            assert_eq!(slider.knob, Color::WHITE);
+            assert_eq!(slider.hovered_knob, Color::WHITE);
+        }
     }
 
     #[test]
