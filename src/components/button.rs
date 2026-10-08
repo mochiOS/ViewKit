@@ -532,10 +532,16 @@ impl View for Button {
         if interaction.focused {
             let ring_width = context.theme.button.focus_ring_width;
             Rectangle::new()
-                .color(RectangleColor::Custom(context.theme.button.focus_ring))
-                .radius(radius)
+                .color(RectangleColor::Custom(Color::TRANSPARENT))
+                .radius(CornerRadius::Custom(
+                    radius.resolve(&context.theme.radius, bounds.size.width, bounds.size.height)
+                        + ring_width,
+                ))
                 .shadow(ShadowStyle::None)
-                .border(BorderStyle::None)
+                .border(BorderStyle::custom(
+                    context.theme.button.focus_ring,
+                    ring_width,
+                ))
                 .paint(
                     Rect::new(
                         bounds.origin.x - ring_width,
