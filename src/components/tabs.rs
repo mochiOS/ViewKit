@@ -268,7 +268,11 @@ impl View for Tabs {
             ),
             color: context.theme.tabs.strip_background,
         });
-        if self.items.iter().any(|item| item.interaction.is_focused()) {
+        if self
+            .items
+            .iter()
+            .any(|item| item.interaction.is_focus_visible())
+        {
             Rectangle::new()
                 .color(RectangleColor::Custom(Color::TRANSPARENT))
                 .radius(CornerRadius::Custom(14.0))

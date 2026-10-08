@@ -18,6 +18,7 @@ struct SliderInteractionInner {
     hovered: bool,
     dragging: bool,
     focused: bool,
+    focus_visible: bool,
     enabled: bool,
     drag_offset_x: f32,
 }
@@ -73,6 +74,7 @@ impl SliderInteractionState {
         inner.hovered = false;
         inner.dragging = false;
         inner.focused = false;
+        inner.focus_visible = false;
         inner.drag_offset_x = 0.0;
         drop(inner);
         self.thumb_shape.reset();
@@ -89,6 +91,7 @@ impl SliderInteractionState {
             inner.hovered = false;
             inner.dragging = false;
             inner.focused = false;
+            inner.focus_visible = false;
             inner.drag_offset_x = 0.0;
         }
 
@@ -497,7 +500,11 @@ impl View for Slider {
         );
 
         let interaction = self.interaction.inner.borrow();
-        if interaction.focused && interaction.hovered && !interaction.dragging {
+        if interaction.focused
+            && interaction.focus_visible
+            && interaction.hovered
+            && !interaction.dragging
+        {
             Rectangle::new()
                 .color(RectangleColor::Custom(context.theme.slider.focus_ring))
                 .radius(CornerRadius::Custom(
@@ -575,6 +582,16 @@ impl View for Slider {
         );
 
         match event {
+            ViewEvent::FocusVisibilityChanged { visible } => {
+                let mut inner = self.interaction.inner.borrow_mut();
+                let changed = inner.focus_visible != *visible;
+                inner.focus_visible = *visible;
+                drop(inner);
+                if changed {
+                    context.request_redraw_in(bounds.expanded(16.0));
+                }
+                EventResult::Ignored
+            }
             ViewEvent::KeyboardFocusRequested { bounds: target } => {
                 let focused = target.is_some_and(|target| target == bounds);
                 let mut inner = self.interaction.inner.borrow_mut();

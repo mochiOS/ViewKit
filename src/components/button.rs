@@ -180,6 +180,7 @@ fn color_with_opacity(color: Color, opacity: f32) -> Color {
 struct ButtonInteractionInner {
     hovered: bool,
     focused: bool,
+    focus_visible: bool,
 
     /*
      * このButton上でPrimaryボタンが
@@ -235,6 +236,11 @@ impl ButtonInteractionState {
 
     pub fn is_focused(&self) -> bool {
         self.inner.borrow().focused
+    }
+
+    pub(crate) fn is_focus_visible(&self) -> bool {
+        let inner = self.inner.borrow();
+        inner.focused && inner.focus_visible
     }
 
     pub fn take_clicked(&self) -> bool {
@@ -588,7 +594,7 @@ impl View for Button {
         });
 
         let interaction = self.interaction.inner.borrow();
-        if interaction.focused && self.focus_ring_visible {
+        if interaction.focused && interaction.focus_visible && self.focus_ring_visible {
             let ring_width = context.theme.button.focus_ring_width;
             Rectangle::new()
                 .color(RectangleColor::Custom(Color::TRANSPARENT))
@@ -727,6 +733,16 @@ impl View for Button {
         }
 
         match event {
+            ViewEvent::FocusVisibilityChanged { visible } => {
+                let mut inner = self.interaction.inner.borrow_mut();
+                let changed = inner.focus_visible != *visible;
+                inner.focus_visible = *visible;
+                drop(inner);
+                if changed {
+                    context.request_redraw_in(bounds.expanded(16.0));
+                }
+                EventResult::Ignored
+            }
             ViewEvent::KeyboardFocusRequested { bounds: target } => {
                 let focused = target.is_some_and(|target| target == bounds);
                 let mut inner = self.interaction.inner.borrow_mut();
@@ -1041,5 +1057,67 @@ mod tests {
             polygon_colors.last(),
             Some(&Theme::LIGHT.button.standard.hovered.background)
         );
+    }
+
+    #[test]
+    fn focus_ring_is_visible_only_for_keyboard_modality() {
+        let interaction = ButtonInteractionState::new();
+        let button = Button::with_interaction_state("Continue", interaction);
+        let bounds = Rect::new(40.0, 30.0, 104.0, 30.0);
+        let mut text_measurer = TextMeasurer::new();
+        let mut event_context =
+            EventContext::new(&Theme::LIGHT, &Typography::DEFAULT, &mut text_measurer);
+
+        button.handle_event(
+            bounds,
+            &ViewEvent::FocusVisibilityChanged { visible: false },
+            &mut event_context,
+        );
+        button.handle_event(
+            bounds,
+            &ViewEvent::KeyboardFocusRequested {
+                bounds: Some(bounds),
+            },
+            &mut event_context,
+        );
+        drop(event_context);
+        let mut pointer_list = DisplayList::new();
+        let mut pointer_context = PaintContext::new(
+            &mut pointer_list,
+            &Theme::LIGHT,
+            &Typography::DEFAULT,
+            &mut text_measurer,
+        );
+        button.paint(bounds, &mut pointer_context);
+        let pointer_strokes = pointer_list
+            .commands()
+            .iter()
+            .filter(|command| matches!(command, DrawCommand::StrokeRoundedRect { .. }))
+            .count();
+
+        {
+            let mut event_context =
+                EventContext::new(&Theme::LIGHT, &Typography::DEFAULT, &mut text_measurer);
+            button.handle_event(
+                bounds,
+                &ViewEvent::FocusVisibilityChanged { visible: true },
+                &mut event_context,
+            );
+        }
+        let mut keyboard_list = DisplayList::new();
+        let mut keyboard_context = PaintContext::new(
+            &mut keyboard_list,
+            &Theme::LIGHT,
+            &Typography::DEFAULT,
+            &mut text_measurer,
+        );
+        button.paint(bounds, &mut keyboard_context);
+        let keyboard_strokes = keyboard_list
+            .commands()
+            .iter()
+            .filter(|command| matches!(command, DrawCommand::StrokeRoundedRect { .. }))
+            .count();
+
+        assert_eq!(keyboard_strokes, pointer_strokes + 1);
     }
 }

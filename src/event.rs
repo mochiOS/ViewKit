@@ -97,6 +97,10 @@ pub enum ViewEvent {
         bounds: Option<Rect>,
     },
 
+    FocusVisibilityChanged {
+        visible: bool,
+    },
+
     FocusChanged {
         focused: bool,
     },
@@ -135,6 +139,7 @@ impl ViewEvent {
             | Self::FileDragExited
             | Self::FocusChanged { .. }
             | Self::KeyboardFocusRequested { .. }
+            | Self::FocusVisibilityChanged { .. }
             | Self::ContextMenuResult { .. }
             | Self::Backspace
             | Self::Delete
@@ -164,6 +169,7 @@ impl ViewEvent {
                 | Self::PointerReleased { .. }
                 | Self::PointerFocusRequested { .. }
                 | Self::KeyboardFocusRequested { .. }
+                | Self::FocusVisibilityChanged { .. }
                 | Self::PointerLeft
                 | Self::KeyPressed { .. }
                 | Self::TextInput { .. }
@@ -501,6 +507,14 @@ impl EventDispatcher {
     ) -> EventResult {
         let mut result = EventResult::Ignored;
 
+        if matches!(event, PlatformEvent::KeyPressed { .. }) {
+            result = result.merge(root.handle_event(
+                bounds,
+                &ViewEvent::FocusVisibilityChanged { visible: true },
+                context,
+            ));
+        }
+
         if let PlatformEvent::Focused(focused) = event {
             self.window_focused = *focused;
             if *focused {
@@ -566,6 +580,11 @@ impl EventDispatcher {
         );
 
         if is_primary_press && let Some(position) = self.pointer_position {
+            result = result.merge(root.handle_event(
+                bounds,
+                &ViewEvent::FocusVisibilityChanged { visible: false },
+                context,
+            ));
             let focus_result = root.handle_event(
                 bounds,
                 &ViewEvent::PointerFocusRequested { position },

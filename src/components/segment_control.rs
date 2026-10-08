@@ -289,7 +289,11 @@ impl View for SegmentedControl {
             ))
             .paint(bounds, context);
 
-        if self.items.iter().any(|item| item.interaction.is_focused()) {
+        if self
+            .items
+            .iter()
+            .any(|item| item.interaction.is_focus_visible())
+        {
             Rectangle::new()
                 .color(RectangleColor::Custom(crate::theme::Color::TRANSPARENT))
                 .radius(context.theme.segmented_control.radius)

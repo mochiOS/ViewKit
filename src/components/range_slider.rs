@@ -17,6 +17,7 @@ use super::{Rectangle, RectangleColor, Text};
 struct RangeInteraction {
     hovered: bool,
     focused: bool,
+    focus_visible: bool,
     dragging: Option<usize>,
     active_thumb: usize,
 }
@@ -338,7 +339,8 @@ impl View for RangeSlider {
                 thumb.size.width,
                 thumb.size.height,
             );
-            if interaction.focused && interaction.active_thumb == index {
+            if interaction.focused && interaction.focus_visible && interaction.active_thumb == index
+            {
                 Rectangle::new()
                     .color(RectangleColor::Custom(context.theme.slider.focus_ring))
                     .radius(CornerRadius::Custom(
@@ -384,6 +386,16 @@ impl View for RangeSlider {
         }
         let (track, lower, upper) = self.geometry(bounds, context);
         match event {
+            ViewEvent::FocusVisibilityChanged { visible } => {
+                let mut interaction = self.interaction.inner.borrow_mut();
+                let changed = interaction.focus_visible != *visible;
+                interaction.focus_visible = *visible;
+                drop(interaction);
+                if changed {
+                    context.request_redraw_in(bounds.expanded(20.0));
+                }
+                EventResult::Ignored
+            }
             ViewEvent::KeyboardFocusRequested { bounds: target } => {
                 self.interaction.inner.borrow_mut().focused =
                     target.is_some_and(|target| target == bounds);
