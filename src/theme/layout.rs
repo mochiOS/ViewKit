@@ -137,8 +137,8 @@ impl LayoutTokens {
         switch_knob_inset: FigmaTokens::SPACING.space_2,
         switch_drag_threshold: FigmaTokens::SPACING.space_2,
         switch_hit_padding: FigmaTokens::SPACING.space_8,
-        segmented_control_inset: FigmaTokens::SPACING.space_4,
-        segmented_control_height: 38.0,
+        segmented_control_inset: FigmaTokens::SPACING.space_2,
+        segmented_control_height: 30.0,
         segmented_item_min_width: 100.0,
     };
 
