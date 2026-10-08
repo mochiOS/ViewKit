@@ -40,9 +40,9 @@ pub enum ButtonStyle {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ButtonSize {
+    #[default]
     Small,
 
-    #[default]
     Medium,
 
     Large,
@@ -328,7 +328,7 @@ impl Button {
             label: Some(label.into()),
             content: None,
             style: ButtonStyle::Standard,
-            size: ButtonSize::Medium,
+            size: ButtonSize::Small,
             radius: None,
             shadow: None,
             alignment: ZStackAlignment::Center,
@@ -438,6 +438,7 @@ impl Button {
     ) -> Self {
         let mut button = Self::with_interaction(interaction);
         button.label = Some(label.into());
+        button.size = ButtonSize::Small;
         button.omochi_enabled = true;
         button
     }
@@ -975,6 +976,16 @@ mod tests {
         assert_eq!(
             ButtonSize::Large.icon_size(&theme),
             theme.layout.stepper_icon_size
+        );
+    }
+
+    #[test]
+    fn public_buttons_default_to_small() {
+        assert_eq!(ButtonSize::default(), ButtonSize::Small);
+        assert_eq!(Button::new("Default").size, ButtonSize::Small);
+        assert_eq!(
+            Button::with_interaction_state("Retained", ButtonInteractionState::new()).size,
+            ButtonSize::Small
         );
     }
 
