@@ -215,7 +215,11 @@ impl RangeSlider {
     fn update_thumb_shape_for_drag(&self, thumb: usize, position: crate::geometry::Point) {
         let shape = self.shape(thumb);
         if self.thumb_is_at_wall(thumb) {
-            shape.reset();
+            if shape.is_active() {
+                // The end stop (including the other thumb) absorbs further
+                // pointer travel. Existing strain may only recover from here.
+                shape.end();
+            }
         } else if shape.is_active() {
             shape.moved(position);
         } else {
@@ -529,7 +533,11 @@ mod tests {
             &mut context,
         );
         assert_eq!(lower.get(), 0.0);
-        assert!(!interaction.lower_shape.is_animating());
+        assert!(!interaction.lower_shape.is_active());
+        assert!(
+            interaction.lower_shape.is_animating(),
+            "strain should recover at the wall instead of snapping"
+        );
 
         slider.handle_event(
             bounds,

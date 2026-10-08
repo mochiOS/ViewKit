@@ -331,7 +331,11 @@ impl Slider {
 
     fn update_thumb_shape_for_drag(&self, position: crate::geometry::Point) {
         if self.thumb_is_at_wall() {
-            self.interaction.thumb_shape.reset();
+            if self.interaction.thumb_shape.is_active() {
+                // Stop accepting pointer velocity at the end stop, but let the
+                // existing strain relax instead of snapping to the base shape.
+                self.interaction.thumb_shape.end();
+            }
         } else if self.interaction.thumb_shape.is_active() {
             self.interaction.thumb_shape.moved(position);
         } else {
@@ -844,7 +848,11 @@ mod tests {
             &mut context,
         );
         assert_eq!(value.get(), 1.0);
-        assert!(!interaction.thumb_shape.is_animating());
+        assert!(!interaction.thumb_shape.is_active());
+        assert!(
+            interaction.thumb_shape.is_animating(),
+            "strain should recover at the wall instead of snapping"
+        );
 
         slider.handle_event(
             bounds,

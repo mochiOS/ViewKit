@@ -6,7 +6,7 @@ use super::{
 use crate::accessibility::AccessibilityRole;
 use crate::animation::{Animation, Transition, interpolate};
 use crate::event::{EventContext, EventResult, ViewEvent};
-use crate::geometry::{Rect, Size};
+use crate::geometry::{Point, Rect, Size};
 use crate::layout::{StackAlignment, StackGap, ViewExt};
 use crate::platform::PointerButton;
 use crate::state::Binding;
@@ -280,7 +280,8 @@ impl Switch {
                 drag.drag_offset_x = drag_offset_x;
                 drag.drag_position = Some(checked_position);
                 drag.settle_animation = None;
-                self.interaction_state.thumb_shape.begin(*position);
+                drop(drag);
+                self.update_thumb_shape_for_drag(checked_position, *position);
 
                 context.request_redraw_in(bounds.expanded(16.0));
 
@@ -294,7 +295,7 @@ impl Switch {
                     return EventResult::Ignored;
                 }
 
-                {
+                let drag_position = {
                     let mut drag = self.interaction_state.drag.inner.borrow_mut();
 
                     if !drag.dragging {
@@ -315,9 +316,12 @@ impl Switch {
                             metrics,
                         ));
                     }
-                }
+                    drag.dragging.then_some(drag.drag_position).flatten()
+                };
 
-                self.interaction_state.thumb_shape.moved(*position);
+                if let Some(drag_position) = drag_position {
+                    self.update_thumb_shape_for_drag(drag_position, *position);
+                }
 
                 context.request_redraw_in(bounds.expanded(16.0));
 
@@ -367,8 +371,12 @@ impl Switch {
                     return EventResult::Ignored;
                 };
 
-                self.interaction_state.thumb_shape.moved(*position);
-                self.interaction_state.thumb_shape.end();
+                if was_dragging {
+                    self.update_thumb_shape_for_drag(final_position, *position);
+                }
+                if self.interaction_state.thumb_shape.is_active() {
+                    self.interaction_state.thumb_shape.end();
+                }
 
                 if was_dragging {
                     self.start_settle(final_position, final_position >= 0.5);
@@ -436,6 +444,22 @@ impl Switch {
     fn start_toggle(&self) {
         let from = bool_position(self.checked.get());
         self.start_settle(from, from < 0.5);
+    }
+
+    fn update_thumb_shape_for_drag(&self, progress: f32, position: Point) {
+        let shape = &self.interaction_state.thumb_shape;
+        let at_wall = progress <= f32::EPSILON || progress >= 1.0 - f32::EPSILON;
+        if at_wall {
+            if shape.is_active() {
+                shape.end();
+            }
+        } else if shape.is_active() {
+            shape.moved(position);
+        } else {
+            // Begin at the first unconstrained position. Pointer travel while
+            // pinned to either end must never become a velocity impulse.
+            shape.begin(position);
+        }
     }
 
     fn start_settle(&self, from: f32, target: bool) {
@@ -771,7 +795,9 @@ fn drag_progress_from_pointer(
 
 #[cfg(test)]
 mod tests {
-    use super::SwitchMetrics;
+    use super::{Switch, SwitchInteractionState, SwitchMetrics};
+    use crate::geometry::Point;
+    use crate::state::State;
     use crate::theme::Theme;
 
     #[test]
@@ -791,5 +817,19 @@ mod tests {
         assert_eq!(metrics.knob_height, 16.0);
         assert_eq!(metrics.knob_width, 20.0);
         assert_eq!(metrics.pressed_knob_width, 24.0);
+    }
+
+    #[test]
+    fn end_stop_releases_velocity_without_snapping_the_thumb() {
+        let checked = State::new(false);
+        let interaction = SwitchInteractionState::new();
+        let switch = Switch::with_interaction(checked.binding(), interaction.clone());
+        interaction.thumb_shape.begin(Point::new(10.0, 0.0));
+        interaction.thumb_shape.moved(Point::new(20.0, 0.0));
+
+        switch.update_thumb_shape_for_drag(1.0, Point::new(80.0, 0.0));
+
+        assert!(!interaction.thumb_shape.is_active());
+        assert!(interaction.thumb_shape.is_animating());
     }
 }
