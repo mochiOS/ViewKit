@@ -142,6 +142,8 @@ impl Tabs {
                     .content(
                         Text::label(item.label.clone())
                             .accessibility_hidden(true)
+                            .font_size(13.0)
+                            .weight(if selected { 600 } else { 500 })
                             .color(foreground),
                     ),
             )
@@ -167,6 +169,45 @@ impl Tabs {
 
     fn selected_index(&self, value: usize) -> Option<usize> {
         self.items.iter().position(|item| item.value == value)
+    }
+
+    fn indicator_points(&self, theme: &Theme) -> Vec<Point> {
+        let half_width = (theme.layout.tab_width - theme.tabs.indicator_inset * 2.0) / 2.0;
+        let half_height =
+            (theme.tabs.height - theme.tabs.tongue_depth - theme.tabs.indicator_inset) / 2.0;
+        let radius = theme
+            .tabs
+            .radius
+            .resolve(&theme.radius, half_width * 2.0, half_height * 2.0);
+        let left = -half_width;
+        let right = half_width;
+        let top = -half_height;
+        let bottom = half_height;
+        let mut points = vec![Point::new(left, bottom), Point::new(left, top + radius)];
+        for index in 1..=12 {
+            let angle = (180.0 + 90.0 * index as f32 / 12.0).to_radians();
+            points.push(Point::new(
+                left + radius + angle.cos() * radius,
+                top + radius + angle.sin() * radius,
+            ));
+        }
+        points.push(Point::new(right - radius, top));
+        for index in 1..=12 {
+            let angle = (-90.0 + 90.0 * index as f32 / 12.0).to_radians();
+            points.push(Point::new(
+                right - radius + angle.cos() * radius,
+                top + radius + angle.sin() * radius,
+            ));
+        }
+        let tongue_half = theme.tabs.tongue_width / 2.0;
+        points.extend([
+            Point::new(right, bottom),
+            Point::new(tongue_half, bottom),
+            Point::new(tongue_half, bottom + theme.tabs.tongue_depth),
+            Point::new(-tongue_half, bottom + theme.tabs.tongue_depth),
+            Point::new(-tongue_half, bottom),
+        ]);
+        points
     }
 
     fn indicator_local_point(&self, bounds: Rect, position: Point, theme: &Theme) -> Point {
@@ -268,6 +309,15 @@ impl View for Tabs {
             ),
             color: context.theme.tabs.strip_background,
         });
+        context.display_list.push(DrawCommand::FillRect {
+            rect: Rect::new(
+                strip_bounds.origin.x,
+                strip_bounds.origin.y + strip_height,
+                strip_bounds.size.width,
+                (bounds.size.height - strip_height).max(0.0),
+            ),
+            color: context.theme.tabs.content_background,
+        });
         if self
             .items
             .iter()
@@ -301,40 +351,22 @@ impl View for Tabs {
                 self.interaction_state.indicator_shape.end();
             }
             let inset = context.theme.tabs.indicator_inset;
-            let indicator = Rect::new(
-                bounds.origin.x + width * index + inset,
-                bounds.origin.y + inset,
-                width - inset * 2.0,
-                strip_height - inset,
+            let indicator_height = strip_height - inset;
+            let center = Point::new(
+                bounds.origin.x + width * (index + 0.5),
+                bounds.origin.y + inset + indicator_height / 2.0,
             );
-            let radius = context.theme.tabs.radius.resolve(
-                &context.theme.radius,
-                indicator.size.width,
-                indicator.size.height,
-            );
+            let indicator_points = self.indicator_points(context.theme);
             context
                 .display_list
                 .push(DrawCommand::PushClip { rect: bounds });
-            self.interaction_state.indicator_shape.paint(
-                indicator,
-                radius,
+            self.interaction_state.indicator_shape.paint_points(
+                &indicator_points,
+                center,
                 context.theme.tabs.selected_background,
+                bounds,
                 context,
             );
-            Rectangle::new()
-                .color(RectangleColor::Custom(
-                    context.theme.tabs.selected_background,
-                ))
-                .radius(CornerRadius::Custom(4.0))
-                .paint(
-                    Rect::new(
-                        indicator.origin.x + 12.0,
-                        bounds.origin.y + strip_height - 2.0,
-                        (indicator.size.width - 24.0).max(0.0),
-                        context.theme.tabs.tongue_depth + 2.0,
-                    ),
-                    context,
-                );
             context.display_list.push(DrawCommand::PopClip);
             if self.interaction_state.selection_motion.ready_to_commit() {
                 self.interaction_state.selection_motion.finish();
@@ -408,6 +440,36 @@ mod tests {
     use crate::state::State;
     use crate::theme::Theme;
     use crate::typography::{TextMeasurer, Typography};
+
+    #[test]
+    fn indicator_contour_matches_the_omochi_tab_geometry() {
+        let selection = State::new(0_usize);
+        let tabs = Tabs::new(selection.binding()).item(0, "Home");
+        let points = tabs.indicator_points(&Theme::LIGHT);
+        let minimum_x = points
+            .iter()
+            .map(|point| point.x)
+            .fold(f32::INFINITY, f32::min);
+        let maximum_x = points
+            .iter()
+            .map(|point| point.x)
+            .fold(f32::NEG_INFINITY, f32::max);
+        let minimum_y = points
+            .iter()
+            .map(|point| point.y)
+            .fold(f32::INFINITY, f32::min);
+        let maximum_y = points
+            .iter()
+            .map(|point| point.y)
+            .fold(f32::NEG_INFINITY, f32::max);
+
+        assert_eq!(minimum_x, -46.0);
+        assert_eq!(maximum_x, 46.0);
+        assert_eq!(minimum_y, -17.5);
+        assert_eq!(maximum_y, 23.5);
+        assert!(points.contains(&Point::new(-34.0, 23.5)));
+        assert!(points.contains(&Point::new(34.0, 23.5)));
+    }
 
     #[test]
     fn selection_changes_immediately_while_indicator_motion_is_retained() {

@@ -215,6 +215,30 @@ impl OmochiShape {
         }
     }
 
+    pub(super) fn paint_points(
+        &self,
+        base_points: &[Point],
+        center: Point,
+        color: Color,
+        redraw_bounds: Rect,
+        context: &mut PaintContext<'_>,
+    ) {
+        let now = Instant::now();
+        let sample = self.surface.sample(base_points, now);
+        context.display_list.push(DrawCommand::FillPolygon {
+            points: sample
+                .points
+                .into_iter()
+                .map(|point| Point::new(center.x + point.x, center.y + point.y))
+                .collect(),
+            color,
+        });
+        if sample.animating {
+            context
+                .request_redraw_in_at(redraw_bounds.expanded(20.0), now + Duration::from_millis(8));
+        }
+    }
+
     pub(super) fn paint_styled(
         &self,
         bounds: Rect,

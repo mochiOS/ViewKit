@@ -530,6 +530,7 @@ pub struct MenuTokens {
 pub struct TabsTokens {
     pub background: Color,
     pub strip_background: Color,
+    pub content_background: Color,
     pub hovered_background: Color,
     pub selected_background: Color,
     pub foreground: Color,
@@ -541,17 +542,40 @@ pub struct TabsTokens {
     pub height: f32,
     pub indicator_inset: f32,
     pub tongue_depth: f32,
+    pub tongue_width: f32,
 }
 
 impl TabsTokens {
     pub const fn from_colors(colors: ColorTokens) -> Self {
+        let dark = colors.background.red < 80;
         Self {
             background: Color::TRANSPARENT,
-            strip_background: colors.surface_muted,
-            hovered_background: colors.surface_subtle,
-            selected_background: colors.elevated_surface,
-            foreground: colors.text_secondary,
-            selected_foreground: colors.text_primary,
+            strip_background: if dark {
+                colors.surface_muted
+            } else {
+                Color::rgb(232, 234, 237)
+            },
+            content_background: if dark {
+                colors.background
+            } else {
+                Color::WHITE
+            },
+            hovered_background: Color::TRANSPARENT,
+            selected_background: if dark {
+                colors.elevated_surface
+            } else {
+                Color::WHITE
+            },
+            foreground: if dark {
+                colors.text_secondary
+            } else {
+                Color::rgb(98, 102, 108)
+            },
+            selected_foreground: if dark {
+                colors.text_primary
+            } else {
+                Color::rgb(23, 24, 26)
+            },
             disabled_foreground: colors.text_disabled,
             horizontal_padding: FigmaTokens::SPACING.space_8,
             vertical_padding: FigmaTokens::SPACING.space_2,
@@ -559,6 +583,7 @@ impl TabsTokens {
             height: 45.0,
             indicator_inset: 4.0,
             tongue_depth: 6.0,
+            tongue_width: 68.0,
         }
     }
 }
