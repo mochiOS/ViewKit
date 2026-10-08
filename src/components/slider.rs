@@ -10,6 +10,7 @@ use crate::state::Binding;
 use crate::theme::{Color, CornerRadius, ShadowStyle};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
+use super::omochi_shape::{OmochiPreset, OmochiShape};
 use super::{Rectangle, RectangleColor, Text};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -102,6 +103,7 @@ pub struct Slider {
     enabled: bool,
 
     interaction: SliderInteractionState,
+    thumb_shape: OmochiShape,
 }
 
 impl Slider {
@@ -121,6 +123,7 @@ impl Slider {
             enabled: true,
 
             interaction,
+            thumb_shape: OmochiShape::velocity(OmochiPreset::Thumb),
         }
     }
 
@@ -340,6 +343,9 @@ impl View for Slider {
         }
 
         self.interaction.set_enabled(self.enabled);
+        if !self.enabled && self.thumb_shape.is_animating() {
+            self.thumb_shape.reset();
+        }
 
         let mut accessibility = AccessibilityNode::new(AccessibilityRole::Slider, bounds);
         accessibility.label = self.label.clone();
@@ -475,8 +481,10 @@ impl View for Slider {
         }
         drop(interaction);
 
+        self.thumb_shape
+            .paint(knob_bounds, knob_radius, knob_color, context);
         Rectangle::new()
-            .color(RectangleColor::Custom(knob_color))
+            .color(RectangleColor::Custom(Color::TRANSPARENT))
             .radius(context.theme.slider.knob_radius)
             .border(super::BorderStyle::custom(
                 if hovered {
@@ -562,6 +570,7 @@ impl View for Slider {
                 };
 
                 let value_changed = if dragging {
+                    self.thumb_shape.moved(*position);
                     self.update_from_pointer(bounds, position.x, drag_offset_x, metrics)
                 } else {
                     false
@@ -618,6 +627,8 @@ impl View for Slider {
                     inner.drag_offset_x = drag_offset_x;
                 }
 
+                self.thumb_shape.begin(*position);
+
                 if !pressed_inside_knob {
                     self.update_from_pointer(bounds, position.x, 0.0, metrics);
                 }
@@ -650,6 +661,8 @@ impl View for Slider {
                 }
 
                 self.update_from_pointer(bounds, position.x, drag_offset_x, metrics);
+                self.thumb_shape.moved(*position);
+                self.thumb_shape.end();
 
                 self.value.commit();
 
@@ -691,6 +704,7 @@ impl View for Slider {
 
                 if was_dragging {
                     self.value.commit();
+                    self.thumb_shape.end();
                 }
 
                 context.request_redraw_in(bounds.expanded(16.0));
