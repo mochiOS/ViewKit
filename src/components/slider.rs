@@ -323,6 +323,30 @@ impl Slider {
 
         true
     }
+
+    fn thumb_is_at_wall(&self) -> bool {
+        let value = self.current_value();
+        values_equal(value, self.minimum) || values_equal(value, self.maximum)
+    }
+
+    fn update_thumb_shape_for_drag(&self, position: crate::geometry::Point) {
+        if self.thumb_is_at_wall() {
+            self.interaction.thumb_shape.reset();
+        } else if self.interaction.thumb_shape.is_active() {
+            self.interaction.thumb_shape.moved(position);
+        } else {
+            // Re-entering the movable range starts a fresh velocity sample so
+            // pointer travel accumulated against an end stop cannot become pull.
+            self.interaction.thumb_shape.begin(position);
+        }
+    }
+
+    fn end_thumb_shape_drag(&self, position: crate::geometry::Point) {
+        self.update_thumb_shape_for_drag(position);
+        if self.interaction.thumb_shape.is_active() {
+            self.interaction.thumb_shape.end();
+        }
+    }
 }
 
 impl View for Slider {
@@ -575,13 +599,15 @@ impl View for Slider {
                 };
 
                 let value_changed = if dragging {
-                    self.interaction.thumb_shape.moved(*position);
-                    self.update_from_pointer(bounds, position.x, drag_offset_x, metrics)
+                    let value_changed =
+                        self.update_from_pointer(bounds, position.x, drag_offset_x, metrics);
+                    self.update_thumb_shape_for_drag(*position);
+                    value_changed
                 } else {
                     false
                 };
 
-                if state_changed || value_changed {
+                if state_changed || value_changed || dragging {
                     context.request_redraw_in(bounds.expanded(16.0));
                 }
 
@@ -632,11 +658,10 @@ impl View for Slider {
                     inner.drag_offset_x = drag_offset_x;
                 }
 
-                self.interaction.thumb_shape.begin(*position);
-
                 if !pressed_inside_knob {
                     self.update_from_pointer(bounds, position.x, 0.0, metrics);
                 }
+                self.update_thumb_shape_for_drag(*position);
 
                 context.request_redraw_in(bounds.expanded(16.0));
 
@@ -666,8 +691,7 @@ impl View for Slider {
                 }
 
                 self.update_from_pointer(bounds, position.x, drag_offset_x, metrics);
-                self.interaction.thumb_shape.moved(*position);
-                self.interaction.thumb_shape.end();
+                self.end_thumb_shape_drag(*position);
                 self.value.commit();
 
                 context.request_redraw_in(bounds.expanded(16.0));
@@ -780,6 +804,46 @@ mod tests {
                 .iter()
                 .any(|command| matches!(command, DrawCommand::FillPolygon { .. }))
         );
+    }
+
+    #[test]
+    fn end_stop_discards_pointer_velocity_until_thumb_moves_inward() {
+        let value = State::new(0.5_f32);
+        let interaction = SliderInteractionState::new();
+        let slider = Slider::with_interaction(value.binding(), interaction.clone());
+        let bounds = Rect::new(24.0, 40.0, 200.0, 28.0);
+        let mut text_measurer = TextMeasurer::new();
+        let mut context =
+            EventContext::new(&Theme::LIGHT, &Typography::DEFAULT, &mut text_measurer);
+
+        let center = Point::new(124.0, 54.0);
+        slider.handle_event(
+            bounds,
+            &ViewEvent::PointerPressed {
+                position: center,
+                button: PointerButton::Primary,
+            },
+            &mut context,
+        );
+        slider.handle_event(
+            bounds,
+            &ViewEvent::PointerMoved {
+                position: Point::new(400.0, 54.0),
+            },
+            &mut context,
+        );
+        assert_eq!(value.get(), 1.0);
+        assert!(!interaction.thumb_shape.is_animating());
+
+        slider.handle_event(
+            bounds,
+            &ViewEvent::PointerMoved {
+                position: Point::new(180.0, 54.0),
+            },
+            &mut context,
+        );
+        assert!(value.get() < 1.0);
+        assert!(interaction.thumb_shape.is_active());
     }
 }
 

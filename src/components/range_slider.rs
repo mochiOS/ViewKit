@@ -199,6 +199,38 @@ impl RangeSlider {
             &self.interaction.upper_shape
         }
     }
+
+    fn thumb_is_at_wall(&self, thumb: usize) -> bool {
+        let scale = self.minimum.abs().max(self.maximum.abs()).max(1.0);
+        let epsilon = f32::EPSILON * scale * 4.0;
+        if thumb == 0 {
+            let value = self.lower_value();
+            value <= self.minimum + epsilon || value >= self.upper_value() - epsilon
+        } else {
+            let value = self.upper_value();
+            value >= self.maximum - epsilon || value <= self.lower_value() + epsilon
+        }
+    }
+
+    fn update_thumb_shape_for_drag(&self, thumb: usize, position: crate::geometry::Point) {
+        let shape = self.shape(thumb);
+        if self.thumb_is_at_wall(thumb) {
+            shape.reset();
+        } else if shape.is_active() {
+            shape.moved(position);
+        } else {
+            // Do not turn pointer travel accumulated at either end stop (or at
+            // the other thumb) into a velocity impulse when movement resumes.
+            shape.begin(position);
+        }
+    }
+
+    fn end_thumb_shape_drag(&self, thumb: usize, position: crate::geometry::Point) {
+        self.update_thumb_shape_for_drag(thumb, position);
+        if self.shape(thumb).is_active() {
+            self.shape(thumb).end();
+        }
+    }
 }
 
 trait RangeContext {
@@ -359,7 +391,7 @@ impl View for RangeSlider {
                 interaction.active_thumb = thumb;
                 drop(interaction);
                 self.set_thumb(thumb, self.value_at(track, position.x));
-                self.shape(thumb).begin(*position);
+                self.update_thumb_shape_for_drag(thumb, *position);
                 context.request_redraw_in(bounds.expanded(20.0));
                 EventResult::Consumed
             }
@@ -367,7 +399,7 @@ impl View for RangeSlider {
                 let thumb = self.interaction.inner.borrow().dragging;
                 if let Some(thumb) = thumb {
                     self.set_thumb(thumb, self.value_at(track, position.x));
-                    self.shape(thumb).moved(*position);
+                    self.update_thumb_shape_for_drag(thumb, *position);
                     context.request_redraw_in(bounds.expanded(20.0));
                     EventResult::Consumed
                 } else {
@@ -383,8 +415,7 @@ impl View for RangeSlider {
                     return EventResult::Ignored;
                 };
                 self.set_thumb(thumb, self.value_at(track, position.x));
-                self.shape(thumb).moved(*position);
-                self.shape(thumb).end();
+                self.end_thumb_shape_drag(thumb, *position);
                 if thumb == 0 {
                     self.lower.commit();
                 } else {
@@ -444,7 +475,11 @@ impl View for RangeSlider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event::EventContext;
+    use crate::geometry::Point;
     use crate::state::State;
+    use crate::theme::Theme;
+    use crate::typography::{TextMeasurer, Typography};
 
     #[test]
     fn values_are_ordered_and_snapped() {
@@ -455,5 +490,46 @@ mod tests {
             .step(5.0);
         assert_eq!(slider.lower_value(), 20.0);
         assert_eq!(slider.upper_value(), 80.0);
+    }
+
+    #[test]
+    fn end_stop_clears_thumb_velocity_until_it_leaves_the_wall() {
+        let lower = State::new(0.25);
+        let upper = State::new(0.75);
+        let interaction = RangeSliderInteractionState::new();
+        let slider =
+            RangeSlider::with_interaction(lower.binding(), upper.binding(), interaction.clone());
+        let bounds = Rect::new(0.0, 0.0, 200.0, 28.0);
+        let mut text_measurer = TextMeasurer::new();
+        let mut context =
+            EventContext::new(&Theme::LIGHT, &Typography::DEFAULT, &mut text_measurer);
+
+        slider.handle_event(
+            bounds,
+            &ViewEvent::PointerPressed {
+                position: Point::new(56.5, 14.0),
+                button: PointerButton::Primary,
+            },
+            &mut context,
+        );
+        slider.handle_event(
+            bounds,
+            &ViewEvent::PointerMoved {
+                position: Point::new(-100.0, 14.0),
+            },
+            &mut context,
+        );
+        assert_eq!(lower.get(), 0.0);
+        assert!(!interaction.lower_shape.is_animating());
+
+        slider.handle_event(
+            bounds,
+            &ViewEvent::PointerMoved {
+                position: Point::new(80.0, 14.0),
+            },
+            &mut context,
+        );
+        assert!(lower.get() > 0.0);
+        assert!(interaction.lower_shape.is_active());
     }
 }
