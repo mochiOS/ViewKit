@@ -27,7 +27,7 @@ pub struct SegmentedControlInteractionState {
 impl SegmentedControlInteractionState {
     pub fn new() -> Self {
         Self {
-            indicator_shape: OmochiShape::velocity(OmochiPreset::SelectionIndicator),
+            indicator_shape: OmochiShape::displacement(OmochiPreset::SelectionIndicator),
             selection_motion: SelectionMotion::default(),
         }
     }
@@ -122,6 +122,7 @@ impl SegmentedControl {
             .style(ButtonStyle::Ghost)
             .radius(CornerRadius::ExtraLarge)
             .shadow(ShadowStyle::None)
+            .focus_ring(false)
             .enabled(enabled)
             .accessibility_role(AccessibilityRole::RadioButton)
             .accessibility_checked(self.selection.get() == value)
@@ -276,6 +277,17 @@ impl View for SegmentedControl {
             ))
             .paint(bounds, context);
 
+        if self.items.iter().any(|item| item.interaction.is_focused()) {
+            Rectangle::new()
+                .color(RectangleColor::Custom(crate::theme::Color::TRANSPARENT))
+                .radius(context.theme.segmented_control.radius)
+                .border(BorderStyle::custom(
+                    context.theme.button.focus_ring,
+                    context.theme.button.focus_ring_width,
+                ))
+                .paint(bounds, context);
+        }
+
         let inset = context.theme.layout.segmented_control_inset;
         let segment_bounds = self.segment_bounds(bounds, inset);
 
@@ -295,14 +307,15 @@ impl View for SegmentedControl {
             let segment_width = segment_bounds[0].size.width;
 
             if let Some((from, to)) = self.interaction_state.selection_motion.take_launch() {
-                let center = |index: f32| {
-                    crate::geometry::Point::new(
-                        segment_bounds[0].origin.x + segment_width * (index + 0.5),
-                        segment_bounds[0].origin.y + segment_bounds[0].size.height / 2.0,
-                    )
-                };
-                self.interaction_state.indicator_shape.begin(center(from));
-                self.interaction_state.indicator_shape.moved(center(to));
+                let direction = (to - from).signum();
+                let edge = direction * segment_width / 2.0;
+                let pull = ((to - from).abs() * segment_width * 0.34).min(34.0);
+                self.interaction_state
+                    .indicator_shape
+                    .begin(crate::geometry::Point::new(edge, 0.0));
+                self.interaction_state
+                    .indicator_shape
+                    .moved(crate::geometry::Point::new(edge + direction * pull, 0.0));
                 self.interaction_state.indicator_shape.end();
             }
 

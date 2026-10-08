@@ -312,6 +312,7 @@ pub struct Button {
     accessibility_selected: bool,
     on_click: Option<RefCell<Box<dyn FnMut()>>>,
     omochi_enabled: bool,
+    focus_ring_visible: bool,
 }
 
 impl Button {
@@ -333,6 +334,7 @@ impl Button {
             accessibility_selected: false,
             on_click: None,
             omochi_enabled: true,
+            focus_ring_visible: true,
             intrinsic_label_size: RefCell::new(None),
         }
     }
@@ -440,6 +442,11 @@ impl Button {
         self
     }
 
+    pub(crate) fn focus_ring(mut self, visible: bool) -> Self {
+        self.focus_ring_visible = visible;
+        self
+    }
+
     pub(crate) fn with_interaction(interaction: ButtonInteractionState) -> Self {
         Self {
             interaction,
@@ -458,6 +465,7 @@ impl Button {
             accessibility_selected: false,
             on_click: None,
             omochi_enabled: false,
+            focus_ring_visible: true,
             intrinsic_label_size: RefCell::new(None),
         }
     }
@@ -569,7 +577,7 @@ impl View for Button {
         });
 
         let interaction = self.interaction.inner.borrow();
-        if interaction.focused {
+        if interaction.focused && self.focus_ring_visible {
             let ring_width = context.theme.button.focus_ring_width;
             Rectangle::new()
                 .color(RectangleColor::Custom(Color::TRANSPARENT))

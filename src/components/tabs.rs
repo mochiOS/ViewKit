@@ -5,11 +5,14 @@ use crate::geometry::{Rect, Size};
 use crate::layout::{StackAlignment, StackGap, ViewExt};
 use crate::platform::{Key, PointerButton};
 use crate::state::Binding;
-use crate::theme::{Color, ShadowStyle, Theme};
+use crate::theme::{Color, CornerRadius, ShadowStyle, Theme};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 use super::omochi_shape::{OmochiPreset, OmochiShape, SelectionMotion};
-use super::{Button, ButtonInteractionState, ButtonStyle, HStack, Padding, Text, ZStackAlignment};
+use super::{
+    Button, ButtonInteractionState, ButtonStyle, HStack, Padding, Rectangle, RectangleColor, Text,
+    ZStackAlignment,
+};
 
 struct TabItem {
     value: usize,
@@ -27,7 +30,7 @@ pub struct TabsInteractionState {
 impl TabsInteractionState {
     pub fn new() -> Self {
         Self {
-            indicator_shape: OmochiShape::velocity(OmochiPreset::SelectionIndicator),
+            indicator_shape: OmochiShape::displacement(OmochiPreset::SelectionIndicator),
             selection_motion: SelectionMotion::default(),
         }
     }
@@ -128,6 +131,7 @@ impl Tabs {
             })
             .radius(theme.tabs.radius)
             .shadow(ShadowStyle::None)
+            .focus_ring(false)
             .alignment(ZStackAlignment::Center)
             .enabled(enabled)
             .accessibility_role(AccessibilityRole::Tab)
@@ -152,10 +156,12 @@ impl Tabs {
     fn stack(&self, theme: &Theme) -> HStack {
         HStack::new()
             .alignment(StackAlignment::Center)
-            .gap(StackGap::Small)
+            .gap(StackGap::None)
             .children(self.items.iter().map(|item| {
-                self.item_button(item, theme)
-                    .frame(theme.layout.tab_width, theme.layout.compact_control_height)
+                self.item_button(item, theme).frame(
+                    theme.layout.tab_width,
+                    theme.tabs.height - theme.tabs.tongue_depth,
+                )
             }))
     }
 
@@ -217,7 +223,10 @@ impl Tabs {
 
 impl View for Tabs {
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
-        self.stack(context.theme).measure(constraints, context)
+        constraints.constrain(Size::new(
+            context.theme.layout.tab_width * self.items.len() as f32,
+            context.theme.tabs.height,
+        ))
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
@@ -228,33 +237,62 @@ impl View for Tabs {
         if !self.enabled && self.interaction_state.indicator_shape.is_animating() {
             self.interaction_state.indicator_shape.reset();
         }
+        let strip_height = (context.theme.tabs.height - context.theme.tabs.tongue_depth)
+            .min(bounds.size.height)
+            .max(0.0);
+        let strip_bounds = Rect::new(
+            bounds.origin.x,
+            bounds.origin.y,
+            (context.theme.layout.tab_width * self.items.len() as f32).min(bounds.size.width),
+            strip_height,
+        );
+        Rectangle::new()
+            .color(RectangleColor::Custom(context.theme.tabs.strip_background))
+            .radius(CornerRadius::Custom(14.0))
+            .paint(strip_bounds, context);
+        context.display_list.push(DrawCommand::FillRect {
+            rect: Rect::new(
+                strip_bounds.origin.x,
+                strip_bounds.origin.y + strip_height / 2.0,
+                strip_bounds.size.width,
+                strip_height / 2.0,
+            ),
+            color: context.theme.tabs.strip_background,
+        });
+        if self.items.iter().any(|item| item.interaction.is_focused()) {
+            Rectangle::new()
+                .color(RectangleColor::Custom(Color::TRANSPARENT))
+                .radius(CornerRadius::Custom(14.0))
+                .border(super::BorderStyle::custom(
+                    context.theme.button.focus_ring,
+                    context.theme.button.focus_ring_width,
+                ))
+                .paint(strip_bounds, context);
+        }
         let (index, next_redraw) = self.animated_index(context.theme);
         if let Some(next_redraw) = next_redraw {
             context.request_redraw_in_at(bounds.expanded(16.0), next_redraw);
         }
         if let Some(index) = index {
-            let gap = StackGap::Small.resolve(&context.theme.spacing);
             let width = context.theme.layout.tab_width;
             if let Some((from, to)) = self.interaction_state.selection_motion.take_launch() {
-                let center = |index: f32| {
-                    crate::geometry::Point::new(
-                        bounds.origin.x + (width + gap) * index + width / 2.0,
-                        bounds.origin.y + context.theme.layout.compact_control_height / 2.0,
-                    )
-                };
-                self.interaction_state.indicator_shape.begin(center(from));
-                self.interaction_state.indicator_shape.moved(center(to));
+                let direction = (to - from).signum();
+                let edge = direction * (width / 2.0 - context.theme.tabs.indicator_inset);
+                let pull = ((to - from).abs() * width * 0.34).min(34.0);
+                self.interaction_state
+                    .indicator_shape
+                    .begin(crate::geometry::Point::new(edge, 0.0));
+                self.interaction_state
+                    .indicator_shape
+                    .moved(crate::geometry::Point::new(edge + direction * pull, 0.0));
                 self.interaction_state.indicator_shape.end();
             }
+            let inset = context.theme.tabs.indicator_inset;
             let indicator = Rect::new(
-                bounds.origin.x + (width + gap) * index,
-                bounds.origin.y,
-                width,
-                context
-                    .theme
-                    .layout
-                    .compact_control_height
-                    .min(bounds.size.height),
+                bounds.origin.x + width * index + inset,
+                bounds.origin.y + inset,
+                width - inset * 2.0,
+                strip_height - inset,
             );
             let radius = context.theme.tabs.radius.resolve(
                 &context.theme.radius,
@@ -270,6 +308,20 @@ impl View for Tabs {
                 context.theme.tabs.selected_background,
                 context,
             );
+            Rectangle::new()
+                .color(RectangleColor::Custom(
+                    context.theme.tabs.selected_background,
+                ))
+                .radius(CornerRadius::Custom(4.0))
+                .paint(
+                    Rect::new(
+                        indicator.origin.x + 12.0,
+                        bounds.origin.y + strip_height - 2.0,
+                        (indicator.size.width - 24.0).max(0.0),
+                        context.theme.tabs.tongue_depth + 2.0,
+                    ),
+                    context,
+                );
             context.display_list.push(DrawCommand::PopClip);
             if self.interaction_state.selection_motion.ready_to_commit() {
                 self.interaction_state.selection_motion.finish();
@@ -348,16 +400,10 @@ mod tests {
             .item(1, "Activity")
             .item(2, "Settings");
         let theme = Theme::LIGHT;
-        let gap = StackGap::Small.resolve(&theme.spacing);
-        let bounds = Rect::new(
-            30.0,
-            24.0,
-            theme.layout.tab_width * 3.0 + gap * 2.0,
-            theme.layout.compact_control_height,
-        );
+        let bounds = Rect::new(30.0, 24.0, theme.layout.tab_width * 3.0, theme.tabs.height);
         let second = Point::new(
-            bounds.origin.x + theme.layout.tab_width + gap + theme.layout.tab_width / 2.0,
-            bounds.origin.y + bounds.size.height / 2.0,
+            bounds.origin.x + theme.layout.tab_width * 1.5,
+            bounds.origin.y + (theme.tabs.height - theme.tabs.tongue_depth) / 2.0,
         );
         let mut text_measurer = TextMeasurer::new();
         let mut event_context = EventContext::new(&theme, &Typography::DEFAULT, &mut text_measurer);
