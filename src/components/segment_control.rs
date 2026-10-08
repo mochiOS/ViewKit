@@ -352,7 +352,7 @@ impl SegmentedControl {
                     .weight(if selected { 600 } else { 500 })
                     .alignment(crate::typography::TextAlignment::Center)
                     .color(foreground)
-                    .height(16.0),
+                    .height(18.0),
             )
     }
 
@@ -775,7 +775,7 @@ mod tests {
         assert_eq!(command.alignment, TextAlignment::Center);
         assert_eq!(command.bounds.origin.x, bounds.origin.x + 2.0);
         assert_eq!(command.bounds.size.width, 100.0);
-        assert_eq!(command.bounds.size.height, 16.0);
-        assert_eq!(command.bounds.origin.y, bounds.origin.y + 9.0);
+        assert_eq!(command.bounds.size.height, 18.0);
+        assert_eq!(command.bounds.origin.y, bounds.origin.y + 8.0);
     }
 }
