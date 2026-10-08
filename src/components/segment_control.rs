@@ -18,26 +18,52 @@ struct SegmentedItem {
     interaction: ButtonInteractionState,
 }
 
+#[derive(Clone)]
+pub struct SegmentedControlInteractionState {
+    indicator_shape: OmochiShape,
+    selection_motion: SelectionMotion,
+}
+
+impl SegmentedControlInteractionState {
+    pub fn new() -> Self {
+        Self {
+            indicator_shape: OmochiShape::velocity(OmochiPreset::SelectionIndicator),
+            selection_motion: SelectionMotion::default(),
+        }
+    }
+}
+
+impl Default for SegmentedControlInteractionState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct SegmentedControl {
     selection: Binding<usize>,
     items: Vec<SegmentedItem>,
     enabled: bool,
     accessibility_label: Option<String>,
     on_change: Option<Rc<RefCell<Box<dyn FnMut(usize)>>>>,
-    indicator_shape: OmochiShape,
-    selection_motion: SelectionMotion,
+    interaction_state: SegmentedControlInteractionState,
 }
 
 impl SegmentedControl {
     pub fn new(selection: Binding<usize>) -> Self {
+        Self::with_interaction(selection, SegmentedControlInteractionState::new())
+    }
+
+    pub fn with_interaction(
+        selection: Binding<usize>,
+        interaction_state: SegmentedControlInteractionState,
+    ) -> Self {
         Self {
             selection,
             items: Vec::new(),
             enabled: true,
             accessibility_label: None,
             on_change: None,
-            indicator_shape: OmochiShape::velocity(OmochiPreset::SelectionIndicator),
-            selection_motion: SelectionMotion::default(),
+            interaction_state,
         }
     }
 
@@ -88,7 +114,7 @@ impl SegmentedControl {
         let selection = self.selection.clone();
         let value = item.value;
         let on_change = self.on_change.clone();
-        let selection_motion = self.selection_motion.clone();
+        let selection_motion = self.interaction_state.selection_motion.clone();
         let from_index = self.selected_index(self.selection.get()).unwrap_or(0);
         let to_index = self.selected_index(value).unwrap_or(from_index);
 
@@ -153,7 +179,10 @@ impl SegmentedControl {
             return (None, None);
         };
 
-        let (index, next_redraw) = self.selection_motion.sample(current_index as f32, motion);
+        let (index, next_redraw) = self
+            .interaction_state
+            .selection_motion
+            .sample(current_index as f32, motion);
         (Some(index), next_redraw)
     }
 
@@ -226,8 +255,8 @@ impl View for SegmentedControl {
         if bounds.size.width <= 0.0 || bounds.size.height <= 0.0 {
             return;
         }
-        if !self.enabled && self.indicator_shape.is_animating() {
-            self.indicator_shape.reset();
+        if !self.enabled && self.interaction_state.indicator_shape.is_animating() {
+            self.interaction_state.indicator_shape.reset();
         }
 
         let mut node = AccessibilityNode::new(AccessibilityRole::RadioGroup, bounds);
@@ -265,16 +294,16 @@ impl View for SegmentedControl {
         if let Some(animated_index) = animated_index {
             let segment_width = segment_bounds[0].size.width;
 
-            if let Some((from, to)) = self.selection_motion.take_launch() {
+            if let Some((from, to)) = self.interaction_state.selection_motion.take_launch() {
                 let center = |index: f32| {
                     crate::geometry::Point::new(
                         segment_bounds[0].origin.x + segment_width * (index + 0.5),
                         segment_bounds[0].origin.y + segment_bounds[0].size.height / 2.0,
                     )
                 };
-                self.indicator_shape.begin(center(from));
-                self.indicator_shape.moved(center(to));
-                self.indicator_shape.end();
+                self.interaction_state.indicator_shape.begin(center(from));
+                self.interaction_state.indicator_shape.moved(center(to));
+                self.interaction_state.indicator_shape.end();
             }
 
             let indicator_bounds = Rect::new(
@@ -296,13 +325,13 @@ impl View for SegmentedControl {
                 rect: bounds,
                 radius: outer_radius,
             });
-            self.indicator_shape.paint(
+            self.interaction_state.indicator_shape.paint(
                 indicator_bounds,
                 indicator_radius,
                 context.theme.segmented_control.indicator_background,
                 context,
             );
-            if !self.indicator_shape.is_animating() {
+            if !self.interaction_state.indicator_shape.is_animating() {
                 Rectangle::new()
                     .color(RectangleColor::Custom(crate::theme::Color::TRANSPARENT))
                     .radius(CornerRadius::Custom(indicator_radius))
@@ -315,8 +344,8 @@ impl View for SegmentedControl {
             }
             context.display_list.push(DrawCommand::PopClip);
 
-            if self.selection_motion.ready_to_commit() && !self.indicator_shape.is_animating() {
-                self.selection_motion.finish();
+            if self.interaction_state.selection_motion.ready_to_commit() {
+                self.interaction_state.selection_motion.finish();
                 self.selection.commit();
             }
         }
@@ -337,20 +366,24 @@ impl View for SegmentedControl {
                 position,
                 button: PointerButton::Primary,
             } if self.enabled && bounds.contains(*position) => {
-                self.indicator_shape.begin(*position)
+                self.interaction_state.indicator_shape.begin(*position)
             }
-            ViewEvent::PointerMoved { position } if self.indicator_shape.is_active() => {
-                self.indicator_shape.moved(*position);
+            ViewEvent::PointerMoved { position }
+                if self.interaction_state.indicator_shape.is_active() =>
+            {
+                self.interaction_state.indicator_shape.moved(*position);
             }
             ViewEvent::PointerReleased {
                 position,
                 button: PointerButton::Primary,
-            } if self.indicator_shape.is_active() => {
-                self.indicator_shape.moved(*position);
-                self.indicator_shape.end();
+            } if self.interaction_state.indicator_shape.is_active() => {
+                self.interaction_state.indicator_shape.moved(*position);
+                self.interaction_state.indicator_shape.end();
             }
-            ViewEvent::FocusChanged { focused: false } if self.indicator_shape.is_active() => {
-                self.indicator_shape.end();
+            ViewEvent::FocusChanged { focused: false }
+                if self.interaction_state.indicator_shape.is_active() =>
+            {
+                self.interaction_state.indicator_shape.end();
             }
             _ => {}
         }
@@ -363,7 +396,9 @@ impl View for SegmentedControl {
             let from_index = self.selected_index(self.selection.get()).unwrap_or(index);
             self.selection
                 .set_without_notification(self.items[index].value);
-            self.selection_motion.start(from_index, index);
+            self.interaction_state
+                .selection_motion
+                .start(from_index, index);
             if let Some(on_change) = self.on_change.as_ref() {
                 (on_change.borrow_mut())(self.items[index].value);
             }
