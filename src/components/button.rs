@@ -529,7 +529,7 @@ impl View for Button {
         });
 
         let interaction = self.interaction.inner.borrow();
-        if interaction.focused && interaction.hovered {
+        if interaction.focused {
             let ring_width = context.theme.button.focus_ring_width;
             Rectangle::new()
                 .color(RectangleColor::Custom(context.theme.button.focus_ring))

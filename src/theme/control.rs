@@ -67,17 +67,17 @@ impl ButtonTokens {
         Self {
             standard: ButtonPalette {
                 rest: ControlAppearance {
-                    background: colors.surface_subtle,
-                    border: colors.border,
-                    foreground: colors.text_primary,
-                },
-                hovered: ControlAppearance {
                     background: colors.surface_muted,
                     border: colors.border_strong,
                     foreground: colors.text_primary,
                 },
-                pressed: ControlAppearance {
+                hovered: ControlAppearance {
                     background: colors.border,
+                    border: colors.border_strong,
+                    foreground: colors.text_primary,
+                },
+                pressed: ControlAppearance {
+                    background: colors.border_strong,
                     border: colors.border_strong,
                     foreground: colors.text_primary,
                 },
@@ -88,23 +88,12 @@ impl ButtonTokens {
                 primary_pressed,
                 primary_foreground,
             ),
-            accent: ButtonPalette {
-                rest: ControlAppearance {
-                    background: colors.accent_soft,
-                    border: transparent,
-                    foreground: colors.accent,
-                },
-                hovered: ControlAppearance {
-                    background: colors.accent.with_alpha(if dark { 54 } else { 30 }),
-                    border: transparent,
-                    foreground: colors.accent,
-                },
-                pressed: ControlAppearance {
-                    background: colors.accent.with_alpha(if dark { 76 } else { 46 }),
-                    border: transparent,
-                    foreground: colors.accent,
-                },
-            },
+            accent: solid_palette(
+                colors.accent,
+                colors.accent_hovered,
+                colors.accent_pressed,
+                Color::WHITE,
+            ),
             ghost: ButtonPalette {
                 rest: ControlAppearance {
                     background: transparent,
@@ -124,23 +113,23 @@ impl ButtonTokens {
             },
             danger: ButtonPalette {
                 rest: ControlAppearance {
-                    background: colors.destructive_soft,
-                    border: transparent,
+                    background: colors.surface_muted,
+                    border: colors.border_strong,
                     foreground: colors.destructive,
                 },
                 hovered: ControlAppearance {
-                    background: colors.destructive.with_alpha(if dark { 54 } else { 28 }),
-                    border: transparent,
+                    background: colors.border,
+                    border: colors.border_strong,
                     foreground: colors.destructive,
                 },
                 pressed: ControlAppearance {
-                    background: colors.destructive.with_alpha(if dark { 76 } else { 44 }),
-                    border: transparent,
+                    background: colors.border_strong,
+                    border: colors.border_strong,
                     foreground: colors.destructive,
                 },
             },
-            horizontal_padding: 14.0,
-            height: 32.0,
+            horizontal_padding: 12.0,
+            height: 28.0,
             radius: CornerRadius::Small,
             stroke_width: FigmaTokens::SHAPE.stroke_default,
             focus_ring: colors.focus_ring,
