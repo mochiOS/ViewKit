@@ -8,8 +8,7 @@ use crate::geometry::{Point, Rect};
 use crate::omochi::{
     DEFAULT_BURGERS, DEFAULT_MATERIAL, OmochiMaterial, OmochiSurface, PullMode, rounded_rect_points,
 };
-use crate::theme::Color;
-use crate::theme::Motion;
+use crate::theme::{Color, Motion, Shadow, ShadowStyle};
 use crate::view::PaintContext;
 
 #[derive(Clone, Copy)]
@@ -215,6 +214,100 @@ impl OmochiShape {
             context.request_redraw_in_at(bounds.expanded(20.0), now + Duration::from_millis(8));
         }
     }
+
+    pub(super) fn paint_styled(
+        &self,
+        bounds: Rect,
+        radius: f32,
+        fill: Color,
+        border: Color,
+        border_width: f32,
+        shadow: ShadowStyle,
+        context: &mut PaintContext<'_>,
+    ) {
+        let now = Instant::now();
+        let base = rounded_rect_points(bounds.size.width, bounds.size.height, radius, 10);
+        let sample = self.surface.sample(&base, now);
+        let center = Point::new(
+            bounds.origin.x + bounds.size.width / 2.0,
+            bounds.origin.y + bounds.size.height / 2.0,
+        );
+
+        if let Some(shadows) = shadow.resolve(&context.theme.shadows) {
+            for shadow in shadows.layers.iter().rev().flatten() {
+                paint_polygon_shadow(&sample.points, center, bounds, *shadow, context);
+            }
+        }
+
+        if border.alpha > 0 && border_width > 0.0 {
+            context.display_list.push(DrawCommand::FillPolygon {
+                points: expanded_points(&sample.points, center, bounds, border_width, 0.0, 0.0),
+                color: border,
+            });
+        }
+        context.display_list.push(DrawCommand::FillPolygon {
+            points: expanded_points(&sample.points, center, bounds, 0.0, 0.0, 0.0),
+            color: fill,
+        });
+
+        if sample.animating {
+            context.request_redraw_in_at(bounds.expanded(20.0), now + Duration::from_millis(8));
+        }
+    }
+}
+
+fn expanded_points(
+    points: &[Point],
+    center: Point,
+    bounds: Rect,
+    expansion: f32,
+    offset_x: f32,
+    offset_y: f32,
+) -> Vec<Point> {
+    let scale_x = 1.0 + expansion * 2.0 / bounds.size.width.max(1.0);
+    let scale_y = 1.0 + expansion * 2.0 / bounds.size.height.max(1.0);
+    points
+        .iter()
+        .map(|point| {
+            Point::new(
+                center.x + point.x * scale_x + offset_x,
+                center.y + point.y * scale_y + offset_y,
+            )
+        })
+        .collect()
+}
+
+fn paint_polygon_shadow(
+    points: &[Point],
+    center: Point,
+    bounds: Rect,
+    shadow: Shadow,
+    context: &mut PaintContext<'_>,
+) {
+    if shadow.color.alpha == 0 {
+        return;
+    }
+    let blur = shadow.blur_radius.max(0.0);
+    let layers = if blur > 0.0 { 5 } else { 1 };
+    let layer_alpha = (u16::from(shadow.color.alpha) / layers as u16).max(1) as u8;
+    for layer in (0..layers).rev() {
+        let progress = if layers == 1 {
+            0.0
+        } else {
+            layer as f32 / (layers - 1) as f32
+        };
+        context.display_list.push(DrawCommand::FillPolygon {
+            points: expanded_points(
+                points,
+                center,
+                bounds,
+                shadow.spread.max(0.0) + blur * progress,
+                shadow.offset_x,
+                shadow.offset_y,
+            ),
+            color: shadow.color.with_alpha(layer_alpha),
+        });
+    }
 }
 
 #[cfg(test)]
@@ -256,5 +349,46 @@ mod tests {
             (painted.x - (center.x + base.x)).abs() > 0.05
                 || (painted.y - (center.y + base.y)).abs() > 0.05
         }));
+    }
+
+    #[test]
+    fn styled_shape_keeps_shadow_border_and_white_fill_while_animating() {
+        let shape = OmochiShape::velocity(OmochiPreset::Thumb);
+        shape.begin(Point::new(0.0, 0.0));
+        shape.moved(Point::new(12.0, 0.0));
+
+        let theme = Theme::LIGHT;
+        let mut display_list = DisplayList::new();
+        let mut text_measurer = TextMeasurer::new();
+        let mut context = PaintContext::new(
+            &mut display_list,
+            &theme,
+            &Typography::DEFAULT,
+            &mut text_measurer,
+        );
+        shape.paint_styled(
+            Rect::new(20.0, 30.0, 26.0, 20.0),
+            10.0,
+            Color::WHITE,
+            theme.slider.knob_border,
+            theme.slider.stroke_width,
+            theme.slider.knob_shadow,
+            &mut context,
+        );
+
+        let polygon_colors = display_list.commands().iter().filter_map(|command| {
+            if let DrawCommand::FillPolygon { color, .. } = command {
+                Some(*color)
+            } else {
+                None
+            }
+        });
+        let polygon_colors = polygon_colors.collect::<Vec<_>>();
+        assert!(
+            polygon_colors.len() > 2,
+            "shadow, border, and fill must be layered"
+        );
+        assert!(polygon_colors.contains(&theme.slider.knob_border));
+        assert_eq!(polygon_colors.last(), Some(&Color::WHITE));
     }
 }

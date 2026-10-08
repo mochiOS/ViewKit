@@ -507,10 +507,21 @@ impl View for Slider {
         }
         drop(interaction);
 
-        self.interaction
-            .thumb_shape
-            .paint(knob_bounds, knob_radius, knob_color, context);
-        if !self.interaction.thumb_shape.is_animating() {
+        if self.interaction.thumb_shape.is_animating() {
+            self.interaction.thumb_shape.paint_styled(
+                knob_bounds,
+                knob_radius,
+                knob_color,
+                if hovered {
+                    context.theme.slider.hovered_knob_border
+                } else {
+                    context.theme.slider.knob_border
+                },
+                context.theme.slider.stroke_width,
+                knob_shadow,
+                context,
+            );
+        } else {
             Rectangle::new()
                 .color(RectangleColor::Custom(knob_color))
                 .radius(context.theme.slider.knob_radius)
