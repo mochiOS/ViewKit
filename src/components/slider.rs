@@ -512,7 +512,7 @@ impl View for Slider {
             .paint(knob_bounds, knob_radius, knob_color, context);
         if !self.interaction.thumb_shape.is_animating() {
             Rectangle::new()
-                .color(RectangleColor::Custom(Color::TRANSPARENT))
+                .color(RectangleColor::Custom(knob_color))
                 .radius(context.theme.slider.knob_radius)
                 .border(super::BorderStyle::custom(
                     if hovered {

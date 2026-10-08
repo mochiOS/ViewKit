@@ -348,7 +348,7 @@ impl View for RangeSlider {
             self.shape(index).paint(thumb, radius, color, context);
             if !self.shape(index).is_animating() {
                 Rectangle::new()
-                    .color(RectangleColor::Custom(Color::TRANSPARENT))
+                    .color(RectangleColor::Custom(color))
                     .radius(context.theme.slider.knob_radius)
                     .border(super::BorderStyle::custom(
                         context.theme.slider.knob_border,
