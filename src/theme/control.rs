@@ -432,25 +432,58 @@ pub struct SegmentedControlTokens {
     pub border: Color,
     pub indicator_background: Color,
     pub indicator_border: Color,
+    pub foreground: Color,
+    pub selected_foreground: Color,
+    pub disabled_foreground: Color,
+    pub focus_ring: Color,
     pub radius: CornerRadius,
     pub stroke_width: f32,
+    pub focus_ring_width: f32,
+    pub indicator_shadow: ShadowStyle,
 }
 
 impl SegmentedControlTokens {
     pub const fn from_colors(colors: ColorTokens) -> Self {
+        let dark = colors.background.red < 80;
         Self {
-            background: colors.surface_muted,
-            border: colors
-                .border
-                .with_alpha(if colors.background.red < 80 { 150 } else { 180 }),
-            indicator_background: colors.surface,
-            indicator_border: colors.border.with_alpha(if colors.background.red < 80 {
-                190
+            background: if dark {
+                colors.surface_muted
             } else {
-                210
-            }),
-            radius: CornerRadius::ExtraLarge,
+                Color::rgb(232, 234, 237)
+            },
+            border: if dark {
+                colors.border.with_alpha(150)
+            } else {
+                Color::rgba(23, 24, 26, 15)
+            },
+            indicator_background: if dark { colors.surface } else { Color::WHITE },
+            indicator_border: if dark {
+                colors.border.with_alpha(190)
+            } else {
+                Color::rgba(23, 24, 26, 20)
+            },
+            foreground: if dark {
+                colors.text_secondary
+            } else {
+                Color::rgb(98, 102, 108)
+            },
+            selected_foreground: if dark {
+                colors.text_primary
+            } else {
+                Color::rgb(23, 24, 26)
+            },
+            disabled_foreground: colors.text_disabled,
+            focus_ring: colors.focus_ring.with_alpha(158),
+            radius: CornerRadius::Full,
             stroke_width: FigmaTokens::SHAPE.stroke_default,
+            focus_ring_width: 3.0,
+            indicator_shadow: ShadowStyle::Custom(ShadowSet::single(Shadow::new(
+                Color::rgba(0, 0, 0, if dark { 42 } else { 26 }),
+                0.0,
+                3.0,
+                8.0,
+                0.0,
+            ))),
         }
     }
 }
