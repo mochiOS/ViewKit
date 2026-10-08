@@ -85,6 +85,209 @@ impl SelectionMotion {
     }
 }
 
+#[derive(Clone, Default)]
+pub(super) struct MagneticSelectionMotion {
+    state: Rc<RefCell<MagneticSelectionState>>,
+}
+
+#[derive(Default)]
+struct MagneticSelectionState {
+    initialized: bool,
+    visual_center: f32,
+    target_center: f32,
+    velocity: f32,
+    last_frame: Option<Instant>,
+    dragging: bool,
+    pointer_x: f32,
+    pointer_velocity: f32,
+    last_pointer_x: f32,
+    last_pointer_at: Option<Instant>,
+    transition_active: bool,
+    surface_direction: f32,
+}
+
+pub(super) struct MagneticSelectionSample {
+    pub center: f32,
+    pub direction: f32,
+    pub pull_distance: f32,
+    pub animating: bool,
+    pub completed: bool,
+}
+
+impl MagneticSelectionMotion {
+    pub(super) fn nearest_index(centers: &[f32], x: f32) -> usize {
+        centers
+            .iter()
+            .enumerate()
+            .min_by(|(_, lhs), (_, rhs)| (*lhs - x).abs().total_cmp(&(*rhs - x).abs()))
+            .map(|(index, _)| index)
+            .unwrap_or(0)
+    }
+
+    pub(super) fn magnetic_center(centers: &[f32], pointer_x: f32, speed: f32) -> f32 {
+        let Some(first) = centers.first().copied() else {
+            return pointer_x;
+        };
+        let last = centers.last().copied().unwrap_or(first);
+        let bounded = pointer_x.clamp(first, last);
+        let nearest = centers[Self::nearest_index(centers, bounded)];
+        let distance = bounded - nearest;
+        let field = (-(distance * distance) / (2.0 * 42.0 * 42.0)).exp();
+        let speed_weakening = 1.0 - (speed.abs() / 1400.0).clamp(0.0, 0.58);
+        let strength = 0.86 * field * speed_weakening;
+        bounded + (nearest - bounded) * strength
+    }
+
+    pub(super) fn begin_drag(&self, pointer_x: f32, current_center: f32, centers: &[f32]) {
+        let now = Instant::now();
+        let mut state = self.state.borrow_mut();
+        if !state.initialized || !state.transition_active {
+            state.initialized = true;
+            state.visual_center = current_center;
+            state.target_center = current_center;
+            state.velocity = 0.0;
+        }
+        state.dragging = true;
+        state.pointer_x = pointer_x;
+        state.pointer_velocity = 0.0;
+        state.last_pointer_x = pointer_x;
+        state.last_pointer_at = Some(now);
+        state.last_frame = Some(now);
+        state.target_center = Self::magnetic_center(centers, pointer_x, 0.0);
+        state.transition_active = true;
+    }
+
+    pub(super) fn move_drag(&self, pointer_x: f32, centers: &[f32]) {
+        let now = Instant::now();
+        let mut state = self.state.borrow_mut();
+        if !state.dragging {
+            return;
+        }
+        let dt = state
+            .last_pointer_at
+            .map(|last| now.duration_since(last).as_secs_f32().max(0.001))
+            .unwrap_or(0.001);
+        let instant_velocity = (pointer_x - state.last_pointer_x) / dt;
+        let blend = 1.0 - (-dt / 0.030).exp();
+        state.pointer_velocity += (instant_velocity - state.pointer_velocity) * blend;
+        state.pointer_x = pointer_x;
+        state.last_pointer_x = pointer_x;
+        state.last_pointer_at = Some(now);
+        state.target_center = Self::magnetic_center(centers, pointer_x, state.pointer_velocity);
+        state.transition_active = true;
+    }
+
+    pub(super) fn end_drag(&self, pointer_x: f32, centers: &[f32]) -> usize {
+        let index = Self::nearest_index(centers, pointer_x);
+        let mut state = self.state.borrow_mut();
+        state.pointer_x = pointer_x;
+        state.dragging = false;
+        state.target_center = centers.get(index).copied().unwrap_or(pointer_x);
+        state.transition_active = true;
+        index
+    }
+
+    pub(super) fn select(&self, current_center: f32, target_center: f32) {
+        let mut state = self.state.borrow_mut();
+        if !state.initialized || !state.transition_active {
+            state.initialized = true;
+            state.visual_center = current_center;
+            state.velocity = 0.0;
+        }
+        state.dragging = false;
+        state.target_center = target_center;
+        state.last_frame = Some(Instant::now());
+        state.transition_active = true;
+    }
+
+    pub(super) fn cancel(&self, center: f32) {
+        let mut state = self.state.borrow_mut();
+        state.initialized = true;
+        state.visual_center = center;
+        state.target_center = center;
+        state.velocity = 0.0;
+        state.dragging = false;
+        state.transition_active = false;
+        state.surface_direction = 0.0;
+    }
+
+    pub(super) fn is_dragging(&self) -> bool {
+        self.state.borrow().dragging
+    }
+
+    pub(super) fn surface_direction(&self) -> f32 {
+        self.state.borrow().surface_direction
+    }
+
+    pub(super) fn set_surface_direction(&self, direction: f32) {
+        self.state.borrow_mut().surface_direction = direction;
+    }
+
+    pub(super) fn sample(&self, fallback_center: f32) -> MagneticSelectionSample {
+        let now = Instant::now();
+        let mut state = self.state.borrow_mut();
+        if !state.initialized {
+            state.initialized = true;
+            state.visual_center = fallback_center;
+            state.target_center = fallback_center;
+            state.last_frame = Some(now);
+        }
+        if !state.transition_active {
+            state.visual_center = fallback_center;
+            state.target_center = fallback_center;
+            state.velocity = 0.0;
+            state.last_frame = Some(now);
+            return MagneticSelectionSample {
+                center: fallback_center,
+                direction: 0.0,
+                pull_distance: 0.0,
+                animating: false,
+                completed: false,
+            };
+        }
+
+        let dt = state
+            .last_frame
+            .map(|last| now.duration_since(last).as_secs_f32().clamp(0.001, 0.033))
+            .unwrap_or(0.001);
+        state.last_frame = Some(now);
+        let previous = state.visual_center;
+        let error = state.target_center - state.visual_center;
+        let follow_time = if state.dragging { 0.026 } else { 0.072 };
+        let alpha = 1.0 - (-dt / follow_time).exp();
+        state.visual_center += error * alpha;
+        state.velocity = (state.visual_center - previous) / dt;
+
+        let request = if state.dragging {
+            state.pointer_x - state.visual_center
+        } else {
+            state.target_center - state.visual_center
+        };
+        let direction = if request.abs() > 0.35 {
+            request.signum()
+        } else {
+            state.surface_direction
+        };
+        let speed_contribution = (state.velocity.abs() * 0.010).min(8.0);
+        let gain = if state.dragging { 0.72 } else { 0.34 };
+        let pull_distance = (request.abs() * gain + speed_contribution).min(34.0);
+        let completed = !state.dragging && error.abs() < 0.06 && state.velocity.abs() < 0.8;
+        if completed {
+            state.visual_center = state.target_center;
+            state.velocity = 0.0;
+            state.transition_active = false;
+        }
+
+        MagneticSelectionSample {
+            center: state.visual_center,
+            direction,
+            pull_distance,
+            animating: state.transition_active,
+            completed,
+        }
+    }
+}
+
 impl OmochiPreset {
     fn material(self) -> OmochiMaterial {
         let mut material = DEFAULT_MATERIAL;
