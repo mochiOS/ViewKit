@@ -345,7 +345,9 @@ pub struct SwitchTokens {
     pub on_pressed: Color,
     pub knob: Color,
     pub disabled_knob: Color,
+    pub knob_border: Color,
     pub knob_shadow: ShadowStyle,
+    pub stroke_width: f32,
     pub disabled_opacity: f32,
     pub content_padding: f32,
 }
@@ -364,10 +366,12 @@ impl SwitchTokens {
             on_pressed: colors.accent_pressed,
             knob: Color::WHITE,
             disabled_knob: Color::rgba(255, 255, 255, 170),
+            knob_border: colors.border_strong,
             knob_shadow: ShadowStyle::Custom(ShadowSet::double(
                 Shadow::new(Color::rgba(0, 0, 0, 28), 0.0, 1.0, 2.0, 0.0),
                 Shadow::new(Color::rgba(0, 0, 0, 14), 0.0, 2.0, 4.0, 0.0),
             )),
+            stroke_width: FigmaTokens::SHAPE.stroke_default,
             disabled_opacity: 0.45,
             content_padding: FigmaTokens::SPACING.space_4,
         }
@@ -853,6 +857,17 @@ mod tests {
             let slider = SliderTokens::from_colors(theme.colors);
             assert_eq!(slider.knob, Color::WHITE);
             assert_eq!(slider.hovered_knob, Color::WHITE);
+        }
+    }
+
+    #[test]
+    fn switch_thumb_stays_white_in_both_appearances() {
+        for theme in [
+            super::super::theme::Theme::LIGHT,
+            super::super::theme::Theme::DARK,
+        ] {
+            let switch = SwitchTokens::from_colors(theme.colors);
+            assert_eq!(switch.knob, Color::WHITE);
         }
     }
 

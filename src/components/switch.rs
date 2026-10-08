@@ -571,16 +571,24 @@ impl View for SwitchMark {
             ShadowStyle::None
         };
 
-        self.thumb_shape.paint(
-            knob_bounds,
-            knob_bounds.size.height / 2.0,
-            knob_color,
-            context,
-        );
-        if !self.thumb_shape.is_animating() {
+        if self.thumb_shape.is_animating() {
+            self.thumb_shape.paint_styled(
+                knob_bounds,
+                knob_bounds.size.height / 2.0,
+                knob_color,
+                context.theme.switch.knob_border,
+                context.theme.switch.stroke_width,
+                knob_shadow,
+                context,
+            );
+        } else {
             Rectangle::new()
-                .color(RectangleColor::Custom(Color::TRANSPARENT))
+                .color(RectangleColor::Custom(knob_color))
                 .radius(CornerRadius::Full)
+                .border(super::BorderStyle::custom(
+                    context.theme.switch.knob_border,
+                    context.theme.switch.stroke_width,
+                ))
                 .shadow(knob_shadow)
                 .paint(knob_bounds, context);
         }
