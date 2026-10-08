@@ -2,7 +2,13 @@ use viewkit::prelude::*;
 
 struct ComponentsGallery {
     theme_mode: State<usize>,
+    omochi_button: ButtonInteractionState,
     omochi_icon: IconButtonInteractionState,
+    omochi_switch: SwitchInteractionState,
+    omochi_slider: SliderInteractionState,
+    omochi_range: RangeSliderInteractionState,
+    omochi_segment: SegmentedControlInteractionState,
+    omochi_tabs: TabsInteractionState,
     checked: State<bool>,
     switched: State<bool>,
     radio: State<usize>,
@@ -64,32 +70,45 @@ impl ComponentsGallery {
                                     status.set("Retained omochi action completed".into())
                                 }),
                             )
-                            .child(Switch::new(self.switched.binding()).label("Elastic switch"))
                             .child(
-                                SegmentedControl::new(self.segment.binding())
-                                    .item(0, "Canvas")
-                                    .item(1, "Layers")
-                                    .item(2, "Inspect"),
+                                Switch::with_interaction(
+                                    self.switched.binding(),
+                                    self.omochi_switch.clone(),
+                                )
+                                .label("Elastic switch"),
+                            )
+                            .child(
+                                SegmentedControl::with_interaction(
+                                    self.segment.binding(),
+                                    self.omochi_segment.clone(),
+                                )
+                                .item(0, "Canvas")
+                                .item(1, "Layers")
+                                .item(2, "Inspect"),
                             ),
                     )
                     .child(
-                        Slider::new(self.slider.binding())
+                        Slider::with_interaction(self.slider.binding(), self.omochi_slider.clone())
                             .range(0.0..=100.0)
                             .step(1.0)
                             .label(format!("Position  {:.0}", self.slider.get())),
                     )
                     .child(
-                        RangeSlider::new(self.range_lower.binding(), self.range_upper.binding())
-                            .range(0.0..=100.0)
-                            .step(1.0)
-                            .label(format!(
-                                "Selection  {:.0}–{:.0}",
-                                self.range_lower.get(),
-                                self.range_upper.get()
-                            )),
+                        RangeSlider::with_interaction(
+                            self.range_lower.binding(),
+                            self.range_upper.binding(),
+                            self.omochi_range.clone(),
+                        )
+                        .range(0.0..=100.0)
+                        .step(1.0)
+                        .label(format!(
+                            "Selection  {:.0}–{:.0}",
+                            self.range_lower.get(),
+                            self.range_upper.get()
+                        )),
                     )
                     .child(
-                        Tabs::new(self.tab.binding())
+                        Tabs::with_interaction(self.tab.binding(), self.omochi_tabs.clone())
                             .item(0, "Overview")
                             .item(1, "Motion")
                             .item(2, "Metrics"),
@@ -112,7 +131,7 @@ impl ComponentsGallery {
                         .alignment(StackAlignment::Center)
                         .child(Button::new("Cancel"))
                         .child(
-                            Button::new("Continue")
+                            Button::with_interaction_state("Continue", self.omochi_button.clone())
                                 .style(ButtonStyle::Primary)
                                 .on_click(move || status.set("Primary action completed".into())),
                         )
@@ -575,7 +594,13 @@ impl App for ComponentsGallery {
     fn new() -> Self {
         Self {
             theme_mode: State::new(0),
+            omochi_button: ButtonInteractionState::new(),
             omochi_icon: IconButtonInteractionState::new(),
+            omochi_switch: SwitchInteractionState::new(),
+            omochi_slider: SliderInteractionState::new(),
+            omochi_range: RangeSliderInteractionState::new(),
+            omochi_segment: SegmentedControlInteractionState::new(),
+            omochi_tabs: TabsInteractionState::new(),
             checked: State::new(true),
             switched: State::new(true),
             radio: State::new(0),
