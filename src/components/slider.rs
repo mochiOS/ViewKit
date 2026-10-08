@@ -462,7 +462,7 @@ impl View for Slider {
             context.theme.slider.knob
         };
 
-        let knob_shadow = ShadowStyle::None;
+        let knob_shadow = context.theme.slider.knob_shadow;
         let knob_radius = context.theme.slider.knob_radius.resolve(
             &context.theme.radius,
             knob_bounds.size.width,

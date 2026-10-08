@@ -285,6 +285,17 @@ impl View for RangeSlider {
                     );
             }
             self.shape(index).paint(thumb, radius, color, context);
+            if !self.shape(index).is_animating() {
+                Rectangle::new()
+                    .color(RectangleColor::Custom(Color::TRANSPARENT))
+                    .radius(context.theme.slider.knob_radius)
+                    .border(super::BorderStyle::custom(
+                        context.theme.slider.knob_border,
+                        context.theme.slider.stroke_width,
+                    ))
+                    .shadow(context.theme.slider.knob_shadow)
+                    .paint(thumb, context);
+            }
         }
         let pending_commit = self.interaction.borrow().pending_commit;
         if let Some(thumb) = pending_commit

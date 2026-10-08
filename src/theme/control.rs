@@ -61,23 +61,38 @@ impl ButtonTokens {
         let primary_hover = colors.accent_hovered;
         let primary_pressed = colors.accent_pressed;
         let primary_foreground = Color::WHITE;
+        let standard_rest = if dark {
+            colors.surface_muted
+        } else {
+            colors.surface_subtle
+        };
+        let standard_hover = if dark {
+            colors.border
+        } else {
+            colors.surface_muted
+        };
+        let standard_pressed = if dark {
+            colors.border_strong
+        } else {
+            colors.border
+        };
         let ghost_hover = colors.text_primary.with_alpha(if dark { 24 } else { 14 });
         let ghost_pressed = colors.text_primary.with_alpha(if dark { 40 } else { 28 });
 
         Self {
             standard: ButtonPalette {
                 rest: ControlAppearance {
-                    background: colors.surface_muted,
+                    background: standard_rest,
                     border: colors.border_strong,
                     foreground: colors.text_primary,
                 },
                 hovered: ControlAppearance {
-                    background: colors.border,
+                    background: standard_hover,
                     border: colors.border_strong,
                     foreground: colors.text_primary,
                 },
                 pressed: ControlAppearance {
-                    background: colors.border_strong,
+                    background: standard_pressed,
                     border: colors.border_strong,
                     foreground: colors.text_primary,
                 },
@@ -113,17 +128,17 @@ impl ButtonTokens {
             },
             danger: ButtonPalette {
                 rest: ControlAppearance {
-                    background: colors.surface_muted,
+                    background: standard_rest,
                     border: colors.border_strong,
                     foreground: colors.destructive,
                 },
                 hovered: ControlAppearance {
-                    background: colors.border,
+                    background: standard_hover,
                     border: colors.border_strong,
                     foreground: colors.destructive,
                 },
                 pressed: ControlAppearance {
-                    background: colors.border_strong,
+                    background: standard_pressed,
                     border: colors.border_strong,
                     foreground: colors.destructive,
                 },
@@ -339,6 +354,7 @@ pub struct SliderTokens {
     pub disabled_knob: Color,
     pub knob_border: Color,
     pub hovered_knob_border: Color,
+    pub knob_shadow: ShadowStyle,
     pub knob_radius: CornerRadius,
     pub focus_ring: Color,
     pub disabled_opacity: f32,
@@ -360,6 +376,10 @@ impl SliderTokens {
             disabled_knob: colors.surface_subtle,
             knob_border: colors.border,
             hovered_knob_border: colors.border_strong,
+            knob_shadow: ShadowStyle::Custom(ShadowSet::double(
+                Shadow::new(Color::rgba(0, 0, 0, 24), 0.0, 1.0, 2.0, 0.0),
+                Shadow::new(Color::rgba(0, 0, 0, 10), 0.0, 2.0, 4.0, 0.0),
+            )),
             knob_radius: CornerRadius::ExtraLarge,
             focus_ring: colors.focus_ring,
             disabled_opacity: 0.45,
@@ -774,6 +794,33 @@ mod tests {
         assert_eq!(
             ButtonTokens::from_colors(colors, false).focus_ring,
             colors.focus_ring
+        );
+    }
+
+    #[test]
+    fn standard_buttons_keep_theme_specific_surface_depth() {
+        let light_theme = super::super::theme::Theme::LIGHT;
+        let dark_theme = super::super::theme::Theme::DARK;
+        let light = ButtonTokens::from_colors(light_theme.colors, false);
+        let dark = ButtonTokens::from_colors(dark_theme.colors, true);
+
+        assert_eq!(
+            light.standard.rest.background,
+            light_theme.colors.surface_subtle
+        );
+        assert_eq!(
+            light.standard.hovered.background,
+            light_theme.colors.surface_muted
+        );
+        assert_eq!(light.standard.pressed.background, light_theme.colors.border);
+        assert_eq!(
+            dark.standard.rest.background,
+            dark_theme.colors.surface_muted
+        );
+        assert_eq!(dark.standard.hovered.background, dark_theme.colors.border);
+        assert_eq!(
+            dark.standard.pressed.background,
+            dark_theme.colors.border_strong
         );
     }
 }

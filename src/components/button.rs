@@ -854,6 +854,9 @@ mod tests {
             ButtonSize::Medium.icon_size(&theme),
             theme.layout.control_icon_size
         );
+        assert_eq!(ButtonSize::Small.height(&theme), 24.0);
+        assert_eq!(ButtonSize::Medium.height(&theme), 28.0);
+        assert_eq!(ButtonSize::Large.height(&theme), 32.0);
         assert_eq!(
             ButtonSize::Large.icon_size(&theme),
             theme.layout.stepper_icon_size
