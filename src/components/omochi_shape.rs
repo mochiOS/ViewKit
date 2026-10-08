@@ -91,40 +91,43 @@ impl OmochiPreset {
         let mut material = DEFAULT_MATERIAL;
         match self {
             Self::CompactControl => {
-                material.drag_gain = 0.48;
-                material.max_pull = 20.0;
-                material.press_depth = 4.2;
+                material.max_pull = 16.0;
+                material.press_depth = 3.4;
                 material.press_radius = 33.0;
-                material.drag_radius = 38.0;
-                material.drag_follow = 0.48;
-                material.neck_ratio = 0.11;
-                material.tip_stretch = 0.44;
+                material.drag_radius = 42.0;
+                material.neck_backshift_ratio = 0.22;
                 material.tip_long_radius = 12.0;
                 material.tip_cross_radius = 21.0;
             }
             Self::Thumb => {
-                material.max_pull = 17.0;
-                material.press_depth = 3.8;
-                material.press_radius = 22.0;
-                material.drag_radius = 28.0;
+                material.press_depth = 0.0;
+                material.max_pull = 18.0;
                 material.drag_follow = 0.46;
-                material.neck_ratio = 0.10;
-                material.tip_stretch = 0.42;
-                material.tip_long_radius = 9.0;
-                material.tip_cross_radius = 16.0;
-                material.velocity_pull_scale = 0.022;
+                material.neck_ratio = 0.080;
+                material.neck_width_ratio = 0.34;
+                material.neck_backshift_ratio = 0.20;
+                material.tip_stretch = 0.62;
+                material.tip_long_radius = 12.0;
+                material.tip_cross_radius = 18.0;
+                material.velocity_pull_scale = 0.018;
+                material.velocity_idle_decay = 0.080;
+                material.viscous_follow_time = 0.040;
+                material.fast_viscous_follow_time = 0.085;
             }
             Self::SelectionIndicator => {
-                material.max_pull = 22.0;
-                material.press_depth = 3.6;
-                material.press_radius = 54.0;
-                material.drag_radius = 60.0;
-                material.drag_follow = 0.44;
-                material.neck_ratio = 0.09;
-                material.tip_stretch = 0.40;
-                material.tip_long_radius = 18.0;
-                material.tip_cross_radius = 28.0;
-                material.velocity_pull_scale = 0.020;
+                material.press_depth = 0.0;
+                material.max_pull = 28.0;
+                material.drag_gain = 0.82;
+                material.viscous_follow_time = 0.044;
+                material.fast_viscous_follow_time = 0.082;
+                material.drag_radius = 72.0;
+                material.drag_follow = 0.38;
+                material.neck_ratio = 0.052;
+                material.neck_width_ratio = 0.28;
+                material.neck_backshift_ratio = 0.26;
+                material.tip_stretch = 0.58;
+                material.tip_long_radius = 20.0;
+                material.tip_cross_radius = 27.0;
             }
         }
         material.press_release_start = 0.6;
@@ -140,13 +143,17 @@ pub(super) struct OmochiShape {
 
 impl OmochiShape {
     pub(super) fn velocity(preset: OmochiPreset) -> Self {
+        let (direction, axis_scale) = match preset {
+            OmochiPreset::Thumb => (-1.0, Point::new(1.0, 0.12)),
+            _ => (1.0, Point::new(1.0, 0.55)),
+        };
         Self {
             surface: OmochiSurface::new(
                 preset.material(),
                 DEFAULT_BURGERS,
                 PullMode::Velocity {
-                    direction: 1.0,
-                    axis_scale: Point::new(1.0, 0.55),
+                    direction,
+                    axis_scale,
                 },
             ),
         }
