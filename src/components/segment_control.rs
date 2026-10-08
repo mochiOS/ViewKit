@@ -1,8 +1,11 @@
+use super::omochi_shape::{OmochiPreset, OmochiShape};
 use super::{BorderStyle, Button, ButtonInteractionState, ButtonStyle, Rectangle, RectangleColor};
+use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 use crate::animation::{Animation, interpolate};
+use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
-use crate::platform::Key;
+use crate::platform::{Key, PointerButton};
 use crate::state::Binding;
 use crate::theme::{CornerRadius, Motion, ShadowStyle};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
@@ -23,6 +26,7 @@ pub struct SegmentedControl {
     enabled: bool,
     accessibility_label: Option<String>,
     on_change: Option<Rc<RefCell<Box<dyn FnMut(usize)>>>>,
+    indicator_shape: OmochiShape,
 }
 
 impl SegmentedControl {
@@ -33,6 +37,7 @@ impl SegmentedControl {
             enabled: true,
             accessibility_label: None,
             on_change: None,
+            indicator_shape: OmochiShape::velocity(OmochiPreset::SelectionIndicator),
         }
     }
 
@@ -239,6 +244,9 @@ impl View for SegmentedControl {
         if bounds.size.width <= 0.0 || bounds.size.height <= 0.0 {
             return;
         }
+        if !self.enabled && self.indicator_shape.is_animating() {
+            self.indicator_shape.reset();
+        }
 
         let mut node = AccessibilityNode::new(AccessibilityRole::RadioGroup, bounds);
         node.label = self.accessibility_label.clone();
@@ -291,10 +299,18 @@ impl View for SegmentedControl {
 
             let indicator_radius = (outer_radius - inset).max(0.0);
 
+            context.display_list.push(DrawCommand::PushRoundedClip {
+                rect: bounds,
+                radius: outer_radius,
+            });
+            self.indicator_shape.paint(
+                indicator_bounds,
+                indicator_radius,
+                context.theme.segmented_control.indicator_background,
+                context,
+            );
             Rectangle::new()
-                .color(RectangleColor::Custom(
-                    context.theme.segmented_control.indicator_background,
-                ))
+                .color(RectangleColor::Custom(crate::theme::Color::TRANSPARENT))
                 .radius(CornerRadius::Custom(indicator_radius))
                 .shadow(ShadowStyle::Card)
                 .border(BorderStyle::custom(
@@ -302,6 +318,7 @@ impl View for SegmentedControl {
                     context.theme.segmented_control.stroke_width,
                 ))
                 .paint(indicator_bounds, context);
+            context.display_list.push(DrawCommand::PopClip);
         }
 
         for (item, item_bounds) in self.items.iter().zip(segment_bounds) {
@@ -315,6 +332,28 @@ impl View for SegmentedControl {
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
+        match event {
+            ViewEvent::PointerPressed {
+                position,
+                button: PointerButton::Primary,
+            } if self.enabled && bounds.contains(*position) => {
+                self.indicator_shape.begin(*position)
+            }
+            ViewEvent::PointerMoved { position } if self.indicator_shape.is_active() => {
+                self.indicator_shape.moved(*position);
+            }
+            ViewEvent::PointerReleased {
+                position,
+                button: PointerButton::Primary,
+            } if self.indicator_shape.is_active() => {
+                self.indicator_shape.moved(*position);
+                self.indicator_shape.end();
+            }
+            ViewEvent::FocusChanged { focused: false } if self.indicator_shape.is_active() => {
+                self.indicator_shape.end();
+            }
+            _ => {}
+        }
         let segment_bounds =
             self.segment_bounds(bounds, context.theme().layout.segmented_control_inset);
 
@@ -352,4 +391,3 @@ impl View for SegmentedControl {
         result
     }
 }
-use crate::accessibility::{AccessibilityNode, AccessibilityRole};
