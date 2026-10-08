@@ -92,26 +92,52 @@ struct KnobWidthAnimationState {
     animation: Option<KnobWidthAnimation>,
 }
 
-pub struct Switch {
-    checked: Binding<bool>,
-    label: Option<String>,
-    enabled: bool,
-    interaction: ButtonInteractionState,
+#[derive(Clone)]
+pub struct SwitchInteractionState {
+    button: ButtonInteractionState,
     knob_width_animation: Arc<Mutex<KnobWidthAnimationState>>,
     drag: SwitchDragState,
     thumb_shape: OmochiShape,
 }
 
+impl SwitchInteractionState {
+    pub fn new() -> Self {
+        Self {
+            button: ButtonInteractionState::new(),
+            knob_width_animation: Arc::new(Mutex::new(KnobWidthAnimationState::default())),
+            drag: SwitchDragState::default(),
+            thumb_shape: OmochiShape::velocity(OmochiPreset::Thumb),
+        }
+    }
+}
+
+impl Default for SwitchInteractionState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub struct Switch {
+    checked: Binding<bool>,
+    label: Option<String>,
+    enabled: bool,
+    interaction_state: SwitchInteractionState,
+}
+
 impl Switch {
     pub fn new(checked: Binding<bool>) -> Self {
+        Self::with_interaction(checked, SwitchInteractionState::new())
+    }
+
+    pub fn with_interaction(
+        checked: Binding<bool>,
+        interaction_state: SwitchInteractionState,
+    ) -> Self {
         Self {
             checked,
             label: None,
             enabled: true,
-            interaction: ButtonInteractionState::new(),
-            knob_width_animation: Arc::new(Mutex::new(KnobWidthAnimationState::default())),
-            drag: SwitchDragState::default(),
-            thumb_shape: OmochiShape::velocity(OmochiPreset::Thumb),
+            interaction_state,
         }
     }
 
@@ -130,7 +156,7 @@ impl Switch {
     }
 
     pub fn interaction(&self) -> &ButtonInteractionState {
-        &self.interaction
+        &self.interaction_state.button
     }
 
     fn button(&self, theme: &Theme) -> Button {
@@ -158,17 +184,17 @@ impl Switch {
                 checked: self.checked.get(),
                 transition: self.checked.transition(),
                 enabled: self.enabled,
-                interaction: self.interaction.clone(),
-                knob_width_animation: self.knob_width_animation.clone(),
-                drag: self.drag.clone(),
+                interaction: self.interaction_state.button.clone(),
+                knob_width_animation: self.interaction_state.knob_width_animation.clone(),
+                drag: self.interaction_state.drag.clone(),
                 checked_binding: self.checked.clone(),
-                thumb_shape: self.thumb_shape.clone(),
+                thumb_shape: self.interaction_state.thumb_shape.clone(),
             }
             .frame(metrics.track_width, metrics.track_height)
             .flex_shrink(0.0),
         );
 
-        Button::with_interaction(self.interaction.clone())
+        Button::with_interaction(self.interaction_state.button.clone())
             .style(ButtonStyle::Custom {
                 background: theme.switch.interaction_background,
                 hovered_background: theme.switch.interaction_background,
@@ -201,7 +227,7 @@ impl Switch {
             ViewEvent::KeyPressed {
                 key: crate::platform::Key::Enter | crate::platform::Key::Space,
                 ..
-            } if self.interaction.is_focused() => {
+            } if self.interaction_state.button.is_focused() => {
                 self.start_toggle();
                 context.request_redraw_in(bounds.expanded(16.0));
                 EventResult::Consumed
@@ -217,7 +243,7 @@ impl Switch {
 
                 let checked_position = bool_position(self.checked.get());
 
-                let mut drag = self.drag.inner.borrow_mut();
+                let mut drag = self.interaction_state.drag.inner.borrow_mut();
 
                 let mark_bounds = drag.mark_bounds;
 
@@ -253,7 +279,7 @@ impl Switch {
                 drag.drag_offset_x = drag_offset_x;
                 drag.drag_position = Some(checked_position);
                 drag.settle_animation = None;
-                self.thumb_shape.begin(*position);
+                self.interaction_state.thumb_shape.begin(*position);
 
                 context.request_redraw_in(bounds.expanded(16.0));
 
@@ -261,14 +287,14 @@ impl Switch {
             }
 
             ViewEvent::PointerMoved { position } => {
-                let tracking = self.drag.inner.borrow().tracking;
+                let tracking = self.interaction_state.drag.inner.borrow().tracking;
 
                 if !tracking {
                     return EventResult::Ignored;
                 }
 
                 {
-                    let mut drag = self.drag.inner.borrow_mut();
+                    let mut drag = self.interaction_state.drag.inner.borrow_mut();
 
                     if !drag.dragging {
                         let moved = (position.x - drag.press_x).abs();
@@ -290,7 +316,7 @@ impl Switch {
                     }
                 }
 
-                self.thumb_shape.moved(*position);
+                self.interaction_state.thumb_shape.moved(*position);
 
                 context.request_redraw_in(bounds.expanded(16.0));
 
@@ -302,7 +328,7 @@ impl Switch {
                 button: PointerButton::Primary,
             } => {
                 let release = {
-                    let mut drag = self.drag.inner.borrow_mut();
+                    let mut drag = self.interaction_state.drag.inner.borrow_mut();
 
                     if !drag.tracking {
                         None
@@ -340,8 +366,8 @@ impl Switch {
                     return EventResult::Ignored;
                 };
 
-                self.thumb_shape.moved(*position);
-                self.thumb_shape.end();
+                self.interaction_state.thumb_shape.moved(*position);
+                self.interaction_state.thumb_shape.end();
 
                 if was_dragging {
                     self.start_settle(final_position, final_position >= 0.5);
@@ -355,7 +381,7 @@ impl Switch {
             }
 
             ViewEvent::PointerLeft => {
-                if self.drag.inner.borrow().tracking {
+                if self.interaction_state.drag.inner.borrow().tracking {
                     EventResult::Consumed
                 } else {
                     EventResult::Ignored
@@ -364,7 +390,7 @@ impl Switch {
 
             ViewEvent::FocusChanged { focused: false } => {
                 let _final_position = {
-                    let mut drag = self.drag.inner.borrow_mut();
+                    let mut drag = self.interaction_state.drag.inner.borrow_mut();
 
                     if !drag.tracking {
                         return EventResult::Ignored;
@@ -393,7 +419,7 @@ impl Switch {
                     position
                 };
 
-                self.thumb_shape.end();
+                self.interaction_state.thumb_shape.end();
 
                 context.request_redraw_in(bounds.expanded(16.0));
 
@@ -413,7 +439,11 @@ impl Switch {
 
     fn start_settle(&self, from: f32, target: bool) {
         self.checked.set_without_notification(target);
-        self.drag.inner.borrow_mut().settle_animation = Some(SwitchPositionAnimation {
+        self.interaction_state
+            .drag
+            .inner
+            .borrow_mut()
+            .settle_animation = Some(SwitchPositionAnimation {
             from,
             to: bool_position(target),
             started_at: Instant::now(),
@@ -427,8 +457,8 @@ impl View for Switch {
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
-        if !self.enabled && self.thumb_shape.is_animating() {
-            self.thumb_shape.reset();
+        if !self.enabled && self.interaction_state.thumb_shape.is_animating() {
+            self.interaction_state.thumb_shape.reset();
         }
         self.button(context.theme).paint(bounds, context);
     }
