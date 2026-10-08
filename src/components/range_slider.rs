@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::ops::RangeInclusive;
+use std::rc::Rc;
 
 use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 use crate::event::{EventContext, EventResult, ViewEvent};
@@ -21,6 +22,29 @@ struct RangeInteraction {
     pending_commit: Option<usize>,
 }
 
+#[derive(Clone)]
+pub struct RangeSliderInteractionState {
+    inner: Rc<RefCell<RangeInteraction>>,
+    lower_shape: OmochiShape,
+    upper_shape: OmochiShape,
+}
+
+impl RangeSliderInteractionState {
+    pub fn new() -> Self {
+        Self {
+            inner: Rc::new(RefCell::new(RangeInteraction::default())),
+            lower_shape: OmochiShape::velocity(OmochiPreset::Thumb),
+            upper_shape: OmochiShape::velocity(OmochiPreset::Thumb),
+        }
+    }
+}
+
+impl Default for RangeSliderInteractionState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// A two-thumb range selector whose values follow input immediately while
 /// omochi deformation remains purely visual.
 pub struct RangeSlider {
@@ -31,13 +55,19 @@ pub struct RangeSlider {
     step: Option<f32>,
     label: Option<String>,
     enabled: bool,
-    interaction: RefCell<RangeInteraction>,
-    lower_shape: OmochiShape,
-    upper_shape: OmochiShape,
+    interaction: RangeSliderInteractionState,
 }
 
 impl RangeSlider {
     pub fn new(lower: Binding<f32>, upper: Binding<f32>) -> Self {
+        Self::with_interaction(lower, upper, RangeSliderInteractionState::new())
+    }
+
+    pub fn with_interaction(
+        lower: Binding<f32>,
+        upper: Binding<f32>,
+        interaction: RangeSliderInteractionState,
+    ) -> Self {
         Self {
             lower,
             upper,
@@ -46,9 +76,7 @@ impl RangeSlider {
             step: None,
             label: None,
             enabled: true,
-            interaction: RefCell::new(RangeInteraction::default()),
-            lower_shape: OmochiShape::velocity(OmochiPreset::Thumb),
-            upper_shape: OmochiShape::velocity(OmochiPreset::Thumb),
+            interaction,
         }
     }
 
@@ -167,9 +195,9 @@ impl RangeSlider {
 
     fn shape(&self, thumb: usize) -> &OmochiShape {
         if thumb == 0 {
-            &self.lower_shape
+            &self.interaction.lower_shape
         } else {
-            &self.upper_shape
+            &self.interaction.upper_shape
         }
     }
 }
@@ -208,15 +236,15 @@ impl View for RangeSlider {
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
         if !self.enabled {
-            self.lower_shape.reset();
-            self.upper_shape.reset();
+            self.interaction.lower_shape.reset();
+            self.interaction.upper_shape.reset();
         }
         let (track, lower, upper) = self.geometry(bounds, context);
         let mut group = AccessibilityNode::new(AccessibilityRole::Group, bounds);
         group.label = self.label.clone();
         group.enabled = self.enabled;
         group.focusable = true;
-        group.focused = self.interaction.borrow().focused;
+        group.focused = self.interaction.inner.borrow().focused;
         context.record_accessibility(group);
         for (name, value, thumb) in [
             ("Minimum", self.lower_value(), lower),
@@ -261,7 +289,7 @@ impl View for RangeSlider {
             .color(RectangleColor::Custom(alpha(context.theme.slider.fill)))
             .radius(CornerRadius::Full)
             .paint(fill, context);
-        let interaction = *self.interaction.borrow();
+        let interaction = *self.interaction.inner.borrow();
         for (index, thumb) in [lower, upper].into_iter().enumerate() {
             let color = if self.enabled {
                 context.theme.slider.knob
@@ -297,11 +325,11 @@ impl View for RangeSlider {
                     .paint(thumb, context);
             }
         }
-        let pending_commit = self.interaction.borrow().pending_commit;
+        let pending_commit = self.interaction.inner.borrow().pending_commit;
         if let Some(thumb) = pending_commit
             && !self.shape(thumb).is_animating()
         {
-            self.interaction.borrow_mut().pending_commit = None;
+            self.interaction.inner.borrow_mut().pending_commit = None;
             if thumb == 0 {
                 self.lower.commit();
             } else {
@@ -322,7 +350,7 @@ impl View for RangeSlider {
         let (track, lower, upper) = self.geometry(bounds, context);
         match event {
             ViewEvent::KeyboardFocusRequested { bounds: target } => {
-                self.interaction.borrow_mut().focused =
+                self.interaction.inner.borrow_mut().focused =
                     target.is_some_and(|target| target == bounds);
                 EventResult::Ignored
             }
@@ -336,7 +364,7 @@ impl View for RangeSlider {
                 let lower_distance = (position.x - (lower.origin.x + lower.size.width / 2.0)).abs();
                 let upper_distance = (position.x - (upper.origin.x + upper.size.width / 2.0)).abs();
                 let thumb = usize::from(upper_distance < lower_distance);
-                let mut interaction = self.interaction.borrow_mut();
+                let mut interaction = self.interaction.inner.borrow_mut();
                 interaction.dragging = Some(thumb);
                 interaction.active_thumb = thumb;
                 interaction.pending_commit = None;
@@ -347,14 +375,14 @@ impl View for RangeSlider {
                 EventResult::Consumed
             }
             ViewEvent::PointerMoved { position } => {
-                let thumb = self.interaction.borrow().dragging;
+                let thumb = self.interaction.inner.borrow().dragging;
                 if let Some(thumb) = thumb {
                     self.set_thumb(thumb, self.value_at(track, position.x));
                     self.shape(thumb).moved(*position);
                     context.request_redraw_in(bounds.expanded(20.0));
                     EventResult::Consumed
                 } else {
-                    self.interaction.borrow_mut().hovered = bounds.contains(*position);
+                    self.interaction.inner.borrow_mut().hovered = bounds.contains(*position);
                     EventResult::Ignored
                 }
             }
@@ -362,24 +390,24 @@ impl View for RangeSlider {
                 position,
                 button: PointerButton::Primary,
             } => {
-                let Some(thumb) = self.interaction.borrow_mut().dragging.take() else {
+                let Some(thumb) = self.interaction.inner.borrow_mut().dragging.take() else {
                     return EventResult::Ignored;
                 };
                 self.set_thumb(thumb, self.value_at(track, position.x));
                 self.shape(thumb).moved(*position);
                 self.shape(thumb).end();
-                self.interaction.borrow_mut().pending_commit = Some(thumb);
+                self.interaction.inner.borrow_mut().pending_commit = Some(thumb);
                 context.request_redraw_in(bounds.expanded(20.0));
                 EventResult::Consumed
             }
             ViewEvent::KeyPressed { key, .. }
-                if self.interaction.borrow().focused
+                if self.interaction.inner.borrow().focused
                     && matches!(
                         key,
                         Key::ArrowLeft | Key::ArrowDown | Key::ArrowRight | Key::ArrowUp
                     ) =>
             {
-                let interaction = *self.interaction.borrow();
+                let interaction = *self.interaction.inner.borrow();
                 let direction = if matches!(key, Key::ArrowLeft | Key::ArrowDown) {
                     -1.0
                 } else {
@@ -404,11 +432,11 @@ impl View for RangeSlider {
                 EventResult::Consumed
             }
             ViewEvent::FocusChanged { focused: false } => {
-                if let Some(thumb) = self.interaction.borrow_mut().dragging.take() {
+                if let Some(thumb) = self.interaction.inner.borrow_mut().dragging.take() {
                     self.shape(thumb).end();
-                    self.interaction.borrow_mut().pending_commit = Some(thumb);
+                    self.interaction.inner.borrow_mut().pending_commit = Some(thumb);
                 }
-                self.interaction.borrow_mut().focused = false;
+                self.interaction.inner.borrow_mut().focused = false;
                 EventResult::Ignored
             }
             _ => EventResult::Ignored,
