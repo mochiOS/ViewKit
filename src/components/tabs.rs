@@ -7,8 +7,9 @@ use crate::platform::{Key, PointerButton};
 use crate::state::Binding;
 use crate::theme::{Color, CornerRadius, ShadowStyle, Theme};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
+use std::time::{Duration, Instant};
 
-use super::omochi_shape::{OmochiPreset, OmochiShape, SelectionMotion};
+use super::omochi_shape::{MagneticSelectionMotion, OmochiPreset, OmochiShape};
 use super::{
     Button, ButtonInteractionState, ButtonStyle, HStack, Rectangle, RectangleColor, Text,
     ZStackAlignment,
@@ -26,14 +27,14 @@ const INDICATOR_DEFORMATION_ALLOWANCE: f32 = 34.0;
 #[derive(Clone)]
 pub struct TabsInteractionState {
     indicator_shape: OmochiShape,
-    selection_motion: SelectionMotion,
+    selection_motion: MagneticSelectionMotion,
 }
 
 impl TabsInteractionState {
     pub fn new() -> Self {
         Self {
             indicator_shape: OmochiShape::displacement(OmochiPreset::SelectionIndicator),
-            selection_motion: SelectionMotion::default(),
+            selection_motion: MagneticSelectionMotion::default(),
         }
     }
 }
@@ -103,11 +104,6 @@ impl Tabs {
     fn item_button(&self, item: &TabItem, theme: &Theme) -> Button {
         let selected = self.selection.get() == item.value;
         let enabled = self.enabled && item.enabled;
-        let selection = self.selection.clone();
-        let value = item.value;
-        let selection_motion = self.interaction_state.selection_motion.clone();
-        let from_index = self.selected_index(self.selection.get()).unwrap_or(0);
-        let to_index = self.selected_index(value).unwrap_or(from_index);
 
         let foreground = if !enabled {
             theme.tabs.disabled_foreground
@@ -148,12 +144,6 @@ impl Tabs {
                     .color(foreground)
                     .height(16.0),
             )
-            .on_click(move || {
-                if selection.get() != value {
-                    selection.set_without_notification(value);
-                    selection_motion.start(from_index, to_index);
-                }
-            })
     }
 
     fn stack(&self, theme: &Theme) -> HStack {
@@ -170,6 +160,14 @@ impl Tabs {
 
     fn selected_index(&self, value: usize) -> Option<usize> {
         self.items.iter().position(|item| item.value == value)
+    }
+
+    fn tab_centers(&self, bounds: Rect, theme: &Theme) -> Vec<f32> {
+        self.items
+            .iter()
+            .enumerate()
+            .map(|(index, _)| bounds.origin.x + theme.layout.tab_width * (index as f32 + 0.5))
+            .collect()
     }
 
     fn indicator_points(&self, theme: &Theme) -> Vec<Point> {
@@ -218,27 +216,6 @@ impl Tabs {
             bounds.size.width,
             bounds.size.height + INDICATOR_DEFORMATION_ALLOWANCE * 2.0,
         )
-    }
-
-    fn indicator_local_point(&self, bounds: Rect, position: Point, theme: &Theme) -> Point {
-        let index = self.selected_index(self.selection.get()).unwrap_or(0) as f32;
-        let center = Point::new(
-            bounds.origin.x + theme.layout.tab_width * (index + 0.5),
-            bounds.origin.y + (theme.tabs.height - theme.tabs.tongue_depth) / 2.0,
-        );
-        Point::new(position.x - center.x, position.y - center.y)
-    }
-
-    fn animated_index(&self, theme: &Theme) -> (Option<f32>, Option<std::time::Instant>) {
-        let value = self.selection.get();
-        let Some(current) = self.selected_index(value) else {
-            return (None, None);
-        };
-        let (index, next_redraw) = self
-            .interaction_state
-            .selection_motion
-            .sample(current as f32, theme.motion.selection);
-        (Some(index), next_redraw)
     }
 
     fn keyboard_target(&self, event: &ViewEvent) -> Option<usize> {
@@ -342,28 +319,55 @@ impl View for Tabs {
                 ))
                 .paint(strip_bounds, context);
         }
-        let (index, next_redraw) = self.animated_index(context.theme);
-        if let Some(next_redraw) = next_redraw {
-            context.request_redraw_in_at(bounds.expanded(16.0), next_redraw);
-        }
-        if let Some(index) = index {
+        if let Some(selected_index) = self.selected_index(self.selection.get()) {
             let width = context.theme.layout.tab_width;
-            if let Some((from, to)) = self.interaction_state.selection_motion.take_launch() {
-                let direction = (to - from).signum();
-                let edge = direction * (width / 2.0 - context.theme.tabs.indicator_inset);
-                let pull = ((to - from).abs() * width * 0.34).min(INDICATOR_DEFORMATION_ALLOWANCE);
-                self.interaction_state
-                    .indicator_shape
-                    .begin(crate::geometry::Point::new(edge, 0.0));
-                self.interaction_state
-                    .indicator_shape
-                    .moved(crate::geometry::Point::new(edge + direction * pull, 0.0));
+            let centers = self.tab_centers(bounds, context.theme);
+            let fallback_center = centers[selected_index];
+            let sample = self
+                .interaction_state
+                .selection_motion
+                .sample(fallback_center);
+            let previous_direction = self.interaction_state.selection_motion.surface_direction();
+            let indicator_half_width = (width - context.theme.tabs.indicator_inset * 2.0) / 2.0;
+
+            if sample.direction != 0.0 && sample.pull_distance > 0.0 {
+                if previous_direction != 0.0 && previous_direction != sample.direction {
+                    self.interaction_state.indicator_shape.end();
+                }
+                if previous_direction != sample.direction
+                    || !self.interaction_state.indicator_shape.is_active()
+                {
+                    let edge = sample.direction * indicator_half_width;
+                    self.interaction_state
+                        .indicator_shape
+                        .begin(Point::new(edge, 0.0));
+                    self.interaction_state
+                        .selection_motion
+                        .set_surface_direction(sample.direction);
+                }
+                let edge = sample.direction * indicator_half_width;
+                self.interaction_state.indicator_shape.moved(Point::new(
+                    edge + sample.direction * sample.pull_distance,
+                    0.0,
+                ));
+            }
+            if sample.completed {
                 self.interaction_state.indicator_shape.end();
+                self.interaction_state
+                    .selection_motion
+                    .set_surface_direction(0.0);
+                self.selection.commit();
+            }
+            if sample.animating || self.interaction_state.indicator_shape.is_animating() {
+                context.request_redraw_in_at(
+                    Self::indicator_clip_bounds(bounds),
+                    Instant::now() + Duration::from_millis(8),
+                );
             }
             let inset = context.theme.tabs.indicator_inset;
             let indicator_height = strip_height - inset;
             let center = Point::new(
-                bounds.origin.x + width * (index + 0.5),
+                sample.center,
                 bounds.origin.y + inset + indicator_height / 2.0,
             );
             let indicator_points = self.indicator_points(context.theme);
@@ -379,10 +383,6 @@ impl View for Tabs {
                 context,
             );
             context.display_list.push(DrawCommand::PopClip);
-            if self.interaction_state.selection_motion.ready_to_commit() {
-                self.interaction_state.selection_motion.finish();
-                self.selection.commit();
-            }
         }
         self.stack(context.theme).paint(strip_bounds, context);
     }
@@ -393,37 +393,6 @@ impl View for Tabs {
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
-        match event {
-            ViewEvent::PointerPressed {
-                position,
-                button: PointerButton::Primary,
-            } if self.enabled && bounds.contains(*position) => self
-                .interaction_state
-                .indicator_shape
-                .begin(self.indicator_local_point(bounds, *position, context.theme())),
-            ViewEvent::PointerMoved { position }
-                if self.interaction_state.indicator_shape.is_active() =>
-            {
-                self.interaction_state
-                    .indicator_shape
-                    .moved(self.indicator_local_point(bounds, *position, context.theme()));
-            }
-            ViewEvent::PointerReleased {
-                position,
-                button: PointerButton::Primary,
-            } if self.interaction_state.indicator_shape.is_active() => {
-                self.interaction_state
-                    .indicator_shape
-                    .moved(self.indicator_local_point(bounds, *position, context.theme()));
-                self.interaction_state.indicator_shape.end();
-            }
-            ViewEvent::FocusChanged { focused: false }
-                if self.interaction_state.indicator_shape.is_active() =>
-            {
-                self.interaction_state.indicator_shape.end();
-            }
-            _ => {}
-        }
         let stack = self.stack(context.theme);
         let strip_height = (context.theme().tabs.height - context.theme().tabs.tongue_depth)
             .min(bounds.size.height)
@@ -434,17 +403,89 @@ impl View for Tabs {
             bounds.size.width,
             strip_height,
         );
+        let child_bounds = stack.child_bounds_for_event(strip_bounds, context);
+        let centers = self.tab_centers(bounds, context.theme());
+        let selected_index = self.selected_index(self.selection.get()).unwrap_or(0);
+        let current_center = centers
+            .get(selected_index)
+            .copied()
+            .unwrap_or(bounds.origin.x);
+
+        match event {
+            ViewEvent::PointerPressed {
+                position,
+                button: PointerButton::Primary,
+            } if self.enabled && bounds.contains(*position) && !centers.is_empty() => {
+                self.interaction_state.selection_motion.begin_drag(
+                    position.x,
+                    current_center,
+                    &centers,
+                );
+                context.request_redraw_in(Self::indicator_clip_bounds(bounds));
+                return EventResult::Consumed;
+            }
+            ViewEvent::PointerMoved { position }
+                if self.interaction_state.selection_motion.is_dragging() =>
+            {
+                self.interaction_state
+                    .selection_motion
+                    .move_drag(position.x, &centers);
+                context.request_redraw_in(Self::indicator_clip_bounds(bounds));
+                return EventResult::Consumed;
+            }
+            ViewEvent::PointerReleased {
+                position,
+                button: PointerButton::Primary,
+            } if self.interaction_state.selection_motion.is_dragging() => {
+                let mut index = self
+                    .interaction_state
+                    .selection_motion
+                    .end_drag(position.x, &centers);
+                if !self.items.get(index).is_some_and(|item| item.enabled) {
+                    index = self
+                        .items
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, item)| item.enabled)
+                        .min_by(|(lhs, _), (rhs, _)| {
+                            (centers[*lhs] - position.x)
+                                .abs()
+                                .total_cmp(&(centers[*rhs] - position.x).abs())
+                        })
+                        .map(|(index, _)| index)
+                        .unwrap_or(selected_index);
+                    self.interaction_state
+                        .selection_motion
+                        .select(current_center, centers[index]);
+                }
+                self.selection
+                    .set_without_notification(self.items[index].value);
+                if let Some(target_bounds) = child_bounds.get(index).copied() {
+                    context.request_keyboard_focus(target_bounds);
+                }
+                context.request_redraw_in(Self::indicator_clip_bounds(bounds));
+                return EventResult::Consumed;
+            }
+            ViewEvent::FocusChanged { focused: false }
+                if self.interaction_state.selection_motion.is_dragging() =>
+            {
+                self.interaction_state
+                    .selection_motion
+                    .cancel(current_center);
+                self.interaction_state.indicator_shape.end();
+            }
+            _ => {}
+        }
+
         if let Some(index) = self.keyboard_target(event) {
-            let child_bounds = stack.child_bounds_for_event(strip_bounds, context);
             if let Some(target_bounds) = child_bounds.get(index).copied() {
-                let from_index = self.selected_index(self.selection.get()).unwrap_or(index);
                 self.selection
                     .set_without_notification(self.items[index].value);
                 self.interaction_state
                     .selection_motion
-                    .start(from_index, index);
+                    .select(current_center, centers[index]);
                 context.request_keyboard_focus(target_bounds);
-                context.request_redraw_in(bounds.expanded(16.0));
+                context.request_redraw_in(Self::indicator_clip_bounds(bounds));
                 return EventResult::Consumed;
             }
         }
@@ -538,7 +579,7 @@ mod tests {
     }
 
     #[test]
-    fn selection_changes_immediately_while_indicator_motion_is_retained() {
+    fn magnetic_drag_defers_selection_until_release() {
         let selection = State::new(0_usize);
         let interaction = TabsInteractionState::new();
         let tabs = Tabs::with_interaction(selection.binding(), interaction.clone())
@@ -547,6 +588,10 @@ mod tests {
             .item(2, "Settings");
         let theme = Theme::LIGHT;
         let bounds = Rect::new(30.0, 24.0, theme.layout.tab_width * 3.0, theme.tabs.height);
+        let first = Point::new(
+            bounds.origin.x + theme.layout.tab_width * 0.5,
+            bounds.origin.y + (theme.tabs.height - theme.tabs.tongue_depth) / 2.0,
+        );
         let second = Point::new(
             bounds.origin.x + theme.layout.tab_width * 1.5,
             bounds.origin.y + (theme.tabs.height - theme.tabs.tongue_depth) / 2.0,
@@ -558,13 +603,22 @@ mod tests {
             tabs.handle_event(
                 bounds,
                 &ViewEvent::PointerPressed {
-                    position: second,
+                    position: first,
                     button: PointerButton::Primary,
                 },
                 &mut event_context,
             ),
             EventResult::Consumed
         );
+        assert_eq!(
+            tabs.handle_event(
+                bounds,
+                &ViewEvent::PointerMoved { position: second },
+                &mut event_context,
+            ),
+            EventResult::Consumed
+        );
+        assert_eq!(selection.get(), 0);
         assert_eq!(
             tabs.handle_event(
                 bounds,
