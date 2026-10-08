@@ -1,18 +1,14 @@
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
 
-use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
-use crate::geometry::{Point, Rect, Size};
+use crate::geometry::{Rect, Size};
 use crate::layout::ViewExt;
-use crate::omochi::{
-    DEFAULT_BURGERS, DEFAULT_MATERIAL, OmochiMaterial, OmochiSurface, PullMode, rounded_rect_points,
-};
 use crate::platform::PointerButton;
 use crate::theme::{Color, ControlAppearance, ControlVisualState, ShadowStyle, Theme};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
+use super::omochi_shape::{OmochiPreset, OmochiShape};
 use super::{
     Button, ButtonInteractionState, ButtonSize, ButtonStyle, Icon, SymbolName, ZStackAlignment,
 };
@@ -32,7 +28,7 @@ pub struct IconButton {
     size: Option<ButtonSize>,
     enabled: bool,
     interaction: ButtonInteractionState,
-    surface: OmochiSurface,
+    surface: OmochiShape,
     on_click: Option<Callback>,
     accessibility_label: Option<String>,
 }
@@ -45,11 +41,7 @@ impl IconButton {
             size: None,
             enabled: true,
             interaction: ButtonInteractionState::new(),
-            surface: OmochiSurface::new(
-                icon_button_material(),
-                DEFAULT_BURGERS,
-                PullMode::Displacement,
-            ),
+            surface: OmochiShape::velocity(OmochiPreset::CompactControl),
             on_click: None,
             accessibility_label: None,
         }
@@ -167,13 +159,6 @@ impl IconButton {
 
         button
     }
-
-    fn local_point(bounds: Rect, point: Point) -> Point {
-        Point::new(
-            point.x - bounds.origin.x - bounds.size.width / 2.0,
-            point.y - bounds.origin.y - bounds.size.height / 2.0,
-        )
-    }
 }
 
 impl View for IconButton {
@@ -193,36 +178,17 @@ impl View for IconButton {
             self.surface.reset();
         }
 
-        let now = Instant::now();
         let appearance = self.appearance(context.theme);
         let radius = context.theme.button.radius.resolve(
             &context.theme.radius,
             bounds.size.width,
             bounds.size.height,
         );
-        let base_points = rounded_rect_points(bounds.size.width, bounds.size.height, radius, 10);
-        let sample = self.surface.sample(&base_points, now);
-        let center = Point::new(
-            bounds.origin.x + bounds.size.width / 2.0,
-            bounds.origin.y + bounds.size.height / 2.0,
-        );
-        let points = sample
-            .points
-            .into_iter()
-            .map(|point| Point::new(center.x + point.x, center.y + point.y))
-            .collect();
-
-        context.display_list.push(DrawCommand::FillPolygon {
-            points,
-            color: appearance.background,
-        });
+        self.surface
+            .paint(bounds, radius, appearance.background, context);
 
         self.button(context.theme, appearance.foreground)
             .paint(bounds, context);
-
-        if sample.animating {
-            context.request_redraw_in_at(bounds.expanded(24.0), now + Duration::from_millis(8));
-        }
     }
 
     fn handle_event(
@@ -246,21 +212,19 @@ impl View for IconButton {
                 position,
                 button: PointerButton::Primary,
             } if bounds.contains(*position) => {
-                self.surface
-                    .begin_press(Self::local_point(bounds, *position), Instant::now());
+                self.surface.begin(*position);
             }
             ViewEvent::PointerMoved { position } if self.surface.is_active() => {
-                self.surface
-                    .move_press(Self::local_point(bounds, *position), Instant::now());
+                self.surface.moved(*position);
             }
             ViewEvent::PointerReleased {
                 button: PointerButton::Primary,
                 ..
             } if self.surface.is_active() => {
-                self.surface.end_press(Instant::now());
+                self.surface.end();
             }
             ViewEvent::PointerLeft if self.surface.is_active() => {
-                self.surface.end_press(Instant::now());
+                self.surface.end();
             }
             _ => {}
         }
@@ -276,22 +240,6 @@ impl View for IconButton {
 
         result
     }
-}
-
-fn icon_button_material() -> OmochiMaterial {
-    let mut material = DEFAULT_MATERIAL;
-
-    material.max_pull = 16.0;
-    material.press_depth = 3.4;
-    material.press_radius = 33.0;
-    material.drag_radius = 42.0;
-    material.neck_backshift_ratio = 0.22;
-    material.tip_long_radius = 12.0;
-    material.tip_cross_radius = 21.0;
-    material.press_release_start = 0.6;
-    material.press_release_end = 4.5;
-
-    material
 }
 
 fn color_with_opacity(color: Color, opacity: f32) -> Color {
