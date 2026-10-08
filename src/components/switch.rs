@@ -522,11 +522,13 @@ impl View for SwitchMark {
             knob_color,
             context,
         );
-        Rectangle::new()
-            .color(RectangleColor::Custom(Color::TRANSPARENT))
-            .radius(CornerRadius::Full)
-            .shadow(knob_shadow)
-            .paint(knob_bounds, context);
+        if !self.thumb_shape.is_animating() {
+            Rectangle::new()
+                .color(RectangleColor::Custom(Color::TRANSPARENT))
+                .radius(CornerRadius::Full)
+                .shadow(knob_shadow)
+                .paint(knob_bounds, context);
+        }
     }
 }
 

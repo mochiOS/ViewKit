@@ -302,15 +302,17 @@ impl View for SegmentedControl {
                 context.theme.segmented_control.indicator_background,
                 context,
             );
-            Rectangle::new()
-                .color(RectangleColor::Custom(crate::theme::Color::TRANSPARENT))
-                .radius(CornerRadius::Custom(indicator_radius))
-                .shadow(ShadowStyle::Card)
-                .border(BorderStyle::custom(
-                    context.theme.segmented_control.indicator_border,
-                    context.theme.segmented_control.stroke_width,
-                ))
-                .paint(indicator_bounds, context);
+            if !self.indicator_shape.is_animating() {
+                Rectangle::new()
+                    .color(RectangleColor::Custom(crate::theme::Color::TRANSPARENT))
+                    .radius(CornerRadius::Custom(indicator_radius))
+                    .shadow(ShadowStyle::Card)
+                    .border(BorderStyle::custom(
+                        context.theme.segmented_control.indicator_border,
+                        context.theme.segmented_control.stroke_width,
+                    ))
+                    .paint(indicator_bounds, context);
+            }
             context.display_list.push(DrawCommand::PopClip);
 
             if self.selection_motion.ready_to_commit() && !self.indicator_shape.is_animating() {
