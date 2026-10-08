@@ -62,9 +62,9 @@ impl ButtonTokens {
         let primary_pressed = colors.accent_pressed;
         let primary_foreground = Color::WHITE;
         let standard_rest = if dark {
-            colors.surface_muted
+            colors.elevated_surface
         } else {
-            colors.surface_subtle
+            colors.surface
         };
         let standard_hover = if dark {
             colors.border
@@ -83,17 +83,17 @@ impl ButtonTokens {
             standard: ButtonPalette {
                 rest: ControlAppearance {
                     background: standard_rest,
-                    border: colors.border_strong,
+                    border: colors.border,
                     foreground: colors.text_primary,
                 },
                 hovered: ControlAppearance {
                     background: standard_hover,
-                    border: colors.border_strong,
+                    border: colors.border,
                     foreground: colors.text_primary,
                 },
                 pressed: ControlAppearance {
                     background: standard_pressed,
-                    border: colors.border_strong,
+                    border: colors.border,
                     foreground: colors.text_primary,
                 },
             },
@@ -129,22 +129,22 @@ impl ButtonTokens {
             danger: ButtonPalette {
                 rest: ControlAppearance {
                     background: standard_rest,
-                    border: colors.border_strong,
+                    border: colors.border,
                     foreground: colors.destructive,
                 },
                 hovered: ControlAppearance {
                     background: standard_hover,
-                    border: colors.border_strong,
+                    border: colors.border,
                     foreground: colors.destructive,
                 },
                 pressed: ControlAppearance {
                     background: standard_pressed,
-                    border: colors.border_strong,
+                    border: colors.border,
                     foreground: colors.destructive,
                 },
             },
-            horizontal_padding: 12.0,
-            height: 28.0,
+            horizontal_padding: 14.0,
+            height: 30.0,
             radius: CornerRadius::Small,
             stroke_width: FigmaTokens::SHAPE.stroke_default,
             focus_ring: colors.focus_ring,
@@ -367,12 +367,12 @@ impl SliderTokens {
         Self {
             label: colors.text_primary,
             disabled_label: colors.text_disabled,
-            track: colors.surface_muted,
+            track: colors.border,
             fill: colors.accent,
             hovered_fill: colors.accent_hovered,
             pressed_fill: colors.accent_pressed,
-            knob: colors.elevated_surface,
-            hovered_knob: colors.surface,
+            knob: colors.surface,
+            hovered_knob: colors.surface_muted,
             disabled_knob: colors.surface_subtle,
             knob_border: colors.border,
             hovered_knob_border: colors.border_strong,
@@ -402,10 +402,16 @@ pub struct SegmentedControlTokens {
 impl SegmentedControlTokens {
     pub const fn from_colors(colors: ColorTokens) -> Self {
         Self {
-            background: colors.surface_subtle,
-            border: colors.border,
+            background: colors.surface_muted,
+            border: colors
+                .border
+                .with_alpha(if colors.background.red < 80 { 150 } else { 180 }),
             indicator_background: colors.surface,
-            indicator_border: colors.border,
+            indicator_border: colors.border.with_alpha(if colors.background.red < 80 {
+                190
+            } else {
+                210
+            }),
             radius: CornerRadius::ExtraLarge,
             stroke_width: FigmaTokens::SHAPE.stroke_default,
         }
@@ -501,9 +507,9 @@ impl TabsTokens {
         Self {
             background: Color::TRANSPARENT,
             hovered_background: colors.surface_subtle,
-            selected_background: colors.accent_soft,
+            selected_background: colors.surface_muted,
             foreground: colors.text_secondary,
-            selected_foreground: colors.accent,
+            selected_foreground: colors.text_primary,
             disabled_foreground: colors.text_disabled,
             horizontal_padding: FigmaTokens::SPACING.space_8,
             vertical_padding: FigmaTokens::SPACING.space_2,
@@ -804,10 +810,7 @@ mod tests {
         let light = ButtonTokens::from_colors(light_theme.colors, false);
         let dark = ButtonTokens::from_colors(dark_theme.colors, true);
 
-        assert_eq!(
-            light.standard.rest.background,
-            light_theme.colors.surface_subtle
-        );
+        assert_eq!(light.standard.rest.background, light_theme.colors.surface);
         assert_eq!(
             light.standard.hovered.background,
             light_theme.colors.surface_muted
@@ -815,12 +818,14 @@ mod tests {
         assert_eq!(light.standard.pressed.background, light_theme.colors.border);
         assert_eq!(
             dark.standard.rest.background,
-            dark_theme.colors.surface_muted
+            dark_theme.colors.elevated_surface
         );
         assert_eq!(dark.standard.hovered.background, dark_theme.colors.border);
         assert_eq!(
             dark.standard.pressed.background,
             dark_theme.colors.border_strong
         );
+        assert_eq!(light.standard.rest.border, light_theme.colors.border);
+        assert_eq!(dark.standard.rest.border, dark_theme.colors.border);
     }
 }
