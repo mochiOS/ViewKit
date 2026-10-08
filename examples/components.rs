@@ -2,6 +2,7 @@ use viewkit::prelude::*;
 
 struct ComponentsGallery {
     theme_mode: State<usize>,
+    gallery_page: State<usize>,
     omochi_button: ButtonInteractionState,
     omochi_icon: IconButtonInteractionState,
     omochi_switch: SwitchInteractionState,
@@ -32,7 +33,107 @@ impl ComponentsGallery {
     fn section(title: &str, subtitle: &str, content: impl View + 'static) -> StackChild {
         VStack::new()
             .alignment(StackAlignment::Stretch)
+            .gap(StackGap::Small)
+            .child(
+                VStack::new()
+                    .alignment(StackAlignment::Start)
+                    .gap(StackGap::ExtraSmall)
+                    .child(Text::body_emphasized(title))
+                    .child(Text::caption(subtitle).tone(TextTone::Secondary)),
+            )
+            .child(content)
+            .layout()
+    }
+
+    fn sidebar_item(&self, index: usize, label: &'static str) -> SidebarItem {
+        let selection = self.gallery_page.clone();
+        SidebarItem::new(label)
+            .selected(self.gallery_page.get() == index)
+            .on_select(move || selection.set(index))
+    }
+
+    fn gallery_sidebar(&self) -> VStack {
+        VStack::new()
+            .alignment(StackAlignment::Stretch)
             .gap(StackGap::Medium)
+            .child(
+                VStack::new()
+                    .alignment(StackAlignment::Start)
+                    .gap(StackGap::ExtraSmall)
+                    .child(Text::body_emphasized("Components"))
+                    .child(Text::caption("ViewKit Library").tone(TextTone::Secondary)),
+            )
+            .child(
+                SidebarSection::new("INTERACTIONS")
+                    .item(self.sidebar_item(0, "Omochi & Actions"))
+                    .item(self.sidebar_item(1, "Inputs & Selection")),
+            )
+            .child(
+                SidebarSection::new("FOUNDATIONS")
+                    .item(self.sidebar_item(2, "Navigation"))
+                    .item(self.sidebar_item(3, "Type & Feedback"))
+                    .item(self.sidebar_item(4, "Surfaces & Layout")),
+            )
+            .child(SidebarSection::new("SYSTEM").item(self.sidebar_item(5, "Overlays & Menus")))
+    }
+
+    fn gallery_detail(&self) -> StackChild {
+        let (title, subtitle, content) = match self.gallery_page.get().min(5) {
+            0 => (
+                "Omochi & Actions",
+                "Direct manipulation, action hierarchy, and retained viscoelastic feedback.",
+                VStack::new()
+                    .alignment(StackAlignment::Stretch)
+                    .gap(StackGap::ExtraLarge)
+                    .child(self.omochi_lab())
+                    .child(self.buttons())
+                    .layout(),
+            ),
+            1 => (
+                "Inputs & Selection",
+                "Editable values, validation, keyboard focus, and selection controls.",
+                VStack::new()
+                    .alignment(StackAlignment::Stretch)
+                    .gap(StackGap::ExtraLarge)
+                    .child(self.inputs())
+                    .child(self.selection())
+                    .layout(),
+            ),
+            2 => (
+                "Navigation",
+                "Tabs, sidebars, lists, toolbars, and split-view behavior.",
+                self.navigation(),
+            ),
+            3 => (
+                "Type & Feedback",
+                "Semantic typography, status, progress, messages, and transient help.",
+                VStack::new()
+                    .alignment(StackAlignment::Stretch)
+                    .gap(StackGap::ExtraLarge)
+                    .child(self.typography())
+                    .child(self.feedback())
+                    .layout(),
+            ),
+            4 => (
+                "Surfaces & Layout",
+                "Application containers, media, forms, settings, and adaptive layout.",
+                VStack::new()
+                    .alignment(StackAlignment::Stretch)
+                    .gap(StackGap::ExtraLarge)
+                    .child(self.surfaces())
+                    .child(self.application_patterns())
+                    .layout(),
+            ),
+            _ => (
+                "Overlays & Menus",
+                "Menus, contextual actions, popovers, and modal presentation.",
+                self.overlays(),
+            ),
+        };
+
+        VStack::new()
+            .alignment(StackAlignment::Stretch)
+            .gap(StackGap::ExtraLarge)
             .child(
                 VStack::new()
                     .alignment(StackAlignment::Start)
@@ -41,8 +142,6 @@ impl ComponentsGallery {
                     .child(Text::body(subtitle).tone(TextTone::Secondary)),
             )
             .child(content)
-            .child(Spacer::new().into_stack_child().height(8.0))
-            .child(Divider::new())
             .layout()
     }
 
@@ -232,7 +331,8 @@ impl ComponentsGallery {
                         .item(0, "List")
                         .item(1, "Grid")
                         .disabled_item(2, "Columns")
-                        .accessibility_label("Layout"),
+                        .accessibility_label("Layout")
+                        .frame(320.0, 34.0),
                 )
                 .child(
                     Slider::new(self.slider.binding())
@@ -489,47 +589,27 @@ impl ComponentsGallery {
     }
 
     fn page(&self) -> Box<dyn View + 'static> {
-        let theme_mode = self.theme_mode.get();
-        let mut gallery = VStack::new()
-            .alignment(StackAlignment::Stretch)
-            .gap(StackGap::ExtraLarge)
-            .child(
-                VStack::new()
-                    .alignment(StackAlignment::Start)
-                    .gap(StackGap::ExtraSmall)
-                    .child(Text::styled("Component Gallery", TextRole::TitleLarge))
-                    .child(
-                        Text::body("A live inventory of ViewKit’s desktop controls and omochi interactions.")
-                            .tone(TextTone::Secondary),
-                    ),
-            )
-            .child(Text::metadata(format!(
-                "Theme: {}",
-                ["System", "Light", "Dark"][theme_mode.min(2)]
-            )))
-            .child(self.omochi_lab())
-            .child(self.buttons())
-            .child(self.inputs())
-            .child(self.selection())
-            .child(self.navigation())
-            .child(self.typography())
-            .child(self.feedback())
-            .child(self.surfaces())
-            .child(self.application_patterns())
-            .child(self.overlays());
+        let detail = self.gallery_detail();
+        let gallery = NavigationSplitView::new(
+            self.gallery_sidebar(),
+            ContentArea::new(Scroll::vertical(detail)).maximum_width(760.0),
+        )
+        .flexible_sidebar(188.0, 216.0, 248.0)
+        .minimum_detail_width(560.0);
 
-        if self.popover_open.get() {
+        let gallery: Box<dyn View + 'static> = if self.popover_open.get() {
             let close = self.popover_open.clone();
-            gallery = gallery.child(
-                Popover::new().content(
-                    VStack::new()
-                        .gap(StackGap::Small)
-                        .child(Text::body_emphasized("Popover"))
-                        .child(Text::body("Escape or the button dismisses this surface."))
-                        .child(Button::new("Close").on_click(move || close.set(false))),
-                ),
+            let popover = Popover::new().content(
+                VStack::new()
+                    .gap(StackGap::Small)
+                    .child(Text::body_emphasized("Popover"))
+                    .child(Text::body("Escape or the button dismisses this surface."))
+                    .child(Button::new("Close").on_click(move || close.set(false))),
             );
-        }
+            Box::new(Overlay::new().content(gallery).overlay(popover))
+        } else {
+            Box::new(gallery)
+        };
 
         let page = VStack::new()
             .alignment(StackAlignment::Stretch)
@@ -539,7 +619,7 @@ impl ComponentsGallery {
                     .alignment(StackAlignment::Center)
                     .gap(StackGap::Medium)
                     .child(Text::body_emphasized("ViewKit"))
-                    .child(Text::metadata("Design system"))
+                    .child(Text::metadata("Components"))
                     .child(Spacer::new())
                     .child(
                         SegmentedControl::new(self.theme_mode.binding())
@@ -550,12 +630,7 @@ impl ComponentsGallery {
                     ),
             ))
             .child(Divider::new())
-            .child(
-                ContentArea::new(Scroll::vertical(gallery))
-                    .maximum_width(920.0)
-                    .layout()
-                    .flex_grow(1.0),
-            );
+            .child(gallery.layout().flex_grow(1.0));
         if self.dialog_open.get() {
             let close = self.dialog_open.clone();
             Box::new(
@@ -594,6 +669,7 @@ impl App for ComponentsGallery {
     fn new() -> Self {
         Self {
             theme_mode: State::new(0),
+            gallery_page: State::new(0),
             omochi_button: ButtonInteractionState::new(),
             omochi_icon: IconButtonInteractionState::new(),
             omochi_switch: SwitchInteractionState::new(),
