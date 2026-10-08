@@ -110,14 +110,13 @@ impl ComponentsGallery {
                     HStack::new()
                         .gap(StackGap::Small)
                         .alignment(StackAlignment::Center)
-                        .child(Button::new("Standard"))
-                        .child(Button::new("Primary").style(ButtonStyle::Primary))
+                        .child(Button::new("Cancel"))
                         .child(
-                            Button::new("Accent")
-                                .style(ButtonStyle::Accent)
-                                .on_click(move || status.set("Accent button clicked".into())),
+                            Button::new("Continue")
+                                .style(ButtonStyle::Primary)
+                                .on_click(move || status.set("Primary action completed".into())),
                         )
-                        .child(Button::new("Ghost").style(ButtonStyle::Ghost))
+                        .child(Button::new("Help").style(ButtonStyle::Ghost))
                         .child(Button::new("Delete").style(ButtonStyle::Danger))
                         .child(Button::new("Disabled").enabled(false)),
                 )
