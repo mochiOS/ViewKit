@@ -15,6 +15,29 @@ use super::{
 
 type Callback = Rc<RefCell<Box<dyn FnMut()>>>;
 
+/// Retained interaction state for icon buttons whose action rebuilds the view
+/// tree. Reusing this value lets the omochi release contour finish naturally.
+#[derive(Clone)]
+pub struct IconButtonInteractionState {
+    button: ButtonInteractionState,
+    surface: OmochiShape,
+}
+
+impl IconButtonInteractionState {
+    pub fn new() -> Self {
+        Self {
+            button: ButtonInteractionState::new(),
+            surface: OmochiShape::displacement(OmochiPreset::CompactControl),
+        }
+    }
+}
+
+impl Default for IconButtonInteractionState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum IconButtonTone {
     #[default]
@@ -27,21 +50,26 @@ pub struct IconButton {
     tone: IconButtonTone,
     size: Option<ButtonSize>,
     enabled: bool,
-    interaction: ButtonInteractionState,
-    surface: OmochiShape,
+    interaction_state: IconButtonInteractionState,
     on_click: Option<Callback>,
     accessibility_label: Option<String>,
 }
 
 impl IconButton {
     pub fn new(icon: SymbolName) -> Self {
+        Self::with_interaction(icon, IconButtonInteractionState::new())
+    }
+
+    pub fn with_interaction(
+        icon: SymbolName,
+        interaction_state: IconButtonInteractionState,
+    ) -> Self {
         Self {
             icon,
             tone: IconButtonTone::Plain,
             size: None,
             enabled: true,
-            interaction: ButtonInteractionState::new(),
-            surface: OmochiShape::displacement(OmochiPreset::CompactControl),
+            interaction_state,
             on_click: None,
             accessibility_label: None,
         }
@@ -63,7 +91,7 @@ impl IconButton {
     }
 
     pub fn interaction(&self) -> &ButtonInteractionState {
-        &self.interaction
+        &self.interaction_state.button
     }
 
     pub fn on_click(mut self, callback: impl FnMut() + 'static) -> Self {
@@ -86,11 +114,11 @@ impl IconButton {
     fn visual_state(&self) -> ControlVisualState {
         if !self.enabled {
             ControlVisualState::Disabled
-        } else if self.interaction.is_pressed() {
+        } else if self.interaction_state.button.is_pressed() {
             ControlVisualState::Pressed
-        } else if self.interaction.is_hovered() {
+        } else if self.interaction_state.button.is_hovered() {
             ControlVisualState::Hovered
-        } else if self.interaction.is_focused() {
+        } else if self.interaction_state.button.is_focused() {
             ControlVisualState::Focused
         } else {
             ControlVisualState::Rest
@@ -104,6 +132,14 @@ impl IconButton {
             IconButtonTone::Accent => theme.button.accent,
         };
         let mut appearance = palette.resolve(state);
+
+        if self.tone == IconButtonTone::Plain
+            && self.enabled
+            && self.interaction_state.surface.is_animating()
+        {
+            appearance.background = theme.colors.surface_muted;
+            appearance.border = Color::TRANSPARENT;
+        }
 
         if state == ControlVisualState::Disabled {
             appearance.background =
@@ -129,7 +165,7 @@ impl IconButton {
             |size| size.icon_size(theme),
         );
 
-        let mut button = Button::with_interaction(self.interaction.clone())
+        let mut button = Button::with_interaction(self.interaction_state.button.clone())
             .style(ButtonStyle::Custom {
                 background: Color::TRANSPARENT,
                 hovered_background: Color::TRANSPARENT,
@@ -181,8 +217,8 @@ impl View for IconButton {
             return;
         }
 
-        if !self.enabled && self.surface.is_animating() {
-            self.surface.reset();
+        if !self.enabled && self.interaction_state.surface.is_animating() {
+            self.interaction_state.surface.reset();
         }
 
         let appearance = self.appearance(context.theme);
@@ -191,7 +227,8 @@ impl View for IconButton {
             bounds.size.width,
             bounds.size.height,
         );
-        self.surface
+        self.interaction_state
+            .surface
             .paint(bounds, radius, appearance.background, context);
 
         self.button(context.theme, appearance.foreground)
@@ -205,8 +242,8 @@ impl View for IconButton {
         context: &mut EventContext<'_>,
     ) -> EventResult {
         if !self.enabled {
-            if self.surface.is_animating() {
-                self.surface.reset();
+            if self.interaction_state.surface.is_animating() {
+                self.interaction_state.surface.reset();
             }
 
             return self
@@ -219,19 +256,23 @@ impl View for IconButton {
                 position,
                 button: PointerButton::Primary,
             } if bounds.contains(*position) => {
-                self.surface.begin(Self::local_point(bounds, *position));
+                self.interaction_state
+                    .surface
+                    .begin(Self::local_point(bounds, *position));
             }
-            ViewEvent::PointerMoved { position } if self.surface.is_active() => {
-                self.surface.moved(Self::local_point(bounds, *position));
+            ViewEvent::PointerMoved { position } if self.interaction_state.surface.is_active() => {
+                self.interaction_state
+                    .surface
+                    .moved(Self::local_point(bounds, *position));
             }
             ViewEvent::PointerReleased {
                 button: PointerButton::Primary,
                 ..
-            } if self.surface.is_active() => {
-                self.surface.end();
+            } if self.interaction_state.surface.is_active() => {
+                self.interaction_state.surface.end();
             }
-            ViewEvent::PointerLeft if self.surface.is_active() => {
-                self.surface.end();
+            ViewEvent::PointerLeft if self.interaction_state.surface.is_active() => {
+                self.interaction_state.surface.end();
             }
             _ => {}
         }
@@ -241,7 +282,7 @@ impl View for IconButton {
             .button(context.theme, appearance.foreground)
             .handle_event(bounds, event, context);
 
-        if self.surface.is_animating() {
+        if self.interaction_state.surface.is_animating() {
             context.request_redraw_in(bounds.expanded(24.0));
         }
 

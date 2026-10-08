@@ -2,6 +2,7 @@ use viewkit::prelude::*;
 
 struct ComponentsGallery {
     theme_mode: State<usize>,
+    omochi_icon: IconButtonInteractionState,
     checked: State<bool>,
     switched: State<bool>,
     radio: State<usize>,
@@ -40,6 +41,7 @@ impl ComponentsGallery {
     }
 
     fn omochi_lab(&self) -> StackChild {
+        let status = self.status.clone();
         Self::section(
             "omochi Interaction Lab",
             "Press, pull, reverse direction, and release. Values follow immediately; only the contour carries viscosity.",
@@ -52,9 +54,15 @@ impl ComponentsGallery {
                             .alignment(StackAlignment::Center)
                             .gap(StackGap::Large)
                             .child(
-                                IconButton::new(SymbolName::Plus)
-                                    .tone(IconButtonTone::Accent)
-                                    .accessibility_label("Add"),
+                                IconButton::with_interaction(
+                                    SymbolName::Plus,
+                                    self.omochi_icon.clone(),
+                                )
+                                .tone(IconButtonTone::Accent)
+                                .accessibility_label("Add")
+                                .on_click(move || {
+                                    status.set("Retained omochi action completed".into())
+                                }),
                             )
                             .child(Switch::new(self.switched.binding()).label("Elastic switch"))
                             .child(
@@ -568,6 +576,7 @@ impl App for ComponentsGallery {
     fn new() -> Self {
         Self {
             theme_mode: State::new(0),
+            omochi_icon: IconButtonInteractionState::new(),
             checked: State::new(true),
             switched: State::new(true),
             radio: State::new(0),

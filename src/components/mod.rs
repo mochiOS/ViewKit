@@ -86,7 +86,7 @@ pub use file_drop_target::{FileDropInteractionState, FileDropTarget};
 #[allow(deprecated)]
 pub use icon::IconName;
 pub use icon::{Icon, SymbolName};
-pub use icon_button::{IconButton, IconButtonTone};
+pub use icon_button::{IconButton, IconButtonInteractionState, IconButtonTone};
 pub use image::{Image, ImageContentMode};
 pub use list::{List, ListRow};
 pub use menu::{Menu, MenuItem};

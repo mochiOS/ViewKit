@@ -199,3 +199,45 @@ impl OmochiShape {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::draw_command::DisplayList;
+    use crate::theme::Theme;
+    use crate::typography::{TextMeasurer, Typography};
+
+    #[test]
+    fn pressed_shape_emits_a_deformed_polygon() {
+        let shape = OmochiShape::displacement(OmochiPreset::CompactControl);
+        shape.begin(Point::new(8.0, 0.0));
+
+        let mut display_list = DisplayList::new();
+        let mut text_measurer = TextMeasurer::new();
+        let mut context = PaintContext::new(
+            &mut display_list,
+            &Theme::LIGHT,
+            &Typography::DEFAULT,
+            &mut text_measurer,
+        );
+        let bounds = Rect::new(20.0, 30.0, 28.0, 28.0);
+        shape.paint(bounds, 6.0, Color::WHITE, &mut context);
+
+        let points = display_list.commands().iter().find_map(|command| {
+            if let DrawCommand::FillPolygon { points, .. } = command {
+                Some(points)
+            } else {
+                None
+            }
+        });
+        let points = points.expect("omochi paint must use a polygon contour");
+        let base = rounded_rect_points(28.0, 28.0, 6.0, 10);
+        let center = Point::new(34.0, 44.0);
+
+        assert_eq!(points.len(), base.len());
+        assert!(points.iter().zip(base).any(|(painted, base)| {
+            (painted.x - (center.x + base.x)).abs() > 0.05
+                || (painted.y - (center.y + base.y)).abs() > 0.05
+        }));
+    }
+}
