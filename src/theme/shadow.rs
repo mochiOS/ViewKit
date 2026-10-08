@@ -57,7 +57,10 @@ pub struct ShadowTokens {
 
 impl ShadowTokens {
     pub const DEFAULT: Self = Self {
-        card: ShadowSet::single(Shadow::new(Color::rgba(0, 0, 0, 4), 0.0, 2.0, 8.0, 0.0)),
+        card: ShadowSet::double(
+            Shadow::new(Color::rgba(0, 0, 0, 14), 0.0, 1.0, 2.0, 0.0),
+            Shadow::new(Color::rgba(0, 0, 0, 8), 0.0, 3.0, 10.0, 0.0),
+        ),
 
         floating: ShadowSet::double(
             Shadow::new(Color::rgba(0, 0, 0, 31), 0.0, 8.0, 24.0, 0.0),

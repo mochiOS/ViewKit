@@ -275,7 +275,7 @@ mod tests {
         assert!(display_list.commands().iter().any(|command| matches!(
             command,
             DrawCommand::DrawSvg { command }
-                if command.bounds == Rect::new(240.0, 48.0, 10.0, 10.0)
+                if command.bounds == Rect::new(240.0, 48.0, 8.0, 8.0)
         )));
         let corner_index = display_list
             .commands()
@@ -284,7 +284,7 @@ mod tests {
                 matches!(
                     command,
                     DrawCommand::DrawSvg { command }
-                        if command.bounds == Rect::new(240.0, 48.0, 10.0, 10.0)
+                        if command.bounds == Rect::new(240.0, 48.0, 8.0, 8.0)
                 )
             })
             .expect("inner corner");

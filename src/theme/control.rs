@@ -55,42 +55,29 @@ pub struct ButtonTokens {
 impl ButtonTokens {
     pub const fn from_colors(colors: ColorTokens, dark: bool) -> Self {
         let transparent = Color::TRANSPARENT;
-        // `Primary` is the neutral, high-emphasis action. Accent-colored actions
-        // use the separate `accent` palette. Keeping these roles distinct makes
-        // the hierarchy predictable when an application changes its accent.
-        let primary_rest = if dark {
-            Color::WHITE
-        } else {
-            Color::from_rgb_hex(0x303236)
-        };
-        let primary_hover = if dark {
-            Color::from_rgb_hex(0xe9ebef)
-        } else {
-            Color::from_rgb_hex(0x202226)
-        };
-        let primary_pressed = if dark {
-            Color::from_rgb_hex(0xd1d4da)
-        } else {
-            Color::BLACK
-        };
-        let primary_foreground = if dark { Color::BLACK } else { Color::WHITE };
+        // Primary actions use the application accent so they remain immediately
+        // identifiable without adding extra weight or decoration.
+        let primary_rest = colors.accent;
+        let primary_hover = colors.accent_hovered;
+        let primary_pressed = colors.accent_pressed;
+        let primary_foreground = Color::WHITE;
         let ghost_hover = colors.text_primary.with_alpha(if dark { 24 } else { 14 });
         let ghost_pressed = colors.text_primary.with_alpha(if dark { 40 } else { 28 });
 
         Self {
             standard: ButtonPalette {
                 rest: ControlAppearance {
-                    background: colors.surface,
+                    background: colors.surface_subtle,
                     border: colors.border,
                     foreground: colors.text_primary,
                 },
                 hovered: ControlAppearance {
-                    background: colors.surface_subtle,
+                    background: colors.surface_muted,
                     border: colors.border_strong,
                     foreground: colors.text_primary,
                 },
                 pressed: ControlAppearance {
-                    background: colors.surface_muted,
+                    background: colors.border,
                     border: colors.border_strong,
                     foreground: colors.text_primary,
                 },
@@ -130,12 +117,12 @@ impl ButtonTokens {
                 colors.destructive,
                 Color::WHITE,
             ),
-            horizontal_padding: 18.0,
+            horizontal_padding: 14.0,
             height: 32.0,
-            radius: CornerRadius::Medium,
+            radius: CornerRadius::Small,
             stroke_width: FigmaTokens::SHAPE.stroke_default,
             focus_ring: colors.focus_ring,
-            focus_ring_width: 3.0,
+            focus_ring_width: 2.0,
             disabled_opacity: 0.42,
         }
     }
@@ -172,7 +159,7 @@ impl TextFieldTokens {
         Self {
             background: colors.surface,
             disabled_background: colors.surface_subtle,
-            border: colors.border_strong,
+            border: colors.border,
             hovered_border: colors.text_secondary,
             focused_border: colors.accent,
             invalid_border: colors.destructive,
@@ -187,7 +174,7 @@ impl TextFieldTokens {
             min_width: 100.0,
             radius: CornerRadius::Small,
             stroke_width: FigmaTokens::SHAPE.stroke_default,
-            focus_ring_width: 3.0,
+            focus_ring_width: 2.0,
             selection_radius: 3.0,
             caret_width: 2.0,
         }
@@ -361,10 +348,10 @@ impl SliderTokens {
             knob_border: colors.border,
             hovered_knob_border: colors.border_strong,
             knob_radius: CornerRadius::ExtraLarge,
-            focus_ring: colors.border_strong,
+            focus_ring: colors.focus_ring,
             disabled_opacity: 0.45,
             stroke_width: FigmaTokens::SHAPE.stroke_default,
-            focus_ring_width: 3.0,
+            focus_ring_width: 2.0,
         }
     }
 }
@@ -430,7 +417,7 @@ pub struct PickerTokens {
 impl PickerTokens {
     pub const fn from_colors(colors: ColorTokens) -> Self {
         Self {
-            background: colors.surface,
+            background: colors.elevated_surface,
             hovered_background: colors.surface_subtle,
             border: colors.border,
             hovered_border: colors.border_strong,
@@ -609,7 +596,7 @@ impl CardTokens {
             padding: FigmaTokens::SPACING.space_16,
             compact_padding: FigmaTokens::SPACING.space_8,
             radius: CornerRadius::Card,
-            shadow: ShadowStyle::Card,
+            shadow: ShadowStyle::None,
             stroke_width: FigmaTokens::SHAPE.stroke_default,
         }
     }
@@ -746,13 +733,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn primary_buttons_keep_readable_neutral_contrast_in_both_themes() {
+    fn primary_buttons_use_the_accent_with_readable_contrast() {
         let light = ButtonTokens::from_colors(super::super::theme::Theme::LIGHT.colors, false);
         let dark = ButtonTokens::from_colors(super::super::theme::Theme::DARK.colors, true);
 
+        assert_eq!(
+            light.primary.rest.background,
+            super::super::theme::Theme::LIGHT.colors.accent
+        );
         assert_eq!(light.primary.rest.foreground, Color::WHITE);
-        assert_eq!(dark.primary.rest.background, Color::WHITE);
-        assert_eq!(dark.primary.rest.foreground, Color::BLACK);
+        assert_eq!(
+            dark.primary.rest.background,
+            super::super::theme::Theme::DARK.colors.accent
+        );
+        assert_eq!(dark.primary.rest.foreground, Color::WHITE);
     }
 
     #[test]
