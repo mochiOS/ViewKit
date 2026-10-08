@@ -202,7 +202,7 @@ impl Switch {
                 key: crate::platform::Key::Enter | crate::platform::Key::Space,
                 ..
             } if self.interaction.is_focused() => {
-                self.checked.set(!self.checked.get());
+                self.start_toggle();
                 context.request_redraw_in(bounds.expanded(16.0));
                 EventResult::Consumed
             }
@@ -332,31 +332,21 @@ impl Switch {
                         drag.drag_offset_x = 0.0;
                         drag.drag_position = None;
 
-                        if was_dragging {
-                            let target = if final_position >= 0.5 { 1.0 } else { 0.0 };
-
-                            drag.settle_animation = Some(SwitchPositionAnimation {
-                                from: final_position,
-                                to: target,
-                                started_at: Instant::now(),
-                            });
-                        } else {
-                            drag.settle_animation = None;
-                        }
-
-                        Some((was_dragging, final_position >= 0.5))
+                        Some((was_dragging, final_position))
                     }
                 };
 
-                let Some((was_dragging, _drag_checked)) = release else {
+                let Some((was_dragging, final_position)) = release else {
                     return EventResult::Ignored;
                 };
 
                 self.thumb_shape.moved(*position);
                 self.thumb_shape.end();
 
-                if !was_dragging && bounds.contains(*position) {
-                    self.checked.set(!self.checked.get());
+                if was_dragging {
+                    self.start_settle(final_position, final_position >= 0.5);
+                } else if bounds.contains(*position) {
+                    self.start_toggle();
                 }
 
                 context.request_redraw_in(bounds.expanded(16.0));
@@ -398,6 +388,8 @@ impl Switch {
                         started_at: Instant::now(),
                     });
 
+                    self.checked.set_without_notification(target >= 0.5);
+
                     position
                 };
 
@@ -410,6 +402,22 @@ impl Switch {
 
             _ => EventResult::Ignored,
         }
+    }
+}
+
+impl Switch {
+    fn start_toggle(&self) {
+        let from = bool_position(self.checked.get());
+        self.start_settle(from, from < 0.5);
+    }
+
+    fn start_settle(&self, from: f32, target: bool) {
+        self.checked.set_without_notification(target);
+        self.drag.inner.borrow_mut().settle_animation = Some(SwitchPositionAnimation {
+            from,
+            to: bool_position(target),
+            started_at: Instant::now(),
+        });
     }
 }
 

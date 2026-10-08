@@ -18,6 +18,7 @@ struct RangeInteraction {
     focused: bool,
     dragging: Option<usize>,
     active_thumb: usize,
+    pending_commit: Option<usize>,
 }
 
 /// A two-thumb range selector whose values follow input immediately while
@@ -285,6 +286,17 @@ impl View for RangeSlider {
             }
             self.shape(index).paint(thumb, radius, color, context);
         }
+        let pending_commit = self.interaction.borrow().pending_commit;
+        if let Some(thumb) = pending_commit
+            && !self.shape(thumb).is_animating()
+        {
+            self.interaction.borrow_mut().pending_commit = None;
+            if thumb == 0 {
+                self.lower.commit();
+            } else {
+                self.upper.commit();
+            }
+        }
     }
 
     fn handle_event(
@@ -316,6 +328,7 @@ impl View for RangeSlider {
                 let mut interaction = self.interaction.borrow_mut();
                 interaction.dragging = Some(thumb);
                 interaction.active_thumb = thumb;
+                interaction.pending_commit = None;
                 drop(interaction);
                 self.set_thumb(thumb, self.value_at(track, position.x));
                 self.shape(thumb).begin(*position);
@@ -344,11 +357,7 @@ impl View for RangeSlider {
                 self.set_thumb(thumb, self.value_at(track, position.x));
                 self.shape(thumb).moved(*position);
                 self.shape(thumb).end();
-                if thumb == 0 {
-                    self.lower.commit();
-                } else {
-                    self.upper.commit();
-                }
+                self.interaction.borrow_mut().pending_commit = Some(thumb);
                 context.request_redraw_in(bounds.expanded(20.0));
                 EventResult::Consumed
             }
@@ -386,6 +395,7 @@ impl View for RangeSlider {
             ViewEvent::FocusChanged { focused: false } => {
                 if let Some(thumb) = self.interaction.borrow_mut().dragging.take() {
                     self.shape(thumb).end();
+                    self.interaction.borrow_mut().pending_commit = Some(thumb);
                 }
                 self.interaction.borrow_mut().focused = false;
                 EventResult::Ignored

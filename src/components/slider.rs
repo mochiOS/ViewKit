@@ -20,6 +20,7 @@ struct SliderInteractionInner {
     focused: bool,
     enabled: bool,
     drag_offset_x: f32,
+    pending_commit: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -72,6 +73,7 @@ impl SliderInteractionState {
         inner.dragging = false;
         inner.focused = false;
         inner.drag_offset_x = 0.0;
+        inner.pending_commit = false;
     }
 
     fn set_enabled(&self, enabled: bool) -> bool {
@@ -86,6 +88,7 @@ impl SliderInteractionState {
             inner.dragging = false;
             inner.focused = false;
             inner.drag_offset_x = 0.0;
+            inner.pending_commit = false;
         }
 
         changed
@@ -483,19 +486,29 @@ impl View for Slider {
 
         self.thumb_shape
             .paint(knob_bounds, knob_radius, knob_color, context);
-        Rectangle::new()
-            .color(RectangleColor::Custom(Color::TRANSPARENT))
-            .radius(context.theme.slider.knob_radius)
-            .border(super::BorderStyle::custom(
-                if hovered {
-                    context.theme.slider.hovered_knob_border
-                } else {
-                    context.theme.slider.knob_border
-                },
-                context.theme.slider.stroke_width,
-            ))
-            .shadow(knob_shadow)
-            .paint(knob_bounds, context);
+        if !self.thumb_shape.is_animating() {
+            Rectangle::new()
+                .color(RectangleColor::Custom(Color::TRANSPARENT))
+                .radius(context.theme.slider.knob_radius)
+                .border(super::BorderStyle::custom(
+                    if hovered {
+                        context.theme.slider.hovered_knob_border
+                    } else {
+                        context.theme.slider.knob_border
+                    },
+                    context.theme.slider.stroke_width,
+                ))
+                .shadow(knob_shadow)
+                .paint(knob_bounds, context);
+
+            let pending_commit = {
+                let mut interaction = self.interaction.inner.borrow_mut();
+                std::mem::take(&mut interaction.pending_commit)
+            };
+            if pending_commit {
+                self.value.commit();
+            }
+        }
     }
 
     fn handle_event(
@@ -625,6 +638,7 @@ impl View for Slider {
                     inner.hovered = true;
                     inner.dragging = true;
                     inner.drag_offset_x = drag_offset_x;
+                    inner.pending_commit = false;
                 }
 
                 self.thumb_shape.begin(*position);
@@ -652,6 +666,7 @@ impl View for Slider {
                     inner.dragging = false;
                     inner.drag_offset_x = 0.0;
                     inner.hovered = hit_bounds.contains(*position);
+                    inner.pending_commit = was_dragging;
 
                     (was_dragging, drag_offset_x)
                 };
@@ -663,8 +678,6 @@ impl View for Slider {
                 self.update_from_pointer(bounds, position.x, drag_offset_x, metrics);
                 self.thumb_shape.moved(*position);
                 self.thumb_shape.end();
-
-                self.value.commit();
 
                 context.request_redraw_in(bounds.expanded(16.0));
 
@@ -698,12 +711,12 @@ impl View for Slider {
                     inner.hovered = false;
                     inner.dragging = false;
                     inner.focused = false;
+                    inner.pending_commit |= was_dragging;
 
                     was_dragging
                 };
 
                 if was_dragging {
-                    self.value.commit();
                     self.thumb_shape.end();
                 }
 
