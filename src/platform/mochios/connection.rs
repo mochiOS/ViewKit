@@ -6,9 +6,8 @@ pub(super) fn syscall_result<T>(result: syscall::SysResult<T>) -> Result<T, Moch
 }
 
 pub(super) fn perf_log(line: &str) {
-    let _ = syscall::call3(
-        syscall::SyscallNumber::Write,
-        2,
+    let _ = syscall::call2(
+        syscall::SyscallNumber::DebugWrite,
         line.as_ptr() as u64,
         line.len() as u64,
     );
