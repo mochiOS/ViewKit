@@ -7,7 +7,7 @@ use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 use crate::components::{BorderStyle, Text};
 use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
-use crate::geometry::{Rect, Size};
+use crate::geometry::{Point, Rect, Size};
 use crate::layout::{IntoStackChild, StackChild};
 use crate::platform::{Key, PointerButton};
 use crate::theme::{
@@ -16,6 +16,7 @@ use crate::theme::{
 use crate::typography::{TextAlignment, TextRole};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
+use super::omochi_shape::{OmochiPreset, OmochiShape};
 use super::{Rectangle, RectangleColor, ZStackAlignment};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -199,6 +200,7 @@ struct ButtonInteractionInner {
 #[derive(Clone)]
 pub struct ButtonInteractionState {
     inner: Rc<RefCell<ButtonInteractionInner>>,
+    omochi: OmochiShape,
 }
 
 impl Default for ButtonInteractionState {
@@ -209,6 +211,7 @@ impl Default for ButtonInteractionState {
 
                 ..ButtonInteractionInner::default()
             })),
+            omochi: OmochiShape::displacement(OmochiPreset::CompactControl),
         }
     }
 }
@@ -252,6 +255,8 @@ impl ButtonInteractionState {
         inner.armed = false;
         inner.pressed = false;
         inner.clicked = false;
+        drop(inner);
+        self.omochi.reset();
     }
 
     fn set_enabled(&self, enabled: bool) -> bool {
@@ -306,6 +311,7 @@ pub struct Button {
     accessibility_checked: Option<bool>,
     accessibility_selected: bool,
     on_click: Option<RefCell<Box<dyn FnMut()>>>,
+    omochi_enabled: bool,
 }
 
 impl Button {
@@ -326,6 +332,7 @@ impl Button {
             accessibility_checked: None,
             accessibility_selected: false,
             on_click: None,
+            omochi_enabled: true,
             intrinsic_label_size: RefCell::new(None),
         }
     }
@@ -415,6 +422,24 @@ impl Button {
         &self.interaction
     }
 
+    /// Creates a regular button with interaction state retained by the caller.
+    /// This keeps omochi recovery continuous when the action rebuilds the view.
+    pub fn with_interaction_state(
+        label: impl Into<String>,
+        interaction: ButtonInteractionState,
+    ) -> Self {
+        let mut button = Self::with_interaction(interaction);
+        button.label = Some(label.into());
+        button.omochi_enabled = true;
+        button
+    }
+
+    /// Enables or disables omochi contour feedback for this button.
+    pub fn omochi(mut self, enabled: bool) -> Self {
+        self.omochi_enabled = enabled;
+        self
+    }
+
     pub(crate) fn with_interaction(interaction: ButtonInteractionState) -> Self {
         Self {
             interaction,
@@ -432,6 +457,7 @@ impl Button {
             accessibility_checked: None,
             accessibility_selected: false,
             on_click: None,
+            omochi_enabled: false,
             intrinsic_label_size: RefCell::new(None),
         }
     }
@@ -480,6 +506,13 @@ impl Button {
             | ZStackAlignment::BottomTrailing => 1.0,
         }
     }
+
+    fn local_point(bounds: Rect, point: Point) -> Point {
+        Point::new(
+            point.x - bounds.origin.x - bounds.size.width / 2.0,
+            point.y - bounds.origin.y - bounds.size.height / 2.0,
+        )
+    }
 }
 
 impl View for Button {
@@ -513,6 +546,13 @@ impl View for Button {
 
         if visual_state == ControlVisualState::Disabled {
             appearance = appearance.with_opacity(context.theme.button.disabled_opacity);
+        }
+
+        if self.omochi_enabled
+            && self.interaction.omochi.is_animating()
+            && appearance.background.alpha < 64
+        {
+            appearance.background = context.theme.colors.surface_muted;
         }
 
         let shadow = if visual_state == ControlVisualState::Pressed {
@@ -554,15 +594,23 @@ impl View for Button {
         }
         drop(interaction);
 
-        Rectangle::new()
-            .color(RectangleColor::Custom(appearance.background))
-            .radius(radius)
-            .shadow(shadow)
-            .border(BorderStyle::custom(
-                appearance.border,
-                context.theme.button.stroke_width,
-            ))
-            .paint(bounds, context);
+        if self.omochi_enabled && self.interaction.omochi.is_animating() {
+            let resolved_radius =
+                radius.resolve(&context.theme.radius, bounds.size.width, bounds.size.height);
+            self.interaction
+                .omochi
+                .paint(bounds, resolved_radius, appearance.background, context);
+        } else {
+            Rectangle::new()
+                .color(RectangleColor::Custom(appearance.background))
+                .radius(radius)
+                .shadow(shadow)
+                .border(BorderStyle::custom(
+                    appearance.border,
+                    context.theme.button.stroke_width,
+                ))
+                .paint(bounds, context);
+        }
 
         if let Some(label) = self.label.as_ref() {
             let text_height = (label_style.line_height * context.text_measurer.font_scale())
@@ -617,7 +665,40 @@ impl View for Button {
         }
 
         if !self.enabled {
+            if self.interaction.omochi.is_animating() {
+                self.interaction.omochi.reset();
+            }
             return EventResult::Ignored;
+        }
+
+        if self.omochi_enabled {
+            match event {
+                ViewEvent::PointerPressed {
+                    position,
+                    button: PointerButton::Primary,
+                } if bounds.contains(*position) => self
+                    .interaction
+                    .omochi
+                    .begin(Self::local_point(bounds, *position)),
+                ViewEvent::PointerMoved { position } if self.interaction.omochi.is_active() => self
+                    .interaction
+                    .omochi
+                    .moved(Self::local_point(bounds, *position)),
+                ViewEvent::PointerReleased {
+                    button: PointerButton::Primary,
+                    ..
+                }
+                | ViewEvent::PointerLeft
+                | ViewEvent::FocusChanged { focused: false }
+                    if self.interaction.omochi.is_active() =>
+                {
+                    self.interaction.omochi.end();
+                }
+                _ => {}
+            }
+            if self.interaction.omochi.is_animating() {
+                context.request_redraw_in(bounds.expanded(24.0));
+            }
         }
 
         match event {
@@ -829,6 +910,8 @@ impl View for Button {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::draw_command::DisplayList;
+    use crate::typography::{TextMeasurer, Typography};
 
     #[test]
     fn semantic_sizes_follow_layout_tokens() {
@@ -860,6 +943,67 @@ mod tests {
         assert_eq!(
             ButtonSize::Large.icon_size(&theme),
             theme.layout.stepper_icon_size
+        );
+    }
+
+    #[test]
+    fn retained_button_paints_omochi_contour_after_click_is_consumed() {
+        let interaction = ButtonInteractionState::new();
+        let button = Button::with_interaction_state("Continue", interaction.clone());
+        let bounds = Rect::new(40.0, 30.0, 104.0, 28.0);
+        let mut text_measurer = TextMeasurer::new();
+        let mut event_context =
+            EventContext::new(&Theme::LIGHT, &Typography::DEFAULT, &mut text_measurer);
+
+        assert_eq!(
+            button.handle_event(
+                bounds,
+                &ViewEvent::PointerPressed {
+                    position: Point::new(130.0, 44.0),
+                    button: PointerButton::Primary,
+                },
+                &mut event_context,
+            ),
+            EventResult::Consumed
+        );
+        assert_eq!(
+            button.handle_event(
+                bounds,
+                &ViewEvent::PointerMoved {
+                    position: Point::new(142.0, 44.0),
+                },
+                &mut event_context,
+            ),
+            EventResult::Consumed
+        );
+        assert_eq!(
+            button.handle_event(
+                bounds,
+                &ViewEvent::PointerReleased {
+                    position: Point::new(142.0, 44.0),
+                    button: PointerButton::Primary,
+                },
+                &mut event_context,
+            ),
+            EventResult::Consumed
+        );
+        assert!(interaction.take_clicked());
+
+        let rebuilt = Button::with_interaction_state("Continue", interaction);
+        let mut display_list = DisplayList::new();
+        let mut paint_context = PaintContext::new(
+            &mut display_list,
+            &Theme::LIGHT,
+            &Typography::DEFAULT,
+            &mut text_measurer,
+        );
+        rebuilt.paint(bounds, &mut paint_context);
+
+        assert!(
+            display_list
+                .commands()
+                .iter()
+                .any(|command| matches!(command, DrawCommand::FillPolygon { .. }))
         );
     }
 }
