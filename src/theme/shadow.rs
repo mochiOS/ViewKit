@@ -1,4 +1,4 @@
-//! 影！！！影は薄くねえぞ！！！
+//! Shared elevation shadows for controls, surfaces, and windows.
 
 use super::Color;
 
@@ -58,18 +58,18 @@ pub struct ShadowTokens {
 impl ShadowTokens {
     pub const DEFAULT: Self = Self {
         card: ShadowSet::double(
-            Shadow::new(Color::rgba(0, 0, 0, 14), 0.0, 1.0, 2.0, 0.0),
-            Shadow::new(Color::rgba(0, 0, 0, 8), 0.0, 3.0, 10.0, 0.0),
+            Shadow::new(Color::rgba(0, 0, 0, 12), 0.0, 1.0, 2.0, 0.0),
+            Shadow::new(Color::rgba(0, 0, 0, 5), 0.0, 2.0, 5.0, 0.0),
         ),
 
         floating: ShadowSet::double(
-            Shadow::new(Color::rgba(0, 0, 0, 31), 0.0, 8.0, 24.0, 0.0),
-            Shadow::new(Color::rgba(0, 0, 0, 31), 0.0, 24.0, 72.0, 0.0),
+            Shadow::new(Color::rgba(0, 0, 0, 22), 0.0, 4.0, 12.0, 0.0),
+            Shadow::new(Color::rgba(0, 0, 0, 12), 0.0, 10.0, 28.0, 0.0),
         ),
 
         window: ShadowSet::double(
-            Shadow::new(Color::rgba(0, 0, 0, 20), 0.0, 2.0, 6.0, 0.0),
-            Shadow::new(Color::rgba(0, 0, 0, 43), 0.0, 24.0, 72.0, 0.0),
+            Shadow::new(Color::rgba(0, 0, 0, 16), 0.0, 2.0, 5.0, 0.0),
+            Shadow::new(Color::rgba(0, 0, 0, 24), 0.0, 10.0, 28.0, 0.0),
         ),
     };
 }
@@ -99,5 +99,34 @@ impl ShadowStyle {
 
             Self::Custom(shadow_set) => Some(shadow_set),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ShadowTokens;
+
+    #[test]
+    fn shared_elevation_shadows_use_compact_blur_radii() {
+        let tokens = ShadowTokens::DEFAULT;
+        let card = tokens.card.layers.into_iter().flatten().collect::<Vec<_>>();
+        let floating = tokens
+            .floating
+            .layers
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+        let window = tokens
+            .window
+            .layers
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+
+        assert!(card.iter().all(|shadow| shadow.blur_radius <= 5.0));
+        assert!(floating.iter().all(|shadow| shadow.blur_radius <= 28.0));
+        assert!(window.iter().all(|shadow| shadow.blur_radius <= 28.0));
+        assert!(floating.iter().all(|shadow| shadow.color.alpha <= 22));
+        assert!(window.iter().all(|shadow| shadow.color.alpha <= 24));
     }
 }
