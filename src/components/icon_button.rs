@@ -1,8 +1,17 @@
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
+use crate::draw_command::DrawCommand;
+use crate::event::{EventContext, EventResult, ViewEvent};
+use crate::geometry::{Point, Rect, Size};
 use crate::layout::ViewExt;
-use crate::theme::{ShadowStyle, Theme};
+use crate::omochi::{
+    DEFAULT_BURGERS, DEFAULT_MATERIAL, OmochiMaterial, OmochiSurface, PullMode, rounded_rect_points,
+};
+use crate::platform::PointerButton;
+use crate::theme::{Color, ControlAppearance, ControlVisualState, ShadowStyle, Theme};
+use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 use super::{
     Button, ButtonInteractionState, ButtonSize, ButtonStyle, Icon, SymbolName, ZStackAlignment,
@@ -23,6 +32,7 @@ pub struct IconButton {
     size: Option<ButtonSize>,
     enabled: bool,
     interaction: ButtonInteractionState,
+    surface: OmochiSurface,
     on_click: Option<Callback>,
     accessibility_label: Option<String>,
 }
@@ -35,6 +45,11 @@ impl IconButton {
             size: None,
             enabled: true,
             interaction: ButtonInteractionState::new(),
+            surface: OmochiSurface::new(
+                icon_button_material(),
+                DEFAULT_BURGERS,
+                PullMode::Displacement,
+            ),
             on_click: None,
             accessibility_label: None,
         }
@@ -69,23 +84,53 @@ impl IconButton {
         self
     }
 
-    pub(crate) fn button(&self, theme: &Theme) -> Button {
-        let (style, icon_color, default_size) = match self.tone {
-            IconButtonTone::Plain => {
-                let icon_color = if self.enabled {
-                    theme.button.ghost.rest.foreground
-                } else {
-                    theme.colors.text_disabled
-                };
+    fn resolved_size(&self) -> ButtonSize {
+        self.size.unwrap_or(match self.tone {
+            IconButtonTone::Plain => ButtonSize::Small,
+            IconButtonTone::Accent => ButtonSize::Medium,
+        })
+    }
 
-                (ButtonStyle::Ghost, icon_color, ButtonSize::Small)
-            }
-            IconButtonTone::Accent => {
-                let icon_color = theme.button.accent.rest.foreground;
-                (ButtonStyle::Accent, icon_color, ButtonSize::Medium)
-            }
+    fn visual_state(&self) -> ControlVisualState {
+        if !self.enabled {
+            ControlVisualState::Disabled
+        } else if self.interaction.is_pressed() {
+            ControlVisualState::Pressed
+        } else if self.interaction.is_hovered() {
+            ControlVisualState::Hovered
+        } else if self.interaction.is_focused() {
+            ControlVisualState::Focused
+        } else {
+            ControlVisualState::Rest
+        }
+    }
+
+    fn appearance(&self, theme: &Theme) -> ControlAppearance {
+        let state = self.visual_state();
+        let palette = match self.tone {
+            IconButtonTone::Plain => theme.button.ghost,
+            IconButtonTone::Accent => theme.button.accent,
         };
-        let size = self.size.unwrap_or(default_size);
+        let mut appearance = palette.resolve(state);
+
+        if state == ControlVisualState::Disabled {
+            appearance.background =
+                color_with_opacity(appearance.background, theme.button.disabled_opacity);
+            appearance.border =
+                color_with_opacity(appearance.border, theme.button.disabled_opacity);
+            appearance.foreground = match self.tone {
+                IconButtonTone::Plain => theme.colors.text_disabled,
+                IconButtonTone::Accent => {
+                    color_with_opacity(appearance.foreground, theme.button.disabled_opacity)
+                }
+            };
+        }
+
+        appearance
+    }
+
+    fn button(&self, theme: &Theme, icon_color: Color) -> Button {
+        let size = self.resolved_size();
         let control_size = size.height(theme);
         let icon_size = self.size.map_or_else(
             || self.icon.control_size(theme.layout),
@@ -93,7 +138,13 @@ impl IconButton {
         );
 
         let mut button = Button::with_interaction(self.interaction.clone())
-            .style(style)
+            .style(ButtonStyle::Custom {
+                background: Color::TRANSPARENT,
+                hovered_background: Color::TRANSPARENT,
+                border: Color::TRANSPARENT,
+                hovered_border: Color::TRANSPARENT,
+                foreground: icon_color,
+            })
             .size(size)
             .radius(theme.button.radius)
             .shadow(ShadowStyle::None)
@@ -116,28 +167,139 @@ impl IconButton {
 
         button
     }
+
+    fn local_point(bounds: Rect, point: Point) -> Point {
+        Point::new(
+            point.x - bounds.origin.x - bounds.size.width / 2.0,
+            point.y - bounds.origin.y - bounds.size.height / 2.0,
+        )
+    }
 }
 
-impl crate::view::View for IconButton {
-    fn measure(
-        &self,
-        constraints: crate::view::Constraints,
-        context: &mut crate::view::MeasureContext<'_>,
-    ) -> crate::geometry::Size {
-        self.button(context.theme).measure(constraints, context)
+impl View for IconButton {
+    fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
+        let appearance = self.appearance(context.theme);
+
+        self.button(context.theme, appearance.foreground)
+            .measure(constraints, context)
     }
 
-    fn paint(&self, bounds: crate::geometry::Rect, context: &mut crate::view::PaintContext<'_>) {
-        self.button(context.theme).paint(bounds, context);
+    fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
+        if bounds.size.width <= 0.0 || bounds.size.height <= 0.0 {
+            return;
+        }
+
+        if !self.enabled && self.surface.is_animating() {
+            self.surface.reset();
+        }
+
+        let now = Instant::now();
+        let appearance = self.appearance(context.theme);
+        let radius = context.theme.button.radius.resolve(
+            &context.theme.radius,
+            bounds.size.width,
+            bounds.size.height,
+        );
+        let base_points = rounded_rect_points(bounds.size.width, bounds.size.height, radius, 10);
+        let sample = self.surface.sample(&base_points, now);
+        let center = Point::new(
+            bounds.origin.x + bounds.size.width / 2.0,
+            bounds.origin.y + bounds.size.height / 2.0,
+        );
+        let points = sample
+            .points
+            .into_iter()
+            .map(|point| Point::new(center.x + point.x, center.y + point.y))
+            .collect();
+
+        context.display_list.push(DrawCommand::FillPolygon {
+            points,
+            color: appearance.background,
+        });
+
+        self.button(context.theme, appearance.foreground)
+            .paint(bounds, context);
+
+        if sample.animating {
+            context.request_redraw_in_at(bounds.expanded(24.0), now + Duration::from_millis(8));
+        }
     }
 
     fn handle_event(
         &self,
-        bounds: crate::geometry::Rect,
-        event: &crate::event::ViewEvent,
-        context: &mut crate::event::EventContext<'_>,
-    ) -> crate::event::EventResult {
-        self.button(context.theme)
-            .handle_event(bounds, event, context)
+        bounds: Rect,
+        event: &ViewEvent,
+        context: &mut EventContext<'_>,
+    ) -> EventResult {
+        if !self.enabled {
+            if self.surface.is_animating() {
+                self.surface.reset();
+            }
+
+            return self
+                .button(context.theme, self.appearance(context.theme).foreground)
+                .handle_event(bounds, event, context);
+        }
+
+        match event {
+            ViewEvent::PointerPressed {
+                position,
+                button: PointerButton::Primary,
+            } if bounds.contains(*position) => {
+                self.surface
+                    .begin_press(Self::local_point(bounds, *position), Instant::now());
+            }
+            ViewEvent::PointerMoved { position } if self.surface.is_active() => {
+                self.surface
+                    .move_press(Self::local_point(bounds, *position), Instant::now());
+            }
+            ViewEvent::PointerReleased {
+                button: PointerButton::Primary,
+                ..
+            } if self.surface.is_active() => {
+                self.surface.end_press(Instant::now());
+            }
+            ViewEvent::PointerLeft if self.surface.is_active() => {
+                self.surface.end_press(Instant::now());
+            }
+            _ => {}
+        }
+
+        let appearance = self.appearance(context.theme);
+        let result = self
+            .button(context.theme, appearance.foreground)
+            .handle_event(bounds, event, context);
+
+        if self.surface.is_animating() {
+            context.request_redraw_in(bounds.expanded(24.0));
+        }
+
+        result
     }
+}
+
+fn icon_button_material() -> OmochiMaterial {
+    let mut material = DEFAULT_MATERIAL;
+
+    material.max_pull = 16.0;
+    material.press_depth = 3.4;
+    material.press_radius = 33.0;
+    material.drag_radius = 42.0;
+    material.neck_backshift_ratio = 0.22;
+    material.tip_long_radius = 12.0;
+    material.tip_cross_radius = 21.0;
+    material.press_release_start = 0.6;
+    material.press_release_end = 4.5;
+
+    material
+}
+
+fn color_with_opacity(color: Color, opacity: f32) -> Color {
+    let opacity = if opacity.is_finite() {
+        opacity.clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
+
+    color.with_alpha((color.alpha as f32 * opacity).round() as u8)
 }
