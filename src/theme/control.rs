@@ -145,7 +145,7 @@ impl ButtonTokens {
             },
             horizontal_padding: 14.0,
             height: 30.0,
-            radius: CornerRadius::Small,
+            radius: CornerRadius::Custom(9.0),
             stroke_width: FigmaTokens::SHAPE.stroke_default,
             focus_ring: colors.focus_ring,
             focus_ring_width: 2.0,
@@ -492,6 +492,7 @@ pub struct MenuTokens {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TabsTokens {
     pub background: Color,
+    pub strip_background: Color,
     pub hovered_background: Color,
     pub selected_background: Color,
     pub foreground: Color,
@@ -500,20 +501,27 @@ pub struct TabsTokens {
     pub horizontal_padding: f32,
     pub vertical_padding: f32,
     pub radius: CornerRadius,
+    pub height: f32,
+    pub indicator_inset: f32,
+    pub tongue_depth: f32,
 }
 
 impl TabsTokens {
     pub const fn from_colors(colors: ColorTokens) -> Self {
         Self {
             background: Color::TRANSPARENT,
+            strip_background: colors.surface_muted,
             hovered_background: colors.surface_subtle,
-            selected_background: colors.surface_muted,
+            selected_background: colors.elevated_surface,
             foreground: colors.text_secondary,
             selected_foreground: colors.text_primary,
             disabled_foreground: colors.text_disabled,
             horizontal_padding: FigmaTokens::SPACING.space_8,
             vertical_padding: FigmaTokens::SPACING.space_2,
-            radius: CornerRadius::Small,
+            radius: CornerRadius::Custom(15.0),
+            height: 45.0,
+            indicator_inset: 4.0,
+            tongue_depth: 6.0,
         }
     }
 }

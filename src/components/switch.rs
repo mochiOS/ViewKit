@@ -34,11 +34,12 @@ impl SwitchMetrics {
         let layout = theme.layout;
         let maximum_width = (layout.switch_track_width - layout.switch_knob_inset * 2.0).max(1.0);
         let maximum_height = (layout.switch_track_height - layout.switch_knob_inset * 2.0).max(1.0);
-        let thumb = layout.control_thumb_size(false);
-        let pressed_thumb = layout.control_thumb_size(true);
-        let knob_height = thumb.height.min(maximum_height);
-        let knob_width = thumb.width.min(maximum_width);
-        let pressed_knob_width = pressed_thumb.width.max(knob_width).min(maximum_width);
+        let knob_height = layout.switch_knob_height.min(maximum_height);
+        let knob_width = layout.switch_knob_width.min(maximum_width);
+        let pressed_knob_width = layout
+            .switch_pressed_knob_width
+            .max(knob_width)
+            .min(maximum_width);
         Self {
             track_width: layout.switch_track_width,
             track_height: layout.switch_track_height,
@@ -780,11 +781,11 @@ mod tests {
     }
 
     #[test]
-    fn thumb_width_is_derived_from_theme_height_and_aspect_ratio() {
+    fn thumb_uses_switch_specific_geometry_tokens() {
         let mut theme = Theme::LIGHT;
-        theme.layout.control_thumb_height = 16.0;
-        theme.layout.control_thumb_aspect_ratio = 1.25;
-        theme.layout.control_pressed_thumb_aspect_ratio = 1.5;
+        theme.layout.switch_knob_height = 16.0;
+        theme.layout.switch_knob_width = 20.0;
+        theme.layout.switch_pressed_knob_width = 24.0;
 
         let metrics = SwitchMetrics::from_theme(&theme);
         assert_eq!(metrics.knob_height, 16.0);
