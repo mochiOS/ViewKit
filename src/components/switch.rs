@@ -1,3 +1,4 @@
+use super::omochi_shape::{OmochiPreset, OmochiShape};
 use super::{
     Button, ButtonInteractionState, ButtonStyle, HStack, Padding, Rectangle, RectangleColor, Text,
     ZStackAlignment,
@@ -32,8 +33,7 @@ impl SwitchMetrics {
     fn from_theme(theme: &Theme) -> Self {
         let layout = theme.layout;
         let maximum_width = (layout.switch_track_width - layout.switch_knob_inset * 2.0).max(1.0);
-        let maximum_height =
-            (layout.switch_track_height - layout.switch_knob_inset * 2.0).max(1.0);
+        let maximum_height = (layout.switch_track_height - layout.switch_knob_inset * 2.0).max(1.0);
         let thumb = layout.control_thumb_size(false);
         let pressed_thumb = layout.control_thumb_size(true);
         let knob_height = thumb.height.min(maximum_height);
@@ -99,6 +99,7 @@ pub struct Switch {
     interaction: ButtonInteractionState,
     knob_width_animation: Arc<Mutex<KnobWidthAnimationState>>,
     drag: SwitchDragState,
+    thumb_shape: OmochiShape,
 }
 
 impl Switch {
@@ -110,6 +111,7 @@ impl Switch {
             interaction: ButtonInteractionState::new(),
             knob_width_animation: Arc::new(Mutex::new(KnobWidthAnimationState::default())),
             drag: SwitchDragState::default(),
+            thumb_shape: OmochiShape::velocity(OmochiPreset::Thumb),
         }
     }
 
@@ -160,6 +162,7 @@ impl Switch {
                 knob_width_animation: self.knob_width_animation.clone(),
                 drag: self.drag.clone(),
                 checked_binding: self.checked.clone(),
+                thumb_shape: self.thumb_shape.clone(),
             }
             .frame(metrics.track_width, metrics.track_height)
             .flex_shrink(0.0),
@@ -250,6 +253,7 @@ impl Switch {
                 drag.drag_offset_x = drag_offset_x;
                 drag.drag_position = Some(checked_position);
                 drag.settle_animation = None;
+                self.thumb_shape.begin(*position);
 
                 context.request_redraw_in(bounds.expanded(16.0));
 
@@ -285,6 +289,8 @@ impl Switch {
                         ));
                     }
                 }
+
+                self.thumb_shape.moved(*position);
 
                 context.request_redraw_in(bounds.expanded(16.0));
 
@@ -346,6 +352,9 @@ impl Switch {
                     return EventResult::Ignored;
                 };
 
+                self.thumb_shape.moved(*position);
+                self.thumb_shape.end();
+
                 if !was_dragging && bounds.contains(*position) {
                     self.checked.set(!self.checked.get());
                 }
@@ -392,6 +401,8 @@ impl Switch {
                     position
                 };
 
+                self.thumb_shape.end();
+
                 context.request_redraw_in(bounds.expanded(16.0));
 
                 EventResult::Consumed
@@ -408,6 +419,9 @@ impl View for Switch {
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
+        if !self.enabled && self.thumb_shape.is_animating() {
+            self.thumb_shape.reset();
+        }
         self.button(context.theme).paint(bounds, context);
     }
 
@@ -438,6 +452,7 @@ struct SwitchMark {
     knob_width_animation: Arc<Mutex<KnobWidthAnimationState>>,
     drag: SwitchDragState,
     checked_binding: Binding<bool>,
+    thumb_shape: OmochiShape,
 }
 
 impl View for SwitchMark {
@@ -493,8 +508,14 @@ impl View for SwitchMark {
             ShadowStyle::None
         };
 
+        self.thumb_shape.paint(
+            knob_bounds,
+            knob_bounds.size.height / 2.0,
+            knob_color,
+            context,
+        );
         Rectangle::new()
-            .color(RectangleColor::Custom(knob_color))
+            .color(RectangleColor::Custom(Color::TRANSPARENT))
             .radius(CornerRadius::Full)
             .shadow(knob_shadow)
             .paint(knob_bounds, context);
