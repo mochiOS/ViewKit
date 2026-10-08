@@ -401,7 +401,7 @@ impl GpuSceneRenderer {
 
         let inner = offset_polygon(points, -0.5);
         let outer = offset_polygon(points, 0.5);
-        let triangles = triangulate_polygon(&inner);
+        let triangles = triangulate_for_fill(points, &inner);
 
         let white = AtlasRect {
             x: 0,
@@ -1436,6 +1436,83 @@ fn triangulate_polygon(points: &[Point]) -> Vec<[Point; 3]> {
     triangles
 }
 
+fn normalized_polygon(points: &[Point]) -> Vec<Point> {
+    const EPSILON: f32 = 0.00001;
+    let mut normalized = remove_duplicate_points(points, EPSILON);
+    remove_collinear_points(&mut normalized, EPSILON);
+    normalized
+}
+
+fn complete_triangulation(points: &[Point]) -> Option<Vec<[Point; 3]>> {
+    let normalized = normalized_polygon(points);
+    if normalized.len() < 3
+        || polygon_signed_area(&normalized).abs() <= 0.00001
+        || !is_simple_polygon(&normalized)
+    {
+        return None;
+    }
+    let triangles = triangulate_polygon(&normalized);
+    (triangles.len() == normalized.len() - 2).then_some(triangles)
+}
+
+fn is_simple_polygon(points: &[Point]) -> bool {
+    let count = points.len();
+    for first in 0..count {
+        let first_next = (first + 1) % count;
+        for second in (first + 1)..count {
+            let second_next = (second + 1) % count;
+            if first == second
+                || first_next == second
+                || second_next == first
+                || first == 0 && second_next == 0
+            {
+                continue;
+            }
+            if segments_intersect(
+                points[first],
+                points[first_next],
+                points[second],
+                points[second_next],
+            ) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn segments_intersect(a: Point, b: Point, c: Point, d: Point) -> bool {
+    const EPSILON: f32 = 0.00001;
+    let ab_c = cross_product(a, b, c);
+    let ab_d = cross_product(a, b, d);
+    let cd_a = cross_product(c, d, a);
+    let cd_b = cross_product(c, d, b);
+    ab_c * ab_d < -EPSILON && cd_a * cd_b < -EPSILON
+}
+
+fn triangulate_for_fill(points: &[Point], inset: &[Point]) -> Vec<[Point; 3]> {
+    complete_triangulation(inset)
+        .or_else(|| complete_triangulation(points))
+        .unwrap_or_else(|| center_fan(points))
+}
+
+fn center_fan(points: &[Point]) -> Vec<[Point; 3]> {
+    let points = normalized_polygon(points);
+    if points.len() < 3 {
+        return Vec::new();
+    }
+    let center = points.iter().fold(Point::new(0.0, 0.0), |sum, point| {
+        Point::new(sum.x + point.x, sum.y + point.y)
+    });
+    let center = Point::new(
+        center.x / points.len() as f32,
+        center.y / points.len() as f32,
+    );
+    (0..points.len())
+        .map(|index| [center, points[index], points[(index + 1) % points.len()]])
+        .collect()
+}
+
 fn remove_duplicate_points(points: &[Point], epsilon: f32) -> Vec<Point> {
     let epsilon_squared = epsilon * epsilon;
     let mut output = Vec::with_capacity(points.len());
@@ -1580,4 +1657,34 @@ fn edge_outward_normal(start: Point, end: Point, orientation: f32) -> Point {
     }
 
     Point::new(dy / length * orientation, -dx / length * orientation)
+}
+
+#[cfg(test)]
+mod polygon_tests {
+    use super::*;
+    use crate::omochi::rounded_rect_points;
+
+    #[test]
+    fn dense_rounded_contour_is_fully_triangulated() {
+        let points = rounded_rect_points(80.0, 28.0, 8.0, 10);
+        let normalized_count = normalized_polygon(&points).len();
+        let triangles = complete_triangulation(&points).expect("rounded contour");
+        assert_eq!(triangles.len(), normalized_count - 2);
+    }
+
+    #[test]
+    fn invalid_inset_falls_back_to_the_original_contour() {
+        let points = rounded_rect_points(80.0, 28.0, 8.0, 10);
+        let invalid_inset = [
+            Point::new(0.0, 0.0),
+            Point::new(10.0, 10.0),
+            Point::new(0.0, 10.0),
+            Point::new(10.0, 0.0),
+        ];
+        let triangles = triangulate_for_fill(&points, &invalid_inset);
+        assert_eq!(
+            triangles.len(),
+            normalized_polygon(&points).len().saturating_sub(2)
+        );
+    }
 }
