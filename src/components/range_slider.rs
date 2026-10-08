@@ -19,7 +19,6 @@ struct RangeInteraction {
     focused: bool,
     dragging: Option<usize>,
     active_thumb: usize,
-    pending_commit: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -291,7 +290,9 @@ impl View for RangeSlider {
             .paint(fill, context);
         let interaction = *self.interaction.inner.borrow();
         for (index, thumb) in [lower, upper].into_iter().enumerate() {
-            let color = if self.enabled {
+            let color = if self.enabled && self.shape(index).is_animating() {
+                context.theme.slider.hovered_knob
+            } else if self.enabled {
                 context.theme.slider.knob
             } else {
                 context.theme.slider.disabled_knob
@@ -325,17 +326,6 @@ impl View for RangeSlider {
                     .paint(thumb, context);
             }
         }
-        let pending_commit = self.interaction.inner.borrow().pending_commit;
-        if let Some(thumb) = pending_commit
-            && !self.shape(thumb).is_animating()
-        {
-            self.interaction.inner.borrow_mut().pending_commit = None;
-            if thumb == 0 {
-                self.lower.commit();
-            } else {
-                self.upper.commit();
-            }
-        }
     }
 
     fn handle_event(
@@ -367,7 +357,6 @@ impl View for RangeSlider {
                 let mut interaction = self.interaction.inner.borrow_mut();
                 interaction.dragging = Some(thumb);
                 interaction.active_thumb = thumb;
-                interaction.pending_commit = None;
                 drop(interaction);
                 self.set_thumb(thumb, self.value_at(track, position.x));
                 self.shape(thumb).begin(*position);
@@ -396,7 +385,11 @@ impl View for RangeSlider {
                 self.set_thumb(thumb, self.value_at(track, position.x));
                 self.shape(thumb).moved(*position);
                 self.shape(thumb).end();
-                self.interaction.inner.borrow_mut().pending_commit = Some(thumb);
+                if thumb == 0 {
+                    self.lower.commit();
+                } else {
+                    self.upper.commit();
+                }
                 context.request_redraw_in(bounds.expanded(20.0));
                 EventResult::Consumed
             }
@@ -434,7 +427,11 @@ impl View for RangeSlider {
             ViewEvent::FocusChanged { focused: false } => {
                 if let Some(thumb) = self.interaction.inner.borrow_mut().dragging.take() {
                     self.shape(thumb).end();
-                    self.interaction.inner.borrow_mut().pending_commit = Some(thumb);
+                    if thumb == 0 {
+                        self.lower.commit();
+                    } else {
+                        self.upper.commit();
+                    }
                 }
                 self.interaction.inner.borrow_mut().focused = false;
                 EventResult::Ignored
