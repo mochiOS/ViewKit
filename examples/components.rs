@@ -23,16 +23,71 @@ struct ComponentsGallery {
 
 impl ComponentsGallery {
     fn section(title: &str, subtitle: &str, content: impl View + 'static) -> StackChild {
-        Card::new()
-            .content(
+        VStack::new()
+            .alignment(StackAlignment::Stretch)
+            .gap(StackGap::Medium)
+            .child(
+                VStack::new()
+                    .alignment(StackAlignment::Start)
+                    .gap(StackGap::ExtraSmall)
+                    .child(Text::styled(title, TextRole::TitleMedium))
+                    .child(Text::body(subtitle).tone(TextTone::Secondary)),
+            )
+            .child(content)
+            .child(Spacer::new().into_stack_child().height(8.0))
+            .child(Divider::new())
+            .layout()
+    }
+
+    fn omochi_lab(&self) -> StackChild {
+        Self::section(
+            "omochi Interaction Lab",
+            "Press, pull, reverse direction, and release. Values follow immediately; only the contour carries viscosity.",
+            Card::new().content(
                 VStack::new()
                     .alignment(StackAlignment::Stretch)
-                    .gap(StackGap::Medium)
-                    .child(PageHeader::new(title).subtitle(subtitle))
-                    .child(Divider::new())
-                    .child(content),
-            )
-            .layout()
+                    .gap(StackGap::Large)
+                    .child(
+                        HStack::new()
+                            .alignment(StackAlignment::Center)
+                            .gap(StackGap::Large)
+                            .child(
+                                IconButton::new(SymbolName::Plus)
+                                    .tone(IconButtonTone::Accent)
+                                    .accessibility_label("Add"),
+                            )
+                            .child(Switch::new(self.switched.binding()).label("Elastic switch"))
+                            .child(
+                                SegmentedControl::new(self.segment.binding())
+                                    .item(0, "Canvas")
+                                    .item(1, "Layers")
+                                    .item(2, "Inspect"),
+                            ),
+                    )
+                    .child(
+                        Slider::new(self.slider.binding())
+                            .range(0.0..=100.0)
+                            .step(1.0)
+                            .label(format!("Position  {:.0}", self.slider.get())),
+                    )
+                    .child(
+                        RangeSlider::new(self.range_lower.binding(), self.range_upper.binding())
+                            .range(0.0..=100.0)
+                            .step(1.0)
+                            .label(format!(
+                                "Selection  {:.0}–{:.0}",
+                                self.range_lower.get(),
+                                self.range_upper.get()
+                            )),
+                    )
+                    .child(
+                        Tabs::new(self.tab.binding())
+                            .item(0, "Overview")
+                            .item(1, "Motion")
+                            .item(2, "Metrics"),
+                    ),
+            ),
+        )
     }
 
     fn buttons(&self) -> StackChild {
@@ -411,36 +466,22 @@ impl ComponentsGallery {
         let theme_mode = self.theme_mode.get();
         let mut gallery = VStack::new()
             .alignment(StackAlignment::Stretch)
-            .gap(StackGap::Large)
+            .gap(StackGap::ExtraLarge)
             .child(
-                HStack::new()
-                    .alignment(StackAlignment::Center)
-                    .gap(StackGap::Medium)
+                VStack::new()
+                    .alignment(StackAlignment::Start)
+                    .gap(StackGap::ExtraSmall)
+                    .child(Text::styled("Component Gallery", TextRole::TitleLarge))
                     .child(
-                        VStack::new()
-                            .alignment(StackAlignment::Start)
-                            .gap(StackGap::ExtraSmall)
-                            .child(Text::styled(
-                                "ViewKit Component Gallery",
-                                TextRole::TitleLarge,
-                            ))
-                            .child(Text::body(
-                                "omochi design language · live public components",
-                            )),
-                    )
-                    .child(Spacer::new())
-                    .child(
-                        SegmentedControl::new(self.theme_mode.binding())
-                            .item(0, "System")
-                            .item(1, "Light")
-                            .item(2, "Dark")
-                            .accessibility_label("Appearance"),
+                        Text::body("A live inventory of ViewKit’s desktop controls and omochi interactions.")
+                            .tone(TextTone::Secondary),
                     ),
             )
             .child(Text::metadata(format!(
                 "Theme: {}",
                 ["System", "Light", "Dark"][theme_mode.min(2)]
             )))
+            .child(self.omochi_lab())
             .child(self.buttons())
             .child(self.inputs())
             .child(self.selection())
@@ -464,7 +505,31 @@ impl ComponentsGallery {
             );
         }
 
-        let page = ContentArea::new(Scroll::vertical(gallery));
+        let page = VStack::new()
+            .alignment(StackAlignment::Stretch)
+            .gap(StackGap::None)
+            .child(Toolbar::new(
+                HStack::new()
+                    .alignment(StackAlignment::Center)
+                    .gap(StackGap::Medium)
+                    .child(Text::body_emphasized("ViewKit"))
+                    .child(Text::metadata("Design system"))
+                    .child(Spacer::new())
+                    .child(
+                        SegmentedControl::new(self.theme_mode.binding())
+                            .item(0, "System")
+                            .item(1, "Light")
+                            .item(2, "Dark")
+                            .accessibility_label("Appearance"),
+                    ),
+            ))
+            .child(Divider::new())
+            .child(
+                ContentArea::new(Scroll::vertical(gallery))
+                    .maximum_width(920.0)
+                    .layout()
+                    .flex_grow(1.0),
+            );
         if self.dialog_open.get() {
             let close = self.dialog_open.clone();
             Box::new(
