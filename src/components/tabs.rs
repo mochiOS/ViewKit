@@ -1,7 +1,7 @@
 use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
-use crate::geometry::{Rect, Size};
+use crate::geometry::{Point, Rect, Size};
 use crate::layout::{StackAlignment, StackGap, ViewExt};
 use crate::platform::{Key, PointerButton};
 use crate::state::Binding;
@@ -167,6 +167,15 @@ impl Tabs {
 
     fn selected_index(&self, value: usize) -> Option<usize> {
         self.items.iter().position(|item| item.value == value)
+    }
+
+    fn indicator_local_point(&self, bounds: Rect, position: Point, theme: &Theme) -> Point {
+        let index = self.selected_index(self.selection.get()).unwrap_or(0) as f32;
+        let center = Point::new(
+            bounds.origin.x + theme.layout.tab_width * (index + 0.5),
+            bounds.origin.y + (theme.tabs.height - theme.tabs.tongue_depth) / 2.0,
+        );
+        Point::new(position.x - center.x, position.y - center.y)
     }
 
     fn animated_index(&self, theme: &Theme) -> (Option<f32>, Option<std::time::Instant>) {
@@ -341,19 +350,24 @@ impl View for Tabs {
             ViewEvent::PointerPressed {
                 position,
                 button: PointerButton::Primary,
-            } if self.enabled && bounds.contains(*position) => {
-                self.interaction_state.indicator_shape.begin(*position)
-            }
+            } if self.enabled && bounds.contains(*position) => self
+                .interaction_state
+                .indicator_shape
+                .begin(self.indicator_local_point(bounds, *position, context.theme())),
             ViewEvent::PointerMoved { position }
                 if self.interaction_state.indicator_shape.is_active() =>
             {
-                self.interaction_state.indicator_shape.moved(*position);
+                self.interaction_state
+                    .indicator_shape
+                    .moved(self.indicator_local_point(bounds, *position, context.theme()));
             }
             ViewEvent::PointerReleased {
                 position,
                 button: PointerButton::Primary,
             } if self.interaction_state.indicator_shape.is_active() => {
-                self.interaction_state.indicator_shape.moved(*position);
+                self.interaction_state
+                    .indicator_shape
+                    .moved(self.indicator_local_point(bounds, *position, context.theme()));
                 self.interaction_state.indicator_shape.end();
             }
             ViewEvent::FocusChanged { focused: false }

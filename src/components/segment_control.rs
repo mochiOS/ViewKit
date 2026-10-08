@@ -3,7 +3,7 @@ use super::{BorderStyle, Button, ButtonInteractionState, ButtonStyle, Rectangle,
 use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
-use crate::geometry::{Rect, Size};
+use crate::geometry::{Point, Rect, Size};
 use crate::platform::{Key, PointerButton};
 use crate::state::Binding;
 use crate::theme::{CornerRadius, ShadowStyle};
@@ -168,6 +168,18 @@ impl SegmentedControl {
                 )
             })
             .collect()
+    }
+
+    fn indicator_local_point(&self, bounds: Rect, position: Point, inset: f32) -> Point {
+        let segment_bounds = self.segment_bounds(bounds, inset);
+        let index = self.selected_index(self.selection.get()).unwrap_or(0);
+        let Some(indicator) = segment_bounds.get(index) else {
+            return Point::new(0.0, 0.0);
+        };
+        Point::new(
+            position.x - indicator.origin.x - indicator.size.width / 2.0,
+            position.y - indicator.origin.y - indicator.size.height / 2.0,
+        )
     }
 
     fn animated_index(
@@ -378,19 +390,36 @@ impl View for SegmentedControl {
             ViewEvent::PointerPressed {
                 position,
                 button: PointerButton::Primary,
-            } if self.enabled && bounds.contains(*position) => {
-                self.interaction_state.indicator_shape.begin(*position)
-            }
+            } if self.enabled && bounds.contains(*position) => self
+                .interaction_state
+                .indicator_shape
+                .begin(self.indicator_local_point(
+                    bounds,
+                    *position,
+                    context.theme().layout.segmented_control_inset,
+                )),
             ViewEvent::PointerMoved { position }
                 if self.interaction_state.indicator_shape.is_active() =>
             {
-                self.interaction_state.indicator_shape.moved(*position);
+                self.interaction_state
+                    .indicator_shape
+                    .moved(self.indicator_local_point(
+                        bounds,
+                        *position,
+                        context.theme().layout.segmented_control_inset,
+                    ));
             }
             ViewEvent::PointerReleased {
                 position,
                 button: PointerButton::Primary,
             } if self.interaction_state.indicator_shape.is_active() => {
-                self.interaction_state.indicator_shape.moved(*position);
+                self.interaction_state
+                    .indicator_shape
+                    .moved(self.indicator_local_point(
+                        bounds,
+                        *position,
+                        context.theme().layout.segmented_control_inset,
+                    ));
                 self.interaction_state.indicator_shape.end();
             }
             ViewEvent::FocusChanged { focused: false }
