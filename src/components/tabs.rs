@@ -21,6 +21,8 @@ struct TabItem {
     interaction: ButtonInteractionState,
 }
 
+const INDICATOR_DEFORMATION_ALLOWANCE: f32 = 34.0;
+
 #[derive(Clone)]
 pub struct TabsInteractionState {
     indicator_shape: OmochiShape,
@@ -209,6 +211,15 @@ impl Tabs {
         points
     }
 
+    fn indicator_clip_bounds(bounds: Rect) -> Rect {
+        Rect::new(
+            bounds.origin.x,
+            bounds.origin.y - INDICATOR_DEFORMATION_ALLOWANCE,
+            bounds.size.width,
+            bounds.size.height + INDICATOR_DEFORMATION_ALLOWANCE * 2.0,
+        )
+    }
+
     fn indicator_local_point(&self, bounds: Rect, position: Point, theme: &Theme) -> Point {
         let index = self.selected_index(self.selection.get()).unwrap_or(0) as f32;
         let center = Point::new(
@@ -340,7 +351,7 @@ impl View for Tabs {
             if let Some((from, to)) = self.interaction_state.selection_motion.take_launch() {
                 let direction = (to - from).signum();
                 let edge = direction * (width / 2.0 - context.theme.tabs.indicator_inset);
-                let pull = ((to - from).abs() * width * 0.34).min(34.0);
+                let pull = ((to - from).abs() * width * 0.34).min(INDICATOR_DEFORMATION_ALLOWANCE);
                 self.interaction_state
                     .indicator_shape
                     .begin(crate::geometry::Point::new(edge, 0.0));
@@ -356,14 +367,15 @@ impl View for Tabs {
                 bounds.origin.y + inset + indicator_height / 2.0,
             );
             let indicator_points = self.indicator_points(context.theme);
-            context
-                .display_list
-                .push(DrawCommand::PushClip { rect: bounds });
+            let indicator_clip = Self::indicator_clip_bounds(bounds);
+            context.display_list.push(DrawCommand::PushClip {
+                rect: indicator_clip,
+            });
             self.interaction_state.indicator_shape.paint_points(
                 &indicator_points,
                 center,
                 context.theme.tabs.selected_background,
-                bounds,
+                indicator_clip,
                 context,
             );
             context.display_list.push(DrawCommand::PopClip);
@@ -477,6 +489,17 @@ mod tests {
         assert_eq!(maximum_y, 23.5);
         assert!(points.contains(&Point::new(-34.0, 23.5)));
         assert!(points.contains(&Point::new(34.0, 23.5)));
+    }
+
+    #[test]
+    fn indicator_clip_preserves_vertical_omochi_deformation() {
+        let bounds = Rect::new(20.0, 30.0, 300.0, 45.0);
+        let clip = Tabs::indicator_clip_bounds(bounds);
+
+        assert_eq!(clip.origin.x, bounds.origin.x);
+        assert_eq!(clip.size.width, bounds.size.width);
+        assert_eq!(clip.origin.y, bounds.origin.y - 34.0);
+        assert_eq!(clip.size.height, bounds.size.height + 68.0);
     }
 
     #[test]
