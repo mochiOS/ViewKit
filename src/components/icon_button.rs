@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::event::{EventContext, EventResult, ViewEvent};
-use crate::geometry::{Rect, Size};
+use crate::geometry::{Point, Rect, Size};
 use crate::layout::ViewExt;
 use crate::platform::PointerButton;
 use crate::theme::{Color, ControlAppearance, ControlVisualState, ShadowStyle, Theme};
@@ -41,7 +41,7 @@ impl IconButton {
             size: None,
             enabled: true,
             interaction: ButtonInteractionState::new(),
-            surface: OmochiShape::velocity(OmochiPreset::CompactControl),
+            surface: OmochiShape::displacement(OmochiPreset::CompactControl),
             on_click: None,
             accessibility_label: None,
         }
@@ -159,6 +159,13 @@ impl IconButton {
 
         button
     }
+
+    fn local_point(bounds: Rect, point: Point) -> Point {
+        Point::new(
+            point.x - bounds.origin.x - bounds.size.width / 2.0,
+            point.y - bounds.origin.y - bounds.size.height / 2.0,
+        )
+    }
 }
 
 impl View for IconButton {
@@ -212,10 +219,10 @@ impl View for IconButton {
                 position,
                 button: PointerButton::Primary,
             } if bounds.contains(*position) => {
-                self.surface.begin(*position);
+                self.surface.begin(Self::local_point(bounds, *position));
             }
             ViewEvent::PointerMoved { position } if self.surface.is_active() => {
-                self.surface.moved(*position);
+                self.surface.moved(Self::local_point(bounds, *position));
             }
             ViewEvent::PointerReleased {
                 button: PointerButton::Primary,

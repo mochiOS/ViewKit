@@ -28,22 +28,22 @@ impl OmochiPreset {
                 material.tip_cross_radius = 21.0;
             }
             Self::Thumb => {
-                material.max_pull = 10.0;
-                material.press_depth = 2.6;
+                material.max_pull = 14.0;
+                material.press_depth = 3.2;
                 material.press_radius = 22.0;
                 material.drag_radius = 32.0;
                 material.tip_long_radius = 9.0;
                 material.tip_cross_radius = 16.0;
-                material.velocity_pull_scale = 0.009;
+                material.velocity_pull_scale = 0.016;
             }
             Self::SelectionIndicator => {
-                material.max_pull = 14.0;
-                material.press_depth = 2.2;
+                material.max_pull = 18.0;
+                material.press_depth = 3.0;
                 material.press_radius = 54.0;
                 material.drag_radius = 72.0;
                 material.tip_long_radius = 18.0;
                 material.tip_cross_radius = 28.0;
-                material.velocity_pull_scale = 0.008;
+                material.velocity_pull_scale = 0.014;
             }
         }
         material.press_release_start = 0.6;
@@ -68,6 +68,12 @@ impl OmochiShape {
                     axis_scale: Point::new(1.0, 0.55),
                 },
             ),
+        }
+    }
+
+    pub(super) fn displacement(preset: OmochiPreset) -> Self {
+        Self {
+            surface: OmochiSurface::new(preset.material(), DEFAULT_BURGERS, PullMode::Displacement),
         }
     }
 
