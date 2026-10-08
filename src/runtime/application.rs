@@ -378,7 +378,7 @@ where
         reset_exit_request();
         let window_title = app.window_for(WindowId::PRIMARY).title().to_owned();
         let appearance = AppearanceSettings::load();
-        let theme = appearance.theme();
+        let theme = app.theme().unwrap_or_else(|| appearance.theme());
         Theme::set_current(theme);
         let mut windows = BTreeMap::new();
         windows.insert(
@@ -427,6 +427,7 @@ where
             return;
         }
         let context = ViewContext::new(viewport);
+        self.theme = self.app.theme().unwrap_or_else(|| self.appearance.theme());
         Theme::set_current(self.theme);
         let root = self.app.body_for(id, &context);
         let state = self.windows.get_mut(&id).expect("window was ensured");
@@ -868,12 +869,11 @@ where
         if appearance == self.appearance {
             return false;
         }
-        let theme = appearance.theme();
         let font_scale = appearance.font_scale();
         self.appearance = appearance;
-        self.theme = theme;
-        Theme::set_current(self.theme);
         self.app.appearance_changed();
+        self.theme = self.app.theme().unwrap_or_else(|| self.appearance.theme());
+        Theme::set_current(self.theme);
         for (&id, state) in &mut self.windows {
             state.text_measurer.set_font_scale(font_scale);
             state.root = None;

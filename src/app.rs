@@ -316,6 +316,15 @@ pub trait App: Sized + 'static {
         self.window()
     }
 
+    /// Overrides the system appearance theme for this application.
+    ///
+    /// Returning `None` follows the platform Light/Dark preference. Because
+    /// this method is consulted during rebuilds, a theme stored in [`crate::state::State`]
+    /// can drive an in-app appearance picker without bypassing design tokens.
+    fn theme(&self) -> Option<Theme> {
+        None
+    }
+
     /// 現在のアプリケーション状態からルートViewを構築します。
     fn body(&self, context: &ViewContext) -> Self::Body;
 
