@@ -10,7 +10,7 @@ use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 use super::omochi_shape::{OmochiPreset, OmochiShape, SelectionMotion};
 use super::{
-    Button, ButtonInteractionState, ButtonStyle, HStack, Padding, Rectangle, RectangleColor, Text,
+    Button, ButtonInteractionState, ButtonStyle, HStack, Rectangle, RectangleColor, Text,
     ZStackAlignment,
 };
 
@@ -138,15 +138,13 @@ impl Tabs {
             .accessibility_label(item.label.clone())
             .accessibility_selected(selected)
             .content(
-                Padding::symmetric(theme.tabs.horizontal_padding, theme.tabs.vertical_padding)
-                    .content(
-                        Text::label(item.label.clone())
-                            .accessibility_hidden(true)
-                            .font_size(13.0)
-                            .weight(if selected { 600 } else { 500 })
-                            .offset_y(4.0)
-                            .color(foreground),
-                    ),
+                Text::label(item.label.clone())
+                    .accessibility_hidden(true)
+                    .font_size(13.0)
+                    .weight(if selected { 600 } else { 500 })
+                    .alignment(crate::typography::TextAlignment::Center)
+                    .color(foreground)
+                    .height(16.0),
             )
             .on_click(move || {
                 if selection.get() != value {
@@ -374,7 +372,7 @@ impl View for Tabs {
                 self.selection.commit();
             }
         }
-        self.stack(context.theme).paint(bounds, context);
+        self.stack(context.theme).paint(strip_bounds, context);
     }
 
     fn handle_event(
@@ -415,8 +413,17 @@ impl View for Tabs {
             _ => {}
         }
         let stack = self.stack(context.theme);
+        let strip_height = (context.theme().tabs.height - context.theme().tabs.tongue_depth)
+            .min(bounds.size.height)
+            .max(0.0);
+        let strip_bounds = Rect::new(
+            bounds.origin.x,
+            bounds.origin.y,
+            bounds.size.width,
+            strip_height,
+        );
         if let Some(index) = self.keyboard_target(event) {
-            let child_bounds = stack.child_bounds_for_event(bounds, context);
+            let child_bounds = stack.child_bounds_for_event(strip_bounds, context);
             if let Some(target_bounds) = child_bounds.get(index).copied() {
                 let from_index = self.selected_index(self.selection.get()).unwrap_or(index);
                 self.selection
@@ -429,7 +436,7 @@ impl View for Tabs {
                 return EventResult::Consumed;
             }
         }
-        stack.handle_event(bounds, event, context)
+        stack.handle_event(strip_bounds, event, context)
     }
 }
 
@@ -470,6 +477,41 @@ mod tests {
         assert_eq!(maximum_y, 23.5);
         assert!(points.contains(&Point::new(-34.0, 23.5)));
         assert!(points.contains(&Point::new(34.0, 23.5)));
+    }
+
+    #[test]
+    fn labels_are_centered_in_the_tab_strip() {
+        let selection = State::new(0_usize);
+        let tabs = Tabs::new(selection.binding()).item(0, "Overview");
+        let theme = Theme::LIGHT;
+        let bounds = Rect::new(20.0, 30.0, theme.layout.tab_width, theme.tabs.height);
+        let mut display_list = DisplayList::new();
+        let mut text_measurer = TextMeasurer::new();
+        let mut paint_context = PaintContext::new(
+            &mut display_list,
+            &theme,
+            &Typography::DEFAULT,
+            &mut text_measurer,
+        );
+        tabs.paint(bounds, &mut paint_context);
+
+        let command = display_list
+            .commands()
+            .iter()
+            .find_map(|command| match command {
+                DrawCommand::DrawText { command } if command.text == "Overview" => Some(command),
+                _ => None,
+            });
+        let command = command.expect("tab label should be painted");
+        assert_eq!(command.alignment, crate::typography::TextAlignment::Center);
+        assert_eq!(command.bounds.origin.x, bounds.origin.x);
+        assert_eq!(command.bounds.size.width, theme.layout.tab_width);
+        assert_eq!(command.bounds.size.height, 16.0);
+        assert_eq!(
+            command.bounds.origin.y,
+            bounds.origin.y
+                + (theme.tabs.height - theme.tabs.tongue_depth - command.bounds.size.height) / 2.0
+        );
     }
 
     #[test]

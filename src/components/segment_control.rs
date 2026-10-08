@@ -7,6 +7,7 @@ use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Point, Rect, Size};
+use crate::layout::ViewExt;
 use crate::platform::{Key, PointerButton};
 use crate::state::Binding;
 use crate::theme::{Color, CornerRadius, ShadowStyle};
@@ -349,8 +350,9 @@ impl SegmentedControl {
                     .accessibility_hidden(true)
                     .font_size(13.0)
                     .weight(if selected { 600 } else { 500 })
-                    .offset_y(4.0)
-                    .color(foreground),
+                    .alignment(crate::typography::TextAlignment::Center)
+                    .color(foreground)
+                    .height(16.0),
             )
     }
 
@@ -715,7 +717,13 @@ impl View for SegmentedControl {
 
 #[cfg(test)]
 mod tests {
-    use super::MagneticSelectionMotion;
+    use super::{MagneticSelectionMotion, SegmentedControl};
+    use crate::draw_command::{DisplayList, DrawCommand};
+    use crate::geometry::Rect;
+    use crate::state::State;
+    use crate::theme::Theme;
+    use crate::typography::{TextAlignment, TextMeasurer, Typography};
+    use crate::view::{PaintContext, View};
 
     #[test]
     fn magnetic_center_clamps_to_reference_end_stops() {
@@ -738,5 +746,36 @@ mod tests {
         assert!(slow < fast);
         assert!((70.0..=100.0).contains(&slow));
         assert!((70.0..=100.0).contains(&fast));
+    }
+
+    #[test]
+    fn labels_are_centered_in_each_segment() {
+        let selection = State::new(0_usize);
+        let control = SegmentedControl::new(selection.binding()).item(0, "Canvas");
+        let theme = Theme::LIGHT;
+        let bounds = Rect::new(20.0, 30.0, 104.0, 34.0);
+        let mut display_list = DisplayList::new();
+        let mut text_measurer = TextMeasurer::new();
+        let mut paint_context = PaintContext::new(
+            &mut display_list,
+            &theme,
+            &Typography::DEFAULT,
+            &mut text_measurer,
+        );
+        control.paint(bounds, &mut paint_context);
+
+        let command = display_list
+            .commands()
+            .iter()
+            .find_map(|command| match command {
+                DrawCommand::DrawText { command } if command.text == "Canvas" => Some(command),
+                _ => None,
+            });
+        let command = command.expect("segment label should be painted");
+        assert_eq!(command.alignment, TextAlignment::Center);
+        assert_eq!(command.bounds.origin.x, bounds.origin.x + 2.0);
+        assert_eq!(command.bounds.size.width, 100.0);
+        assert_eq!(command.bounds.size.height, 16.0);
+        assert_eq!(command.bounds.origin.y, bounds.origin.y + 9.0);
     }
 }

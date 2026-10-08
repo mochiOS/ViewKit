@@ -23,7 +23,6 @@ pub struct Text {
     weight: Option<u16>,
 
     alignment: TextAlignment,
-    offset_y: f32,
 
     color: Option<Color>,
     tone: TextTone,
@@ -43,7 +42,6 @@ impl Text {
             weight: None,
 
             alignment: TextAlignment::Start,
-            offset_y: 0.0,
 
             color: None,
             tone: TextTone::Primary,
@@ -121,12 +119,6 @@ impl Text {
     pub fn alignment(mut self, alignment: TextAlignment) -> Self {
         self.alignment = alignment;
 
-        self
-    }
-
-    /// Applies a visual-only vertical correction without changing measurement.
-    pub(crate) fn offset_y(mut self, offset_y: f32) -> Self {
-        self.offset_y = if offset_y.is_finite() { offset_y } else { 0.0 };
         self
     }
 
@@ -353,12 +345,6 @@ impl View for Text {
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
-        let bounds = Rect::new(
-            bounds.origin.x,
-            bounds.origin.y + self.offset_y,
-            bounds.size.width,
-            bounds.size.height,
-        );
         if bounds.size.width <= 0.0 || bounds.size.height <= 0.0 || self.value.is_empty() {
             return;
         }
