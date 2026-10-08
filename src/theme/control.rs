@@ -50,6 +50,9 @@ pub struct ButtonTokens {
     pub focus_ring: Color,
     pub focus_ring_width: f32,
     pub disabled_opacity: f32,
+    pub shadow: ShadowStyle,
+    pub pressed_shadow: ShadowStyle,
+    pub omochi_shadow: ShadowStyle,
 }
 
 impl ButtonTokens {
@@ -150,6 +153,36 @@ impl ButtonTokens {
             focus_ring: colors.focus_ring,
             focus_ring_width: 2.0,
             disabled_opacity: 0.42,
+            shadow: ShadowStyle::Custom(ShadowSet::single(Shadow::new(
+                Color::rgba(0, 0, 0, if dark { 34 } else { 20 }),
+                0.0,
+                1.0,
+                1.0,
+                0.0,
+            ))),
+            pressed_shadow: ShadowStyle::Custom(ShadowSet::single(Shadow::new(
+                Color::rgba(0, 0, 0, if dark { 24 } else { 14 }),
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+            ))),
+            omochi_shadow: ShadowStyle::Custom(ShadowSet::double(
+                Shadow::new(
+                    Color::rgba(0, 0, 0, if dark { 38 } else { 24 }),
+                    0.0,
+                    1.0,
+                    2.0,
+                    0.0,
+                ),
+                Shadow::new(
+                    Color::rgba(0, 0, 0, if dark { 18 } else { 10 }),
+                    0.0,
+                    2.0,
+                    4.0,
+                    0.0,
+                ),
+            )),
         }
     }
 }

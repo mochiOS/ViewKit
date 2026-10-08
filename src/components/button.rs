@@ -302,7 +302,7 @@ pub struct Button {
     style: ButtonStyle,
     size: ButtonSize,
     radius: Option<CornerRadius>,
-    shadow: ShadowStyle,
+    shadow: Option<ShadowStyle>,
     alignment: ZStackAlignment,
     enabled: bool,
     accessibility_label: Option<String>,
@@ -324,7 +324,7 @@ impl Button {
             style: ButtonStyle::Standard,
             size: ButtonSize::Medium,
             radius: None,
-            shadow: ShadowStyle::None,
+            shadow: None,
             alignment: ZStackAlignment::Center,
             enabled: true,
             accessibility_label: None,
@@ -371,7 +371,7 @@ impl Button {
     }
 
     pub fn shadow(mut self, shadow: ShadowStyle) -> Self {
-        self.shadow = shadow;
+        self.shadow = Some(shadow);
         self
     }
 
@@ -455,7 +455,7 @@ impl Button {
             style: ButtonStyle::Standard,
             size: ButtonSize::Medium,
             radius: None,
-            shadow: ShadowStyle::None,
+            shadow: None,
             alignment: ZStackAlignment::Center,
             enabled: true,
             accessibility_label: None,
@@ -563,10 +563,21 @@ impl View for Button {
             appearance.background = context.theme.colors.surface_muted;
         }
 
-        let shadow = if visual_state == ControlVisualState::Pressed {
+        let shadow = if let Some(shadow) = self.shadow {
+            shadow
+        } else if matches!(self.style, ButtonStyle::Ghost) {
             ShadowStyle::None
+        } else if visual_state == ControlVisualState::Pressed {
+            context.theme.button.pressed_shadow
         } else {
-            self.shadow
+            context.theme.button.shadow
+        };
+        let omochi_shadow = if matches!(self.style, ButtonStyle::Ghost) {
+            ShadowStyle::None
+        } else if let Some(shadow) = self.shadow {
+            shadow
+        } else {
+            context.theme.button.omochi_shadow
         };
 
         let radius = self.radius.unwrap_or_else(|| {
@@ -605,9 +616,15 @@ impl View for Button {
         if self.omochi_enabled && self.interaction.omochi.is_animating() {
             let resolved_radius =
                 radius.resolve(&context.theme.radius, bounds.size.width, bounds.size.height);
-            self.interaction
-                .omochi
-                .paint(bounds, resolved_radius, appearance.background, context);
+            self.interaction.omochi.paint_styled(
+                bounds,
+                resolved_radius,
+                appearance.background,
+                appearance.border,
+                context.theme.button.stroke_width,
+                omochi_shadow,
+                context,
+            );
         } else {
             Rectangle::new()
                 .color(RectangleColor::Custom(appearance.background))
@@ -1007,11 +1024,22 @@ mod tests {
         );
         rebuilt.paint(bounds, &mut paint_context);
 
+        let polygon_colors = display_list
+            .commands()
+            .iter()
+            .filter_map(|command| match command {
+                DrawCommand::FillPolygon { color, .. } => Some(*color),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
         assert!(
-            display_list
-                .commands()
-                .iter()
-                .any(|command| matches!(command, DrawCommand::FillPolygon { .. }))
+            polygon_colors.len() > 2,
+            "deformed button must retain shadow, border, and fill layers"
+        );
+        assert!(polygon_colors.contains(&Theme::LIGHT.button.standard.hovered.border));
+        assert_eq!(
+            polygon_colors.last(),
+            Some(&Theme::LIGHT.button.standard.hovered.background)
         );
     }
 }
