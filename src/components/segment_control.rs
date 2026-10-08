@@ -1,15 +1,19 @@
-use super::omochi_shape::{OmochiPreset, OmochiShape, SelectionMotion};
-use super::{BorderStyle, Button, ButtonInteractionState, ButtonStyle, Rectangle, RectangleColor};
+use super::omochi_shape::{OmochiPreset, OmochiShape};
+use super::{
+    BorderStyle, Button, ButtonInteractionState, ButtonStyle, Rectangle, RectangleColor, Text,
+    ZStackAlignment,
+};
 use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Point, Rect, Size};
 use crate::platform::{Key, PointerButton};
 use crate::state::Binding;
-use crate::theme::{CornerRadius, ShadowStyle};
+use crate::theme::{Color, CornerRadius, ShadowStyle};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 struct SegmentedItem {
     value: usize,
@@ -21,14 +25,217 @@ struct SegmentedItem {
 #[derive(Clone)]
 pub struct SegmentedControlInteractionState {
     indicator_shape: OmochiShape,
-    selection_motion: SelectionMotion,
+    selection_motion: MagneticSelectionMotion,
 }
 
 impl SegmentedControlInteractionState {
     pub fn new() -> Self {
         Self {
             indicator_shape: OmochiShape::displacement(OmochiPreset::SelectionIndicator),
-            selection_motion: SelectionMotion::default(),
+            selection_motion: MagneticSelectionMotion::default(),
+        }
+    }
+}
+
+#[derive(Clone, Default)]
+struct MagneticSelectionMotion {
+    state: Rc<RefCell<MagneticSelectionState>>,
+}
+
+#[derive(Default)]
+struct MagneticSelectionState {
+    initialized: bool,
+    visual_center: f32,
+    target_center: f32,
+    velocity: f32,
+    last_frame: Option<Instant>,
+    dragging: bool,
+    pointer_x: f32,
+    pointer_velocity: f32,
+    last_pointer_x: f32,
+    last_pointer_at: Option<Instant>,
+    transition_active: bool,
+    surface_direction: f32,
+}
+
+struct MagneticSample {
+    center: f32,
+    direction: f32,
+    pull_distance: f32,
+    animating: bool,
+    completed: bool,
+}
+
+impl MagneticSelectionMotion {
+    fn nearest_index(centers: &[f32], x: f32) -> usize {
+        centers
+            .iter()
+            .enumerate()
+            .min_by(|(_, lhs), (_, rhs)| (*lhs - x).abs().total_cmp(&(*rhs - x).abs()))
+            .map(|(index, _)| index)
+            .unwrap_or(0)
+    }
+
+    fn magnetic_center(centers: &[f32], pointer_x: f32, speed: f32) -> f32 {
+        let Some(first) = centers.first().copied() else {
+            return pointer_x;
+        };
+        let last = centers.last().copied().unwrap_or(first);
+        let bounded = pointer_x.clamp(first, last);
+        let nearest = centers[Self::nearest_index(centers, bounded)];
+        let distance = bounded - nearest;
+        let field = (-(distance * distance) / (2.0 * 42.0 * 42.0)).exp();
+        let speed_weakening = 1.0 - (speed.abs() / 1400.0).clamp(0.0, 0.58);
+        let strength = 0.86 * field * speed_weakening;
+        bounded + (nearest - bounded) * strength
+    }
+
+    fn begin_drag(&self, pointer_x: f32, current_center: f32, centers: &[f32]) {
+        let now = Instant::now();
+        let mut state = self.state.borrow_mut();
+        if !state.initialized || !state.transition_active {
+            state.initialized = true;
+            state.visual_center = current_center;
+            state.target_center = current_center;
+            state.velocity = 0.0;
+        }
+        state.dragging = true;
+        state.pointer_x = pointer_x;
+        state.pointer_velocity = 0.0;
+        state.last_pointer_x = pointer_x;
+        state.last_pointer_at = Some(now);
+        state.last_frame = Some(now);
+        state.target_center = Self::magnetic_center(centers, pointer_x, 0.0);
+        state.transition_active = true;
+    }
+
+    fn move_drag(&self, pointer_x: f32, centers: &[f32]) {
+        let now = Instant::now();
+        let mut state = self.state.borrow_mut();
+        if !state.dragging {
+            return;
+        }
+        let dt = state
+            .last_pointer_at
+            .map(|last| now.duration_since(last).as_secs_f32().max(0.001))
+            .unwrap_or(0.001);
+        let instant_velocity = (pointer_x - state.last_pointer_x) / dt;
+        let blend = 1.0 - (-dt / 0.030).exp();
+        state.pointer_velocity += (instant_velocity - state.pointer_velocity) * blend;
+        state.pointer_x = pointer_x;
+        state.last_pointer_x = pointer_x;
+        state.last_pointer_at = Some(now);
+        state.target_center = Self::magnetic_center(centers, pointer_x, state.pointer_velocity);
+        state.transition_active = true;
+    }
+
+    fn end_drag(&self, pointer_x: f32, centers: &[f32]) -> usize {
+        let index = Self::nearest_index(centers, pointer_x);
+        let mut state = self.state.borrow_mut();
+        state.pointer_x = pointer_x;
+        state.dragging = false;
+        state.target_center = centers.get(index).copied().unwrap_or(pointer_x);
+        state.transition_active = true;
+        index
+    }
+
+    fn select(&self, current_center: f32, target_center: f32) {
+        let mut state = self.state.borrow_mut();
+        if !state.initialized || !state.transition_active {
+            state.initialized = true;
+            state.visual_center = current_center;
+            state.velocity = 0.0;
+        }
+        state.dragging = false;
+        state.target_center = target_center;
+        state.last_frame = Some(Instant::now());
+        state.transition_active = true;
+    }
+
+    fn cancel(&self, center: f32) {
+        let mut state = self.state.borrow_mut();
+        state.initialized = true;
+        state.visual_center = center;
+        state.target_center = center;
+        state.velocity = 0.0;
+        state.dragging = false;
+        state.transition_active = false;
+        state.surface_direction = 0.0;
+    }
+
+    fn is_dragging(&self) -> bool {
+        self.state.borrow().dragging
+    }
+
+    fn surface_direction(&self) -> f32 {
+        self.state.borrow().surface_direction
+    }
+
+    fn set_surface_direction(&self, direction: f32) {
+        self.state.borrow_mut().surface_direction = direction;
+    }
+
+    fn sample(&self, fallback_center: f32) -> MagneticSample {
+        let now = Instant::now();
+        let mut state = self.state.borrow_mut();
+        if !state.initialized {
+            state.initialized = true;
+            state.visual_center = fallback_center;
+            state.target_center = fallback_center;
+            state.last_frame = Some(now);
+        }
+        if !state.transition_active {
+            state.visual_center = fallback_center;
+            state.target_center = fallback_center;
+            state.velocity = 0.0;
+            state.last_frame = Some(now);
+            return MagneticSample {
+                center: fallback_center,
+                direction: 0.0,
+                pull_distance: 0.0,
+                animating: false,
+                completed: false,
+            };
+        }
+
+        let dt = state
+            .last_frame
+            .map(|last| now.duration_since(last).as_secs_f32().clamp(0.001, 0.033))
+            .unwrap_or(0.001);
+        state.last_frame = Some(now);
+        let previous = state.visual_center;
+        let error = state.target_center - state.visual_center;
+        let follow_time = if state.dragging { 0.026 } else { 0.072 };
+        let alpha = 1.0 - (-dt / follow_time).exp();
+        state.visual_center += error * alpha;
+        state.velocity = (state.visual_center - previous) / dt;
+
+        let request = if state.dragging {
+            state.pointer_x - state.visual_center
+        } else {
+            state.target_center - state.visual_center
+        };
+        let direction = if request.abs() > 0.35 {
+            request.signum()
+        } else {
+            state.surface_direction
+        };
+        let speed_contribution = (state.velocity.abs() * 0.010).min(8.0);
+        let gain = if state.dragging { 0.72 } else { 0.34 };
+        let pull_distance = (request.abs() * gain + speed_contribution).min(34.0);
+        let completed = !state.dragging && error.abs() < 0.06 && state.velocity.abs() < 0.8;
+        if completed {
+            state.visual_center = state.target_center;
+            state.velocity = 0.0;
+            state.transition_active = false;
+        }
+
+        MagneticSample {
+            center: state.visual_center,
+            direction,
+            pull_distance,
+            animating: state.transition_active,
+            completed,
         }
     }
 }
@@ -108,34 +315,42 @@ impl SegmentedControl {
         self.selection.get()
     }
 
-    fn item_button(&self, item: &SegmentedItem) -> Button {
+    fn item_button(&self, item: &SegmentedItem, theme: &crate::theme::Theme) -> Button {
         let enabled = self.enabled && item.enabled;
+        let selected = self.selection.get() == item.value;
+        let foreground = if !enabled {
+            theme.segmented_control.disabled_foreground
+        } else if selected {
+            theme.segmented_control.selected_foreground
+        } else {
+            theme.segmented_control.foreground
+        };
 
-        let selection = self.selection.clone();
-        let value = item.value;
-        let on_change = self.on_change.clone();
-        let selection_motion = self.interaction_state.selection_motion.clone();
-        let from_index = self.selected_index(self.selection.get()).unwrap_or(0);
-        let to_index = self.selected_index(value).unwrap_or(from_index);
-
-        Button::with_interaction_and_label(item.interaction.clone(), item.label.clone())
-            .style(ButtonStyle::Ghost)
-            .radius(CornerRadius::ExtraLarge)
+        Button::with_interaction(item.interaction.clone())
+            .style(ButtonStyle::Custom {
+                background: Color::TRANSPARENT,
+                hovered_background: Color::TRANSPARENT,
+                border: Color::TRANSPARENT,
+                hovered_border: Color::TRANSPARENT,
+                foreground,
+            })
+            .radius(CornerRadius::Full)
             .shadow(ShadowStyle::None)
             .focus_ring(false)
+            .omochi(false)
+            .alignment(ZStackAlignment::Center)
             .enabled(enabled)
             .accessibility_role(AccessibilityRole::RadioButton)
-            .accessibility_checked(self.selection.get() == value)
-            .accessibility_selected(self.selection.get() == value)
-            .on_click(move || {
-                if selection.get() != value {
-                    selection.set_without_notification(value);
-                    selection_motion.start(from_index, to_index);
-                    if let Some(on_change) = on_change.as_ref() {
-                        (on_change.borrow_mut())(value);
-                    }
-                }
-            })
+            .accessibility_label(item.label.clone())
+            .accessibility_checked(selected)
+            .accessibility_selected(selected)
+            .content(
+                Text::label(item.label.clone())
+                    .accessibility_hidden(true)
+                    .font_size(13.0)
+                    .weight(if selected { 600 } else { 500 })
+                    .color(foreground),
+            )
     }
 
     fn selected_index(&self, value: usize) -> Option<usize> {
@@ -170,33 +385,11 @@ impl SegmentedControl {
             .collect()
     }
 
-    fn indicator_local_point(&self, bounds: Rect, position: Point, inset: f32) -> Point {
-        let segment_bounds = self.segment_bounds(bounds, inset);
-        let index = self.selected_index(self.selection.get()).unwrap_or(0);
-        let Some(indicator) = segment_bounds.get(index) else {
-            return Point::new(0.0, 0.0);
-        };
-        Point::new(
-            position.x - indicator.origin.x - indicator.size.width / 2.0,
-            position.y - indicator.origin.y - indicator.size.height / 2.0,
-        )
-    }
-
-    fn animated_index(
-        &self,
-        motion: crate::theme::Motion,
-    ) -> (Option<f32>, Option<std::time::Instant>) {
-        let current_value = self.selection.get();
-
-        let Some(current_index) = self.selected_index(current_value) else {
-            return (None, None);
-        };
-
-        let (index, next_redraw) = self
-            .interaction_state
-            .selection_motion
-            .sample(current_index as f32, motion);
-        (Some(index), next_redraw)
+    fn segment_centers(&self, segment_bounds: &[Rect]) -> Vec<f32> {
+        segment_bounds
+            .iter()
+            .map(|segment| segment.origin.x + segment.size.width / 2.0)
+            .collect()
     }
 
     fn keyboard_target(&self, event: &ViewEvent) -> Option<usize> {
@@ -250,7 +443,7 @@ impl View for SegmentedControl {
         let mut maximum_width = context.theme.layout.segmented_item_min_width;
 
         for item in &self.items {
-            let measured = self.item_button(item).measure(
+            let measured = self.item_button(item, context.theme).measure(
                 Constraints::loose(Size::new(f32::INFINITY, segment_height)),
                 context,
             );
@@ -298,8 +491,8 @@ impl View for SegmentedControl {
                 .color(RectangleColor::Custom(crate::theme::Color::TRANSPARENT))
                 .radius(context.theme.segmented_control.radius)
                 .border(BorderStyle::custom(
-                    context.theme.button.focus_ring,
-                    context.theme.button.focus_ring_width,
+                    context.theme.segmented_control.focus_ring,
+                    context.theme.segmented_control.focus_ring_width,
                 ))
                 .paint(bounds, context);
         }
@@ -311,32 +504,52 @@ impl View for SegmentedControl {
             return;
         }
 
-        let motion = context.theme.motion.selection;
-
-        let (animated_index, next_redraw) = self.animated_index(motion);
-
-        if let Some(next_redraw) = next_redraw {
-            context.request_redraw_in_at(bounds.expanded(16.0), next_redraw);
-        }
-
-        if let Some(animated_index) = animated_index {
+        if let Some(selected_index) = self.selected_index(self.selection.get()) {
             let segment_width = segment_bounds[0].size.width;
+            let fallback_center = segment_bounds[selected_index].origin.x + segment_width / 2.0;
+            let sample = self
+                .interaction_state
+                .selection_motion
+                .sample(fallback_center);
+            let previous_direction = self.interaction_state.selection_motion.surface_direction();
 
-            if let Some((from, to)) = self.interaction_state.selection_motion.take_launch() {
-                let direction = (to - from).signum();
-                let edge = direction * segment_width / 2.0;
-                let pull = ((to - from).abs() * segment_width * 0.34).min(34.0);
-                self.interaction_state
-                    .indicator_shape
-                    .begin(crate::geometry::Point::new(edge, 0.0));
-                self.interaction_state
-                    .indicator_shape
-                    .moved(crate::geometry::Point::new(edge + direction * pull, 0.0));
+            if sample.direction != 0.0 && sample.pull_distance > 0.0 {
+                if previous_direction != 0.0 && previous_direction != sample.direction {
+                    self.interaction_state.indicator_shape.end();
+                }
+                if previous_direction != sample.direction
+                    || !self.interaction_state.indicator_shape.is_active()
+                {
+                    let edge = sample.direction * segment_width / 2.0;
+                    self.interaction_state
+                        .indicator_shape
+                        .begin(Point::new(edge, 0.0));
+                    self.interaction_state
+                        .selection_motion
+                        .set_surface_direction(sample.direction);
+                }
+                let edge = sample.direction * segment_width / 2.0;
+                self.interaction_state.indicator_shape.moved(Point::new(
+                    edge + sample.direction * sample.pull_distance,
+                    0.0,
+                ));
+            }
+            if sample.completed {
                 self.interaction_state.indicator_shape.end();
+                self.interaction_state
+                    .selection_motion
+                    .set_surface_direction(0.0);
+                self.selection.commit();
+            }
+            if sample.animating || self.interaction_state.indicator_shape.is_animating() {
+                context.request_redraw_in_at(
+                    bounds.expanded(20.0),
+                    Instant::now() + Duration::from_millis(8),
+                );
             }
 
             let indicator_bounds = Rect::new(
-                segment_bounds[0].origin.x + segment_width * animated_index,
+                sample.center - segment_width / 2.0,
                 segment_bounds[0].origin.y,
                 segment_width,
                 segment_bounds[0].size.height,
@@ -354,33 +567,21 @@ impl View for SegmentedControl {
                 rect: bounds,
                 radius: outer_radius,
             });
-            self.interaction_state.indicator_shape.paint(
+            self.interaction_state.indicator_shape.paint_styled(
                 indicator_bounds,
                 indicator_radius,
                 context.theme.segmented_control.indicator_background,
+                context.theme.segmented_control.indicator_border,
+                context.theme.segmented_control.stroke_width,
+                context.theme.segmented_control.indicator_shadow,
                 context,
             );
-            if !self.interaction_state.indicator_shape.is_animating() {
-                Rectangle::new()
-                    .color(RectangleColor::Custom(crate::theme::Color::TRANSPARENT))
-                    .radius(CornerRadius::Custom(indicator_radius))
-                    .shadow(ShadowStyle::Card)
-                    .border(BorderStyle::custom(
-                        context.theme.segmented_control.indicator_border,
-                        context.theme.segmented_control.stroke_width,
-                    ))
-                    .paint(indicator_bounds, context);
-            }
             context.display_list.push(DrawCommand::PopClip);
-
-            if self.interaction_state.selection_motion.ready_to_commit() {
-                self.interaction_state.selection_motion.finish();
-                self.selection.commit();
-            }
         }
 
         for (item, item_bounds) in self.items.iter().zip(segment_bounds) {
-            self.item_button(item).paint(item_bounds, context);
+            self.item_button(item, context.theme)
+                .paint(item_bounds, context);
         }
     }
 
@@ -390,61 +591,96 @@ impl View for SegmentedControl {
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
+        let inset = context.theme().layout.segmented_control_inset;
+        let segment_bounds = self.segment_bounds(bounds, inset);
+        let centers = self.segment_centers(&segment_bounds);
+        let selected_index = self.selected_index(self.selection.get()).unwrap_or(0);
+        let current_center = centers
+            .get(selected_index)
+            .copied()
+            .unwrap_or(bounds.origin.x);
+
         match event {
             ViewEvent::PointerPressed {
                 position,
                 button: PointerButton::Primary,
-            } if self.enabled && bounds.contains(*position) => self
-                .interaction_state
-                .indicator_shape
-                .begin(self.indicator_local_point(
-                    bounds,
-                    *position,
-                    context.theme().layout.segmented_control_inset,
-                )),
+            } if self.enabled && bounds.contains(*position) && !centers.is_empty() => {
+                self.interaction_state.selection_motion.begin_drag(
+                    position.x,
+                    current_center,
+                    &centers,
+                );
+                context.request_redraw_in(bounds.expanded(20.0));
+                return EventResult::Consumed;
+            }
             ViewEvent::PointerMoved { position }
-                if self.interaction_state.indicator_shape.is_active() =>
+                if self.interaction_state.selection_motion.is_dragging() =>
             {
                 self.interaction_state
-                    .indicator_shape
-                    .moved(self.indicator_local_point(
-                        bounds,
-                        *position,
-                        context.theme().layout.segmented_control_inset,
-                    ));
+                    .selection_motion
+                    .move_drag(position.x, &centers);
+                context.request_redraw_in(bounds.expanded(20.0));
+                return EventResult::Consumed;
             }
             ViewEvent::PointerReleased {
                 position,
                 button: PointerButton::Primary,
-            } if self.interaction_state.indicator_shape.is_active() => {
-                self.interaction_state
-                    .indicator_shape
-                    .moved(self.indicator_local_point(
-                        bounds,
-                        *position,
-                        context.theme().layout.segmented_control_inset,
-                    ));
-                self.interaction_state.indicator_shape.end();
+            } if self.interaction_state.selection_motion.is_dragging() => {
+                let mut index = self
+                    .interaction_state
+                    .selection_motion
+                    .end_drag(position.x, &centers);
+                if !self.items.get(index).is_some_and(|item| item.enabled) {
+                    index = self
+                        .items
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, item)| item.enabled)
+                        .min_by(|(lhs, _), (rhs, _)| {
+                            (centers[*lhs] - position.x)
+                                .abs()
+                                .total_cmp(&(centers[*rhs] - position.x).abs())
+                        })
+                        .map(|(index, _)| index)
+                        .unwrap_or(selected_index);
+                    self.interaction_state
+                        .selection_motion
+                        .select(current_center, centers[index]);
+                }
+                let value = self.items[index].value;
+                if self.selection.get() != value {
+                    self.selection.set_without_notification(value);
+                    if let Some(on_change) = self.on_change.as_ref() {
+                        (on_change.borrow_mut())(value);
+                    }
+                }
+                context.request_keyboard_focus(segment_bounds[index]);
+                context.request_redraw_in(bounds.expanded(20.0));
+                return EventResult::Consumed;
             }
             ViewEvent::FocusChanged { focused: false }
-                if self.interaction_state.indicator_shape.is_active() =>
+                if self.interaction_state.selection_motion.is_dragging() =>
             {
+                self.interaction_state
+                    .selection_motion
+                    .cancel(current_center);
                 self.interaction_state.indicator_shape.end();
             }
             _ => {}
         }
-        let segment_bounds =
-            self.segment_bounds(bounds, context.theme().layout.segmented_control_inset);
 
         if let Some(index) = self.keyboard_target(event)
             && let Some(target_bounds) = segment_bounds.get(index).copied()
         {
-            let from_index = self.selected_index(self.selection.get()).unwrap_or(index);
+            let from_center = centers
+                .get(selected_index)
+                .copied()
+                .unwrap_or(current_center);
             self.selection
                 .set_without_notification(self.items[index].value);
             self.interaction_state
                 .selection_motion
-                .start(from_index, index);
+                .select(from_center, centers[index]);
             if let Some(on_change) = self.on_change.as_ref() {
                 (on_change.borrow_mut())(self.items[index].value);
             }
@@ -461,9 +697,9 @@ impl View for SegmentedControl {
                 continue;
             }
 
-            let item_result = self
-                .item_button(item)
-                .handle_event(item_bounds, event, context);
+            let item_result =
+                self.item_button(item, context.theme())
+                    .handle_event(item_bounds, event, context);
 
             result = result.merge(item_result);
 
@@ -473,5 +709,33 @@ impl View for SegmentedControl {
         }
 
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MagneticSelectionMotion;
+
+    #[test]
+    fn magnetic_center_clamps_to_reference_end_stops() {
+        let centers = [70.0, 170.0, 270.0];
+        assert_eq!(
+            MagneticSelectionMotion::magnetic_center(&centers, -50.0, 0.0),
+            70.0
+        );
+        assert_eq!(
+            MagneticSelectionMotion::magnetic_center(&centers, 400.0, 0.0),
+            270.0
+        );
+    }
+
+    #[test]
+    fn fast_drag_weakens_magnetic_capture() {
+        let centers = [70.0, 170.0, 270.0];
+        let slow = MagneticSelectionMotion::magnetic_center(&centers, 100.0, 0.0);
+        let fast = MagneticSelectionMotion::magnetic_center(&centers, 100.0, 2_000.0);
+        assert!(slow < fast);
+        assert!((70.0..=100.0).contains(&slow));
+        assert!((70.0..=100.0).contains(&fast));
     }
 }
