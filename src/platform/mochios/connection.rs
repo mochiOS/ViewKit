@@ -294,7 +294,7 @@ impl ReceivedHandles {
         let count = raw.count as usize;
         if count > raw.handles.len()
             || count > 4
-            || raw.reserved != 0
+            || !raw.is_user_delivery()
             || raw
                 .handles
                 .iter()

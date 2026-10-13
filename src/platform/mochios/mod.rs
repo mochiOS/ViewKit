@@ -175,7 +175,7 @@ static mut EVENT_BUF: [u8; EVENT_BUFFER_SIZE] = [0; EVENT_BUFFER_SIZE];
 static mut EVENT_OBJECT_HANDLES: mochi_user_platform::ipc::IpcObjectHandles =
     mochi_user_platform::ipc::IpcObjectHandles {
         count: 0,
-        reserved: 0,
+        delivery_flags: 0,
         handles: [mochi_user_platform::ipc::IpcObjectHandle {
             handle: 0,
             reserved: 0,
