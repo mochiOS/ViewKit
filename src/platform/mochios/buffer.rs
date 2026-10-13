@@ -1,11 +1,13 @@
 use super::*;
 
-use super::connection::{alloc_shared_page_count, send_pages};
+use super::connection::syscall_result;
+use memory_object::{MemoryMapping, MemoryObject};
 
 pub(super) struct SharedBuffer {
-    virt: u64,
+    mapping: MemoryMapping,
+    object: MemoryObject,
     byte_capacity: usize,
-    sent_pages: bool,
+    offered_endpoint: Option<u64>,
     attached: bool,
 }
 
@@ -62,12 +64,18 @@ impl SharedBuffer {
         let byte_capacity = page_count
             .checked_mul(PAGE_SIZE)
             .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
-        let virt = alloc_shared_page_count(page_count)?;
+        let object = syscall_result(MemoryObject::create(byte_capacity as u64))?;
+        let mapping = syscall_result(object.map(
+            0,
+            byte_capacity as u64,
+            syscall::MEMORY_ACCESS_READ | syscall::MEMORY_ACCESS_WRITE,
+        ))?;
 
         Ok(Self {
-            virt,
+            mapping,
+            object,
             byte_capacity,
-            sent_pages: false,
+            offered_endpoint: None,
             attached: false,
         })
     }
@@ -89,12 +97,14 @@ impl SharedBuffer {
         if bytes_len > self.byte_capacity {
             return Err(MochiOsBackendError::InvalidWindowSize);
         }
+        // SAFETY: the owned mapping covers byte_capacity; this process is the
+        // only writer and every transferred handle is restricted to READ|MAP.
         let dst =
-            unsafe { std::slice::from_raw_parts_mut(self.virt as *mut u8, self.byte_capacity) };
+            unsafe { std::slice::from_raw_parts_mut(self.mapping.as_mut_ptr(), self.byte_capacity) };
 
         let pixmap_width = pixmap.width() as usize;
         let pixmap_height = pixmap.height() as usize;
-        let copy_rect = if self.sent_pages {
+        let copy_rect = if self.offered_endpoint == Some(compositor) {
             dirty_rect
         } else {
             PhysicalDirtyRect {
@@ -138,16 +148,7 @@ impl SharedBuffer {
                 out.copy_from_slice(&value.to_le_bytes());
             }
         }
-        let page_count = bytes_len
-            .checked_add(PAGE_SIZE - 1)
-            .map(|len| len / PAGE_SIZE)
-            .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
-        if self.sent_pages {
-            return Ok(());
-        }
-        send_pages(compositor, page_count, self.virt)?;
-        self.sent_pages = true;
-        Ok(())
+        self.offer(compositor)
     }
 
     pub(super) fn send_scene_to(
@@ -158,13 +159,21 @@ impl SharedBuffer {
         if scene.len() > self.byte_capacity {
             return Err(MochiOsBackendError::InvalidWindowSize);
         }
+        // SAFETY: scene length was checked against the retained mapping and
+        // peers receive read-only access, never a writable handle.
         let destination =
-            unsafe { std::slice::from_raw_parts_mut(self.virt as *mut u8, self.byte_capacity) };
+            unsafe { std::slice::from_raw_parts_mut(self.mapping.as_mut_ptr(), self.byte_capacity) };
         destination[..scene.len()].copy_from_slice(scene);
-        if !self.sent_pages {
-            let page_count = self.byte_capacity / PAGE_SIZE;
-            send_pages(compositor, page_count, self.virt)?;
-            self.sent_pages = true;
+        self.offer(compositor)
+    }
+
+    fn offer(&mut self, endpoint: u64) -> Result<(), MochiOsBackendError> {
+        if endpoint == 0 {
+            return Err(MochiOsBackendError::InvalidReply);
+        }
+        if self.offered_endpoint != Some(endpoint) {
+            syscall_result(self.object.send_readonly(endpoint, 0, self.byte_capacity as u64))?;
+            self.offered_endpoint = Some(endpoint);
         }
         Ok(())
     }

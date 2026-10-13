@@ -198,35 +198,6 @@ pub(super) fn ipc_wait_object_handles_raw(
     Ok((msg & 0xffff_ffff) as usize)
 }
 
-pub(super) fn alloc_shared_page_count(page_count: usize) -> Result<u64, MochiOsBackendError> {
-    let virt = syscall_result(syscall::call4(
-        syscall::SyscallNumber::AllocSharedPages,
-        page_count as u64,
-        0,
-        0,
-        0,
-    ))?;
-    if virt == 0 || (virt & (PAGE_SIZE as u64 - 1)) != 0 {
-        return Err(MochiOsBackendError::Syscall(5));
-    }
-    Ok(virt)
-}
-
-pub(super) fn send_pages(
-    dest: u64,
-    page_count: usize,
-    local_base: u64,
-) -> Result<(), MochiOsBackendError> {
-    syscall_result(syscall::call4(
-        syscall::SyscallNumber::IpcSendPages,
-        dest,
-        0,
-        page_count as u64,
-        local_base,
-    ))?;
-    Ok(())
-}
-
 pub(super) unsafe fn zero_raw(ptr: *mut u8, len: usize) {
     unsafe {
         core::ptr::write_bytes(ptr, 0, len);

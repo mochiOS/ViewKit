@@ -7,6 +7,7 @@ use cosmic_text::{
     Attrs, Buffer, Color as CosmicColor, FontSystem, Metrics, Shaping, SwashCache, Weight,
 };
 use mochi_user_syscall as syscall;
+use mochi_user_platform::memory_object;
 use tiny_skia::{
     BlendMode, FillRule, FilterQuality, Mask, Paint, Path, PathBuilder, Pixmap, PixmapPaint,
     Rect as SkiaRect, Stroke, Transform,
