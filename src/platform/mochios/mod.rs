@@ -78,7 +78,6 @@ const RENDERER_CAP_GPU_SCENE: u32 = 1;
 const PAGE_SIZE: usize = 4096;
 const MAX_SURFACE_EXTENT: u32 = 16_384;
 const MAX_WINDOW_TITLE_BYTES: usize = 64;
-const ERRNO_EAGAIN: u64 = 11;
 const EVENT_POINTER_ENTER: u32 = 2;
 const EVENT_POINTER_LEAVE: u32 = 3;
 const EVENT_POINTER_MOTION: u32 = 4;
@@ -190,6 +189,9 @@ static mut INPUT_SUBSCRIBE_REPLY: [u8; 1] = [0; 1];
 
 #[derive(Debug, thiserror::Error)]
 pub enum MochiOsBackendError {
+    #[error("mochiOS native mechanism failed: {0:?}")]
+    Native(syscall::NativeError),
+
     #[error("mochiOS syscall failed: {0}")]
     Syscall(u64),
 

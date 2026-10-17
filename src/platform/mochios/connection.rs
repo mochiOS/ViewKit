@@ -2,7 +2,10 @@ use super::*;
 use crate::platform::PlatformFileHandle;
 
 pub(super) fn syscall_result<T>(result: syscall::SysResult<T>) -> Result<T, MochiOsBackendError> {
-    result.map_err(|err| MochiOsBackendError::Syscall(err.errno().unwrap_or(5)))
+    result.map_err(|err| match err.native_error() {
+        Some(error) => MochiOsBackendError::Native(error),
+        None => MochiOsBackendError::Syscall(err.errno().unwrap_or(5)),
+    })
 }
 
 pub(super) fn perf_log(line: &str) {
@@ -297,13 +300,13 @@ pub(super) fn try_recv_event()
     // The handle-aware receive is a strict superset of the legacy receive: it
     // also accepts ordinary messages and reports an empty handle list.  Use it
     // for the first dequeue so a delegated document cannot escape the event
-    // loop as EMSGSIZE between two separate receive attempts.
+    // loop as an unsupported-handle failure between separate receive attempts.
     let raw_handles = core::ptr::addr_of_mut!(EVENT_OBJECT_HANDLES);
     let len = match ipc_wait_object_handles_raw(0, event, EVENT_BUFFER_SIZE, unsafe {
         &mut *raw_handles
     }) {
         Ok(len) => len,
-        Err(MochiOsBackendError::Syscall(ERRNO_EAGAIN)) => return Ok(None),
+        Err(MochiOsBackendError::Native(syscall::NativeError::NotReady)) => return Ok(None),
         Err(err) => return Err(err),
     };
     let handles = ReceivedHandles::from_raw(unsafe { *raw_handles })?;
@@ -327,7 +330,6 @@ pub(super) fn read_event_blocking(
         &mut *raw_handles
     }) {
         Ok(len) => len,
-        Err(MochiOsBackendError::Syscall(ERRNO_EAGAIN)) => return Ok(None),
         Err(err) => return Err(err),
     };
     let handles = ReceivedHandles::from_raw(unsafe { *raw_handles })?;
