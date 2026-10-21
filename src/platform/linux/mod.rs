@@ -1,6 +1,6 @@
 mod backend;
-mod gpu_scene;
 mod gpu_renderer;
+mod gpu_scene;
 
 pub use backend::{LinuxBackend, LinuxBackendError};
 pub use gpu_renderer::{GpuRenderer, GpuRendererError};
@@ -9,3 +9,6 @@ pub use gpu_renderer::{GpuRenderer, GpuRendererError};
 pub type WindowsBackend<A> = LinuxBackend<A>;
 #[cfg(target_os = "windows")]
 pub type WindowsBackendError = LinuxBackendError;
+
+/// Linux desktop preview transport; not a mochiOS application ABI.
+pub mod preview;

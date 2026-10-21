@@ -31,6 +31,9 @@ const FORWARD_MOUSE_BUTTON_ID: u16 = 5;
 
 #[derive(Debug, thiserror::Error)]
 pub enum LinuxBackendError {
+    #[error("The desktop preview connection failed: {0}")]
+    Preview(std::io::Error),
+
     #[error("Failed to create or run the event loop: {0}")]
     EventLoop(#[from] EventLoopError),
 
@@ -498,6 +501,9 @@ where
         let window_ids = self.windows.keys().copied().collect::<Vec<_>>();
         for window_id in window_ids {
             self.flush_pending_pointer_move(window_id);
+        }
+        if std::env::var_os("MOCHIOS_PREVIEW_CONFIG_ROOT").is_some() {
+            self.application.reload_appearance();
         }
         self.process_window_commands(event_loop);
         if self.application.exit_requested() {

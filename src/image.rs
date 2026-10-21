@@ -174,6 +174,25 @@ impl PartialEq for ImageData {
 
 impl Eq for ImageData {}
 
+#[cfg(target_os = "linux")]
+impl serde::Serialize for ImageData {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serde::Serialize::serialize(
+            &(self.width(), self.height(), self.premultiplied_rgba8()),
+            serializer,
+        )
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl<'de> serde::Deserialize<'de> for ImageData {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let (width, height, pixels): (u32, u32, Vec<u8>) =
+            serde::Deserialize::deserialize(deserializer)?;
+        Self::from_premultiplied_rgba8(width, height, pixels).map_err(serde::de::Error::custom)
+    }
+}
+
 impl fmt::Debug for ImageData {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter

@@ -108,6 +108,21 @@ impl PartialEq for SvgData {
 
 impl Eq for SvgData {}
 
+#[cfg(target_os = "linux")]
+impl serde::Serialize for SvgData {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.tree().to_string(&usvg::WriteOptions::default()))
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl<'de> serde::Deserialize<'de> for SvgData {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let source: String = serde::Deserialize::deserialize(deserializer)?;
+        Self::decode(source.as_bytes()).map_err(serde::de::Error::custom)
+    }
+}
+
 impl fmt::Debug for SvgData {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter

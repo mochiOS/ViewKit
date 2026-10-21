@@ -43,11 +43,16 @@ impl AppearanceSettings {
 
         #[cfg(not(target_os = "mochios"))]
         {
+            if let Some(root) = std::env::var_os("MOCHIOS_PREVIEW_CONFIG_ROOT") {
+                let path = std::path::PathBuf::from(root).join("appearance/settings.conf");
+                return std::fs::read_to_string(path)
+                    .ok()
+                    .map_or_else(Self::default, |text| Self::parse(&text));
+            }
             Self::default()
         }
     }
 
-    #[cfg(any(target_os = "mochios", test))]
     fn parse(text: &str) -> Self {
         let mut settings = Self::default();
         for line in text.lines() {
@@ -112,7 +117,6 @@ fn accent_color(accent: usize) -> Option<Color> {
     }
 }
 
-#[cfg(any(target_os = "mochios", test))]
 fn parse_usize(value: &str, fallback: usize, maximum: usize) -> usize {
     value
         .trim()
@@ -122,7 +126,6 @@ fn parse_usize(value: &str, fallback: usize, maximum: usize) -> usize {
         .unwrap_or(fallback)
 }
 
-#[cfg(any(target_os = "mochios", test))]
 fn parse_f32(value: &str, fallback: f32, minimum: f32, maximum: f32) -> f32 {
     value
         .trim()

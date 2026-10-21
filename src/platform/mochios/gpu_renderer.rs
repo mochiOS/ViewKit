@@ -7,6 +7,7 @@ use mochios_viewkit_gpu_protocol::{
     ATLAS_HEIGHT, ATLAS_WIDTH, HEADER_LEN, VERTEX_STRIDE, encode_header,
 };
 const CURVE_SEGMENTS: usize = 48;
+#[cfg(not(target_os = "linux"))]
 const IMAGE_RASTER_CACHE_CAPACITY: usize = 128;
 const SVG_RASTER_CACHE_CAPACITY: usize = 128;
 
@@ -33,9 +34,16 @@ struct SvgRasterCacheEntry {
     atlas: AtlasRect,
 }
 
+#[cfg(not(target_os = "linux"))]
 struct ImageRasterCacheEntry {
     image: ImageData,
     atlas: AtlasRect,
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) struct ExternalImage {
+    pub image: ImageData,
+    pub vertices: std::ops::Range<u32>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -52,6 +60,8 @@ struct GlyphAtlasEntry {
 }
 
 pub(crate) struct GpuSceneRenderer {
+    #[cfg(target_os = "linux")]
+    pub(crate) external_images: Vec<ExternalImage>,
     vertices: Vec<Vertex>,
     atlas: Vec<u8>,
     atlas_x: u32,
@@ -60,6 +70,7 @@ pub(crate) struct GpuSceneRenderer {
     atlas_dirty_rows: Option<(u32, u32)>,
     clips: Vec<ClipRegion>,
     glyph_atlas_cache: HashMap<GlyphAtlasKey, GlyphAtlasEntry>,
+    #[cfg(not(target_os = "linux"))]
     image_raster_cache: Vec<ImageRasterCacheEntry>,
     svg_raster_cache: Vec<SvgRasterCacheEntry>,
     frame_width: u32,
@@ -71,6 +82,8 @@ pub(crate) struct GpuSceneRenderer {
 impl GpuSceneRenderer {
     pub(crate) fn new() -> Self {
         Self {
+            #[cfg(target_os = "linux")]
+            external_images: Vec::new(),
             vertices: Vec::new(),
             atlas: Vec::new(),
             atlas_x: 2,
@@ -79,6 +92,7 @@ impl GpuSceneRenderer {
             atlas_dirty_rows: None,
             clips: Vec::new(),
             glyph_atlas_cache: HashMap::new(),
+            #[cfg(not(target_os = "linux"))]
             image_raster_cache: Vec::new(),
             svg_raster_cache: Vec::new(),
             frame_width: 0,
@@ -223,6 +237,8 @@ impl GpuSceneRenderer {
     }
 
     fn reset(&mut self) -> Result<(), MochiOsBackendError> {
+        #[cfg(target_os = "linux")]
+        self.external_images.clear();
         self.vertices.clear();
         self.clips.clear();
         self.atlas_dirty_rows = None;
@@ -246,6 +262,7 @@ impl GpuSceneRenderer {
         self.atlas_row_height = 1;
         self.atlas_dirty_rows = None;
         self.glyph_atlas_cache.clear();
+        #[cfg(not(target_os = "linux"))]
         self.image_raster_cache.clear();
         self.svg_raster_cache.clear();
         self.frame_valid = false;
@@ -260,7 +277,7 @@ impl GpuSceneRenderer {
             self.atlas_y,
             self.atlas_row_height,
             self.glyph_atlas_cache.len(),
-            self.image_raster_cache.len(),
+            self.external_images.len(),
             self.svg_raster_cache.len()
         );
         self.atlas_full = true;
@@ -614,27 +631,49 @@ impl GpuSceneRenderer {
         if command.bounds.intersection(self.current_clip()).is_none() {
             return Ok(());
         }
-        let atlas = if let Some(entry) = self
-            .image_raster_cache
-            .iter()
-            .find(|entry| entry.image == command.image)
+        #[cfg(target_os = "linux")]
         {
-            entry.atlas
-        } else {
-            if self.image_raster_cache.len() >= IMAGE_RASTER_CACHE_CAPACITY {
-                return Err(self.atlas_capacity_error());
+            let start = self.vertices.len() as u32;
+            self.textured_quad_uv(
+                scale_rect(command.bounds, scale),
+                (0.0, 0.0, 1.0, 1.0),
+                command.opacity,
+                viewport,
+            );
+            let end = self.vertices.len() as u32;
+            if end > start {
+                self.external_images.push(ExternalImage {
+                    image: command.image.clone(),
+                    vertices: start..end,
+                });
             }
-            let pixels = rgba_to_bgra(command.image.premultiplied_rgba8());
-            let atlas = self.pack_bgra(command.image.width(), command.image.height(), &pixels)?;
-            self.image_raster_cache.push(ImageRasterCacheEntry {
-                image: command.image.clone(),
-                atlas,
-            });
-            atlas
-        };
-        let rect = scale_rect(command.bounds, scale);
-        self.textured_quad(rect, atlas, command.opacity, viewport);
-        Ok(())
+            return Ok(());
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let atlas = if let Some(entry) = self
+                .image_raster_cache
+                .iter()
+                .find(|entry| entry.image == command.image)
+            {
+                entry.atlas
+            } else {
+                if self.image_raster_cache.len() >= IMAGE_RASTER_CACHE_CAPACITY {
+                    return Err(self.atlas_capacity_error());
+                }
+                let pixels = rgba_to_bgra(command.image.premultiplied_rgba8());
+                let atlas =
+                    self.pack_bgra(command.image.width(), command.image.height(), &pixels)?;
+                self.image_raster_cache.push(ImageRasterCacheEntry {
+                    image: command.image.clone(),
+                    atlas,
+                });
+                atlas
+            };
+            let rect = scale_rect(command.bounds, scale);
+            self.textured_quad(rect, atlas, command.opacity, viewport);
+            Ok(())
+        }
     }
 
     fn svg(
@@ -828,11 +867,21 @@ impl GpuSceneRenderer {
     }
 
     fn textured_quad(&mut self, rect: Rect, atlas: AtlasRect, opacity: f32, viewport: Viewport) {
+        self.textured_quad_uv(rect, self.uv_bounds(atlas), opacity, viewport);
+    }
+
+    fn textured_quad_uv(
+        &mut self,
+        rect: Rect,
+        uv_bounds: (f32, f32, f32, f32),
+        opacity: f32,
+        viewport: Viewport,
+    ) {
         let original = rect;
         let Some(rect) = original.intersection(self.current_clip()) else {
             return;
         };
-        let (u0, v0, u1, v1) = self.uv_bounds(atlas);
+        let (u0, v0, u1, v1) = uv_bounds;
         let left = (rect.origin.x - original.origin.x) / original.size.width;
         let top = (rect.origin.y - original.origin.y) / original.size.height;
         let right = (rect.origin.x + rect.size.width - original.origin.x) / original.size.width;

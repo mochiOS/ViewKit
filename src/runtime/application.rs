@@ -1185,6 +1185,11 @@ where
     {
         use crate::platform::linux::LinuxBackend;
 
+        if let Some(socket) = std::env::var_os(crate::platform::linux::preview::SOCKET_ENV) {
+            crate::platform::linux::preview::run(runtime, window_config(options), &socket)
+                .map_err(crate::platform::linux::LinuxBackendError::Preview)?;
+            return Ok(());
+        }
         let backend = LinuxBackend::new(runtime, window_config(options));
 
         backend.run()?;

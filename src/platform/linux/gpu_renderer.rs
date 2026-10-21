@@ -11,6 +11,7 @@ use super::gpu_scene::{GpuSceneError, GpuSceneRenderer, TextLayoutKey};
 use crate::draw_command::DisplayList;
 use crate::font::create_font_system;
 use crate::geometry::Rect;
+use crate::image::ImageData;
 use crate::renderer::{Renderer, Viewport};
 
 const SHADER: &str = include_str!("../../shaders/desktop_scene.wgsl");
@@ -37,6 +38,9 @@ pub enum GpuRendererError {
 }
 
 pub struct GpuRenderer {
+    image_bind_group_layout: wgpu::BindGroupLayout,
+    image_sampler: wgpu::Sampler,
+    image_textures: Vec<ImageTexture>,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -52,6 +56,12 @@ pub struct GpuRenderer {
     font_system: FontSystem,
     swash_cache: SwashCache,
     text_layout_cache: HashMap<TextLayoutKey, Buffer>,
+}
+
+struct ImageTexture {
+    image: ImageData,
+    _texture: wgpu::Texture,
+    bind_group: wgpu::BindGroup,
 }
 
 impl GpuRenderer {
@@ -126,28 +136,27 @@ impl GpuRenderer {
         };
         surface.configure(&device, &config);
 
-        let bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("ViewKit GPU scene atlas layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("ViewKit GPU scene atlas layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                ],
-            });
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("ViewKit GPU scene shader"),
             source: wgpu::ShaderSource::Wgsl(SHADER.into()),
@@ -180,8 +189,7 @@ impl GpuRenderer {
                         },
                         wgpu::VertexAttribute {
                             format: wgpu::VertexFormat::Float32x4,
-                            offset: (mem::size_of::<[f32; 3]>()
-                                + mem::size_of::<[f32; 2]>())
+                            offset: (mem::size_of::<[f32; 3]>() + mem::size_of::<[f32; 2]>())
                                 as wgpu::BufferAddress,
                             shader_location: 2,
                         },
@@ -250,6 +258,9 @@ impl GpuRenderer {
         });
 
         Ok(Self {
+            image_bind_group_layout: bind_group_layout,
+            image_sampler: atlas_sampler,
+            image_textures: Vec::new(),
             surface,
             device,
             queue,
@@ -336,6 +347,110 @@ impl Renderer for GpuRenderer {
             false,
             &mut self.scene_bytes,
         )?;
+        // Raster images have independent textures. The small shared atlas is
+        // reserved for glyphs and vector controls; wallpapers retain their
+        // original resolution and no longer compete with text for space.
+        self.image_textures.retain(|texture| {
+            self.scene_renderer
+                .external_images
+                .iter()
+                .any(|draw| draw.image == texture.image)
+        });
+        let images: Vec<_> = self
+            .scene_renderer
+            .external_images
+            .iter()
+            .map(|draw| draw.image.clone())
+            .collect();
+        for image in images {
+            if self
+                .image_textures
+                .iter()
+                .any(|texture| texture.image == image)
+            {
+                continue;
+            }
+            let limit = self.device.limits().max_texture_dimension_2d;
+            let (width, height) = image.dimensions();
+            let (upload_width, upload_height, pixels) = if width > limit || height > limit {
+                let factor = (limit as f64 / width as f64).min(limit as f64 / height as f64);
+                let output_width = (width as f64 * factor).floor().max(1.0) as u32;
+                let output_height = (height as f64 * factor).floor().max(1.0) as u32;
+                let source = ::image::RgbaImage::from_raw(
+                    width,
+                    height,
+                    image.premultiplied_rgba8().to_vec(),
+                )
+                .ok_or(GpuRendererError::InvalidScene)?;
+                let resized = ::image::imageops::resize(
+                    &source,
+                    output_width,
+                    output_height,
+                    ::image::imageops::FilterType::Lanczos3,
+                );
+                (
+                    output_width,
+                    output_height,
+                    std::borrow::Cow::Owned(resized.into_raw()),
+                )
+            } else {
+                (
+                    width,
+                    height,
+                    std::borrow::Cow::Borrowed(image.premultiplied_rgba8()),
+                )
+            };
+            let size = wgpu::Extent3d {
+                width: upload_width,
+                height: upload_height,
+                depth_or_array_layers: 1,
+            };
+            let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("ViewKit image"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            self.queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &pixels,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(upload_width * 4),
+                    rows_per_image: Some(upload_height),
+                },
+                size,
+            );
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("ViewKit image binding"),
+                layout: &self.image_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&self.image_sampler),
+                    },
+                ],
+            });
+            self.image_textures.push(ImageTexture {
+                image,
+                _texture: texture,
+                bind_group,
+            });
+        }
         let vertex_count = decode(&self.scene_bytes)
             .map_err(|_| GpuRendererError::InvalidScene)?
             .vertex_count() as usize;
@@ -394,9 +509,26 @@ impl Renderer for GpuRenderer {
                 multiview_mask: None,
             });
             pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &self.atlas_bind_group, &[]);
             pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            pass.draw(0..vertex_count as u32, 0..1);
+            let mut start = 0;
+            for draw in &self.scene_renderer.external_images {
+                if start < draw.vertices.start {
+                    pass.set_bind_group(0, &self.atlas_bind_group, &[]);
+                    pass.draw(start..draw.vertices.start, 0..1);
+                }
+                let texture = self
+                    .image_textures
+                    .iter()
+                    .find(|texture| texture.image == draw.image)
+                    .ok_or(GpuRendererError::InvalidScene)?;
+                pass.set_bind_group(0, &texture.bind_group, &[]);
+                pass.draw(draw.vertices.clone(), 0..1);
+                start = draw.vertices.end;
+            }
+            if start < vertex_count as u32 {
+                pass.set_bind_group(0, &self.atlas_bind_group, &[]);
+                pass.draw(start..vertex_count as u32, 0..1);
+            }
         }
         self.queue.submit(Some(encoder.finish()));
         self.queue.present(frame);

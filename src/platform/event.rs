@@ -4,6 +4,7 @@ use crate::renderer::Viewport;
 use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]
 pub enum PointerButton {
     Primary,
     Secondary,
@@ -12,12 +13,14 @@ pub enum PointerButton {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]
 pub enum ButtonState {
     Pressed,
     Released,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]
 pub enum Key {
     Alt,
     CapsLock,
@@ -39,6 +42,7 @@ pub enum Key {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]
 pub struct KeyModifiers(u8);
 
 impl KeyModifiers {
@@ -77,6 +81,7 @@ impl KeyModifiers {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]
 pub enum PlatformEvent {
     Resumed {
         viewport: Viewport,

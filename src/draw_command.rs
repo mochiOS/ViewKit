@@ -7,6 +7,7 @@ use crate::theme::Color;
 use crate::typography::TextAlignment;
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]
 pub enum DrawCommand {
     Clear {
         color: Color,
@@ -72,11 +73,13 @@ pub enum DrawCommand {
 }
 
 #[derive(Clone, Debug, Default)]
+#[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]
 pub struct DisplayList {
     commands: Vec<DrawCommand>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]
 pub struct TextCommand {
     pub text: String,
     pub bounds: Rect,
@@ -92,6 +95,7 @@ pub struct TextCommand {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]
 pub enum ImageSampling {
     Nearest,
 
@@ -102,6 +106,7 @@ pub enum ImageSampling {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]
 pub struct ImageCommand {
     pub image: ImageData,
     pub bounds: Rect,
@@ -111,6 +116,7 @@ pub struct ImageCommand {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]
 pub struct SvgCommand {
     pub svg: SvgData,
     pub bounds: Rect,

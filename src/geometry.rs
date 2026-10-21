@@ -1,16 +1,19 @@
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]
 pub struct Point {
     pub x: f32,
     pub y: f32,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]
 pub struct Size {
     pub width: f32,
     pub height: f32,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]
 pub struct Rect {
     pub origin: Point,
     pub size: Size,

@@ -10,6 +10,7 @@ use crate::renderer::Viewport;
 use std::time::Instant;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]
 pub enum CursorIcon {
     #[default]
     Default,
@@ -22,6 +23,7 @@ pub enum CursorIcon {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]
 pub struct WindowConfig {
     pub title: String,
     pub size: Size,

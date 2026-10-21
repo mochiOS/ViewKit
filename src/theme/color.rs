@@ -1,6 +1,7 @@
 //! 色を定義
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]
 pub struct Color {
     pub red: u8,
     pub green: u8,

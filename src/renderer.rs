@@ -4,6 +4,7 @@ use crate::draw_command::DisplayList;
 use crate::geometry::{Rect, Size};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]
 pub struct Viewport {
     pub logical_size: Size,
     pub physical_width: u32,

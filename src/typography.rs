@@ -20,6 +20,7 @@ pub(crate) struct TextMeasurementKey {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]
 pub enum TextAlignment {
     #[default]
     Start,
