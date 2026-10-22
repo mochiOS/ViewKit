@@ -84,12 +84,21 @@ impl<T> State<T> {
 
     /// 現在の値を変更します。
     pub fn update<R>(&self, update: impl FnOnce(&mut T) -> R) -> R {
+        let result = self.update_for_repaint(update);
+        mark_changed();
+        result
+    }
+
+    /// Viewツリーを再構築せず、描画時に参照する値を更新します。
+    ///
+    /// Windowの位置など、既存Viewのpaint/hit-testだけで消費される状態に限り
+    /// 使用します。呼び出し元は変更前後を含む領域の再描画を明示的に要求する
+    /// 必要があります。Viewの構成やレイアウトが変わる値にはupdateを使います。
+    /// 他のState更新による再構築要求は解除しません。
+    pub fn update_for_repaint<R>(&self, update: impl FnOnce(&mut T) -> R) -> R {
         self.previous_value.replace(None);
         let result = update(&mut self.value.borrow_mut());
         self.last_changed_at.set(Some(Instant::now()));
-
-        mark_changed();
-
         result
     }
 
@@ -234,7 +243,7 @@ impl<T> Clone for Binding<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::State;
+    use super::{State, take_state_changed};
 
     struct NonCloneValue {
         count: usize,
@@ -245,5 +254,31 @@ mod tests {
         let state = State::new(NonCloneValue { count: 42 });
 
         assert_eq!(state.with(|value| value.count), 42);
+    }
+
+    #[test]
+    fn repaint_update_preserves_other_states_rebuild_requests() {
+        let _ = take_state_changed();
+        let geometry = State::new(10);
+        let shared_geometry = geometry.clone();
+        geometry.update_for_repaint(|value| *value = 20);
+        assert_eq!(shared_geometry.get(), 20);
+        assert!(
+            !take_state_changed(),
+            "paint-only updates use explicit damage"
+        );
+
+        let layout = State::new(0);
+        layout.set(1);
+        geometry.update_for_repaint(|value| *value = 30);
+        assert!(
+            take_state_changed(),
+            "another state still requires a rebuild"
+        );
+        geometry.update(|value| *value = 40);
+        assert!(
+            take_state_changed(),
+            "normal updates retain automatic invalidation"
+        );
     }
 }
