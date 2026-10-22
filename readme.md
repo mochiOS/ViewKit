@@ -1,5 +1,7 @@
 # ViewKit
 
+The shared mochiOS component language is documented in [omochi](docs/omochi.md).
+
 ViewKit provides the same Rust and C UI runtime on mochiOS, Linux, and Windows.
 The repository is self-contained for desktop builds. Linux uses the shared
 `winit`/`softbuffer` backend, while Windows uses a `winit` backend with a GPU
