@@ -48,6 +48,11 @@ impl Rect {
             && point.y < self.origin.y + self.size.height
     }
 
+    /// Test the same continuous rounded boundary used by painting and clipping.
+    pub fn contains_rounded(self, radius: f32, point: Point) -> bool {
+        self.contains(point) && crate::continuous_corner::contains(self, radius, point)
+    }
+
     pub fn union(self, other: Self) -> Self {
         let left = self.origin.x.min(other.origin.x);
         let top = self.origin.y.min(other.origin.y);

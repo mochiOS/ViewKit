@@ -351,4 +351,35 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn asymmetric_corners_fill_border_and_clip_use_shared_gpu_geometry() {
+        let rect = Rect::new(20.0, 30.0, 100.0, 60.0);
+        for radii in [[0.0, 4.0, 30.0, 12.0], [90.0, 30.0, 20.0, 10.0], [0.1; 4]] {
+            let mut list = DisplayList::new();
+            list.push(DrawCommand::PushRoundedCornersClip { rect, radii });
+            list.push(DrawCommand::FillRoundedCornersRect {
+                rect,
+                radii,
+                color: Color::WHITE,
+            });
+            list.push(DrawCommand::StrokeInsideRoundedCornersRect {
+                rect,
+                radii,
+                color: Color::BLACK,
+                width: 1.0,
+            });
+            list.push(DrawCommand::PopClip);
+            let bytes = encode(&mut GpuSceneRenderer::new(), &list);
+            let decoded = mochios_viewkit_gpu_protocol::decode(&bytes).unwrap();
+            assert!(decoded.vertex_count() > 0);
+            let shape = crate::continuous_corner::shape(rect, radii);
+            for v in decoded.vertices.chunks_exact(36) {
+                let x = (f32::from_le_bytes(v[..4].try_into().unwrap()) + 1.0) * 640.0;
+                let y = (f32::from_le_bytes(v[4..8].try_into().unwrap()) + 1.0) * 400.0;
+                assert!(x.is_finite() && y.is_finite());
+                let p = (x + (70.0 - x) * 0.0002, y + (60.0 - y) * 0.0002);
+                assert!(shape.contains(p), "{radii:?}: {x} {y}");
+            }
+        }
+    }
 }

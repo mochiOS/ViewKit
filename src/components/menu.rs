@@ -284,6 +284,19 @@ impl Menu {
         self
     }
 
+    /// Hit-test the visible menu surface using the same continuous corners.
+    pub fn contains(&self, bounds: Rect, point: crate::geometry::Point, theme: &Theme) -> bool {
+        let radius = if self.compact {
+            crate::theme::CornerRadius::Custom(theme.menu.compact_radius)
+        } else {
+            theme.menu.surface_radius
+        };
+        bounds.contains_rounded(
+            radius.resolve(&theme.radius, bounds.size.width, bounds.size.height),
+            point,
+        )
+    }
+
     fn card(&self) -> Card<ViewRef<'_, VStack>> {
         Card::new()
             .compact()

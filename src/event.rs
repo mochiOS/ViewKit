@@ -247,6 +247,7 @@ pub struct EventContext<'a> {
     command_requests: Vec<CommandId>,
     command_statuses: &'a [CommandStatus],
     command_target: Option<Point>,
+    corner_radii: Vec<f32>,
 }
 
 impl<'a> EventContext<'a> {
@@ -268,6 +269,7 @@ impl<'a> EventContext<'a> {
             command_requests: Vec::new(),
             command_statuses: &[],
             command_target: None,
+            corner_radii: Vec::new(),
         }
     }
 
@@ -288,6 +290,16 @@ impl<'a> EventContext<'a> {
                     .command_target
                     .is_none_or(|target| status.bounds.contains(target))
         })
+    }
+
+    pub(crate) fn inherited_corner_radius(&self) -> Option<f32> {
+        self.corner_radii.last().copied()
+    }
+    pub(crate) fn push_corner_radius(&mut self, radius: f32) {
+        self.corner_radii.push(radius);
+    }
+    pub(crate) fn pop_corner_radius(&mut self) {
+        self.corner_radii.pop();
     }
 
     pub fn theme(&self) -> &Theme {

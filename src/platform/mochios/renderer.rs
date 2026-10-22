@@ -97,6 +97,28 @@ pub(super) fn render_display_list(
                 }
                 clip_depth = next_depth;
             }
+            DrawCommand::PushRoundedCornersClip { rect, radii } => {
+                let next_depth = clip_depth.saturating_add(1);
+                let enabled = clip_enabled[clip_depth] && rect.intersection(dirty_bounds).is_some();
+                if clip_enabled.len() <= next_depth {
+                    clip_enabled.resize(next_depth + 1, false);
+                }
+                clip_enabled[next_depth] = enabled;
+                if enabled {
+                    let path =
+                        crate::continuous_corner::path(*rect, *radii, scale).map(|p| (*p).clone());
+                    configure_path_clip_mask(
+                        clip_masks,
+                        next_depth,
+                        path,
+                        Some(clip_depth),
+                        width,
+                        height,
+                        transform,
+                    )?;
+                }
+                clip_depth = next_depth;
+            }
             DrawCommand::PushRoundedClip { rect, radius } => {
                 let next_depth = clip_depth.saturating_add(1);
                 let enabled = clip_enabled[clip_depth] && rect.intersection(dirty_bounds).is_some();
@@ -190,6 +212,44 @@ pub(super) fn render_display_list(
                 let paint = solid_paint(*color);
                 pixmap.fill_rect(rect, &paint, transform, clip_masks.get(clip_depth));
             }
+            DrawCommand::FillRoundedCornersRect { rect, radii, color } => {
+                if rect.intersection(dirty_bounds).is_none() {
+                    continue;
+                }
+                if let Some(path) = crate::continuous_corner::path(*rect, *radii, scale) {
+                    pixmap.fill_path(
+                        &path,
+                        &solid_paint(*color),
+                        FillRule::Winding,
+                        transform,
+                        clip_masks.get(clip_depth),
+                    );
+                }
+            }
+            DrawCommand::StrokeInsideRoundedCornersRect {
+                rect,
+                radii,
+                color,
+                width: stroke_width,
+            } => {
+                if rect.intersection(dirty_bounds).is_none() {
+                    continue;
+                }
+                if let Some(path) = crate::continuous_corner::inside_border_path_corners(
+                    *rect,
+                    *radii,
+                    *stroke_width,
+                    scale,
+                ) {
+                    pixmap.fill_path(
+                        &path,
+                        &solid_paint(*color),
+                        FillRule::EvenOdd,
+                        transform,
+                        clip_masks.get(clip_depth),
+                    );
+                }
+            }
             DrawCommand::FillRoundedRect {
                 rect,
                 radius,
@@ -201,7 +261,7 @@ pub(super) fn render_display_list(
                 let Some(rect) = to_skia_rect(*rect) else {
                     continue;
                 };
-                let path = rounded_rect_path(rect, *radius);
+                let path = rounded_rect_path(rect, *radius, scale);
                 let paint = solid_paint(*color);
                 pixmap.fill_path(
                     &path,
@@ -260,6 +320,30 @@ pub(super) fn render_display_list(
                     clip_masks.get(clip_depth),
                 );
             }
+            DrawCommand::StrokeInsideRoundedRect {
+                rect,
+                radius,
+                color,
+                width: stroke_width,
+            } => {
+                if rect.intersection(dirty_bounds).is_none() {
+                    continue;
+                }
+                if let Some(path) = crate::continuous_corner::inside_border_path(
+                    *rect,
+                    *radius,
+                    *stroke_width,
+                    scale,
+                ) {
+                    pixmap.fill_path(
+                        &path,
+                        &solid_paint(*color),
+                        FillRule::EvenOdd,
+                        transform,
+                        clip_masks.get(clip_depth),
+                    );
+                }
+            }
             DrawCommand::StrokeRoundedRect {
                 rect,
                 radius,
@@ -279,7 +363,7 @@ pub(super) fn render_display_list(
                 let Some(rect) = to_skia_rect(*rect) else {
                     continue;
                 };
-                let path = rounded_rect_path(rect, *radius);
+                let path = rounded_rect_path(rect, *radius, scale);
                 let paint = solid_paint(*color);
                 let stroke = Stroke {
                     width: *stroke_width,
@@ -884,34 +968,14 @@ fn to_skia_rect(rect: Rect) -> Option<SkiaRect> {
     )
 }
 
-fn rounded_rect_path(rect: SkiaRect, radius: f32) -> Path {
-    let radius = if radius.is_finite() {
-        radius.max(0.0).min(rect.width().min(rect.height()) / 2.0)
-    } else {
-        0.0
-    };
-    if radius == 0.0 {
-        return PathBuilder::from_rect(rect);
-    }
-
-    let left = rect.left();
-    let top = rect.top();
-    let right = rect.right();
-    let bottom = rect.bottom();
-    let mut builder = PathBuilder::new();
-    builder.move_to(left + radius, top);
-    builder.line_to(right - radius, top);
-    builder.quad_to(right, top, right, top + radius);
-    builder.line_to(right, bottom - radius);
-    builder.quad_to(right, bottom, right - radius, bottom);
-    builder.line_to(left + radius, bottom);
-    builder.quad_to(left, bottom, left, bottom - radius);
-    builder.line_to(left, top + radius);
-    builder.quad_to(left, top, left + radius, top);
-    builder.close();
-    builder
-        .finish()
-        .unwrap_or_else(|| PathBuilder::from_rect(rect))
+fn rounded_rect_path(rect: SkiaRect, radius: f32, scale: f32) -> Path {
+    crate::continuous_corner::path(
+        Rect::new(rect.left(), rect.top(), rect.width(), rect.height()),
+        [radius; 4],
+        scale,
+    )
+    .map(|path| (*path).clone())
+    .unwrap_or_else(|| PathBuilder::from_rect(rect))
 }
 
 fn ellipse_path(rect: SkiaRect) -> Path {
@@ -987,7 +1051,7 @@ fn configure_rounded_clip_mask(
     height: u32,
     transform: Transform,
 ) -> Result<(), MochiOsBackendError> {
-    let path = to_skia_rect(rect).map(|rect| rounded_rect_path(rect, radius));
+    let path = to_skia_rect(rect).map(|rect| rounded_rect_path(rect, radius, transform.sx));
     configure_path_clip_mask(masks, index, path, previous, width, height, transform)
 }
 

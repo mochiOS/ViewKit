@@ -77,6 +77,29 @@ pub enum DrawCommand {
     },
 
     PopClip,
+    /// A border entirely inside the continuous boundary; radius is unchanged.
+    StrokeInsideRoundedRect {
+        rect: Rect,
+        radius: f32,
+        color: Color,
+        width: f32,
+    },
+    /// Independent radii ordered top-left, top-right, bottom-right, bottom-left.
+    FillRoundedCornersRect {
+        rect: Rect,
+        radii: [f32; 4],
+        color: Color,
+    },
+    StrokeInsideRoundedCornersRect {
+        rect: Rect,
+        radii: [f32; 4],
+        color: Color,
+        width: f32,
+    },
+    PushRoundedCornersClip {
+        rect: Rect,
+        radii: [f32; 4],
+    },
 }
 
 #[derive(Clone, Debug, Default)]
@@ -155,7 +178,13 @@ impl PaintTransform {
                 *width *= self.scale;
                 *color = color.alpha(self.opacity);
             }
-            DrawCommand::StrokeRoundedRect {
+            DrawCommand::StrokeInsideRoundedRect {
+                rect,
+                radius,
+                color,
+                width,
+            }
+            | DrawCommand::StrokeRoundedRect {
                 rect,
                 radius,
                 color,
@@ -165,6 +194,26 @@ impl PaintTransform {
                 *radius *= self.scale;
                 *width *= self.scale;
                 *color = color.alpha(self.opacity);
+            }
+            DrawCommand::FillRoundedCornersRect { rect, radii, color } => {
+                *rect = self.rect(*rect);
+                *radii = radii.map(|r| r * self.scale);
+                *color = color.alpha(self.opacity);
+            }
+            DrawCommand::StrokeInsideRoundedCornersRect {
+                rect,
+                radii,
+                color,
+                width,
+            } => {
+                *rect = self.rect(*rect);
+                *radii = radii.map(|r| r * self.scale);
+                *color = color.alpha(self.opacity);
+                *width *= self.scale;
+            }
+            DrawCommand::PushRoundedCornersClip { rect, radii } => {
+                *rect = self.rect(*rect);
+                *radii = radii.map(|r| r * self.scale);
             }
             DrawCommand::DrawText { command } => {
                 command.bounds = self.rect(command.bounds);
@@ -262,9 +311,7 @@ impl DisplayList {
 }
 
 pub fn clamp_radius(rect: Rect, radius: f32) -> f32 {
-    radius
-        .max(0.0)
-        .min(rect.size.width.min(rect.size.height) / 2.0)
+    crate::continuous_corner::shape(rect, [radius; 4]).radii[0]
 }
 
 #[cfg(test)]

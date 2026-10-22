@@ -453,7 +453,7 @@ pub fn deform_points(
         .collect()
 }
 
-/// Same line/arc sampling and Catmull–Rom tension (0.68) as button/index.html.
+/// Continuous-corner rest shape with the existing material deformation and tension.
 pub fn button_contour(
     bounds: Rect,
     radius: f32,
@@ -471,17 +471,13 @@ pub fn button_contour(
         }
     };
     line(Point::new(r, 0.0), Point::new(w - r, 0.0), 18);
-    // Build arcs/edges in one loop to avoid duplicating corner endpoints.
+    // Build shared corners/edges without duplicating corner endpoints.
     for corner in 0..4 {
-        let (cx, cy, start) = match corner {
-            0 => (w - r, r, -90.0_f32),
-            1 => (w - r, h - r, 0.0),
-            2 => (r, h - r, 90.0),
-            _ => (r, r, 180.0),
-        };
-        for i in 1..=12 {
-            let angle = (start + i as f32 * 90.0 / 12.0).to_radians();
-            base.push(Point::new(cx + r * angle.cos(), cy + r * angle.sin()));
+        let shape = crate::continuous_corner::shape(Rect::new(0.0, 0.0, w, h), [r; 4]);
+        let count = crate::continuous_corner::polygon_segments(r);
+        for i in 1..=count {
+            let p = shape.corner_point(corner, crate::continuous_corner::sample(i * 1024 / count));
+            base.push(Point::new(p.0, p.1));
         }
         let (a, b, count) = match corner {
             0 => (Point::new(w, r), Point::new(w, h - r), 10),

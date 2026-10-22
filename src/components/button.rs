@@ -676,9 +676,10 @@ impl View for Button {
 
         let content_bounds = self.alignment.child_bounds(bounds, content_size);
 
-        context
-            .display_list
-            .push(DrawCommand::PushClip { rect: bounds });
+        context.display_list.push(DrawCommand::PushRoundedClip {
+            rect: bounds,
+            radius: radius.resolve(&context.theme.radius, bounds.size.width, bounds.size.height),
+        });
 
         content.paint(content_bounds, context);
 
@@ -691,6 +692,16 @@ impl View for Button {
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
+        let radius = self
+            .radius
+            .unwrap_or_else(|| {
+                context
+                    .inherited_corner_radius()
+                    .map(CornerRadius::Custom)
+                    .unwrap_or(context.theme.button.radius)
+            })
+            .resolve(&context.theme.radius, bounds.size.width, bounds.size.height);
+        let hit = |p| bounds.contains_rounded(radius, p);
         let enabled_changed = self.interaction.set_enabled(self.enabled);
 
         if enabled_changed {
@@ -712,7 +723,7 @@ impl View for Button {
                 ViewEvent::PointerPressed {
                     position,
                     button: PointerButton::Primary,
-                } if bounds.contains(*position) => {
+                } if hit(*position) => {
                     inner.surface.begin(local(*position), now);
                     inner.keyboard_pressure = false;
                 }
@@ -787,7 +798,7 @@ impl View for Button {
             ViewEvent::PointerMoved { position } => {
                 let mut inner = self.interaction.inner.borrow_mut();
 
-                let hovered = bounds.contains(*position);
+                let hovered = hit(*position);
 
                 let pressed = inner.armed && hovered;
 
@@ -815,7 +826,7 @@ impl View for Button {
                 position,
                 button: PointerButton::Primary,
             } => {
-                if !bounds.contains(*position) {
+                if !hit(*position) {
                     return EventResult::Ignored;
                 }
 
@@ -837,7 +848,7 @@ impl View for Button {
                 position,
                 button: PointerButton::Primary,
             } => {
-                let inside = bounds.contains(*position);
+                let inside = hit(*position);
 
                 let (was_armed, clicked, changed) = {
                     let mut inner = self.interaction.inner.borrow_mut();

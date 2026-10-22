@@ -1,17 +1,14 @@
 //! Standard toolbar/sidebar/detail layout from the ViewKit Layout Example.
 
-use std::sync::OnceLock;
-
 use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
 use crate::layout::{IntoStackChild, StackChild};
-use crate::svg::SvgData;
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
-use super::{Rectangle, RectangleColor, Svg, SvgContentMode};
-
-const INNER_CORNER_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10"><path d="M0 0H10C4.48 0 0 4.48 0 10V0Z" fill="#000"/></svg>"##;
+use super::{Rectangle, RectangleColor};
+use crate::draw_command::DrawCommand;
+use crate::geometry::Point;
 
 /// Owns the standard application chrome used by sidebar-based applications.
 ///
@@ -88,12 +85,6 @@ impl NavigationLayout {
         (toolbar, sidebar, detail)
     }
 
-    fn inner_corner() -> Option<SvgData> {
-        static SVG: OnceLock<Option<SvgData>> = OnceLock::new();
-        SVG.get_or_init(|| SvgData::decode(INNER_CORNER_SVG).ok())
-            .clone()
-    }
-
     fn inner_corner_size(bounds: Rect, context: &PaintContext<'_>) -> f32 {
         let available_width =
             (bounds.size.width - context.theme.layout.navigation_sidebar_width).max(0.0);
@@ -144,34 +135,27 @@ impl View for NavigationLayout {
             .navigation_sidebar_width
             .min(bounds.size.width)
             .max(0.0);
-        Rectangle::new()
-            .color(RectangleColor::SubtleSurface)
-            .paint(
-                Rect::new(
-                    bounds.origin.x,
-                    bounds.origin.y,
-                    bounds.size.width,
-                    toolbar_height,
-                ),
-                context,
-            );
-        Rectangle::new()
-            .color(RectangleColor::SubtleSurface)
-            .paint(
-                Rect::new(
-                    bounds.origin.x,
-                    bounds.origin.y + toolbar_height,
-                    sidebar_width,
-                    (bounds.size.height - toolbar_height).max(0.0),
-                ),
-                context,
-            );
+        Rectangle::new().color(RectangleColor::SubtleSurface).paint(
+            Rect::new(
+                bounds.origin.x,
+                bounds.origin.y,
+                bounds.size.width,
+                toolbar_height,
+            ),
+            context,
+        );
+        Rectangle::new().color(RectangleColor::SubtleSurface).paint(
+            Rect::new(
+                bounds.origin.x,
+                bounds.origin.y + toolbar_height,
+                sidebar_width,
+                (bounds.size.height - toolbar_height).max(0.0),
+            ),
+            context,
+        );
 
         let (toolbar, sidebar, detail) = Self::regions(bounds, context);
-        context.record_accessibility(AccessibilityNode::new(
-            AccessibilityRole::Toolbar,
-            toolbar,
-        ));
+        context.record_accessibility(AccessibilityNode::new(AccessibilityRole::Toolbar, toolbar));
         context.record_accessibility(AccessibilityNode::new(
             AccessibilityRole::Navigation,
             sidebar,
@@ -180,21 +164,21 @@ impl View for NavigationLayout {
 
         // The detail view commonly paints its own opaque surface. Composite
         // the concave join after it so the inner corner remains visible.
-        if let Some(svg) = Self::inner_corner() {
-            let corner_size = Self::inner_corner_size(bounds, context);
-            Svg::new(svg)
-                .content_mode(SvgContentMode::Stretch)
-                .tint(context.theme.colors.surface_subtle)
-                .paint(
-                    Rect::new(
-                        bounds.origin.x + sidebar_width,
-                        bounds.origin.y + toolbar_height,
-                        corner_size,
-                        corner_size,
-                    ),
-                    context,
-                );
+        let r = Self::inner_corner_size(bounds, context);
+        let x = bounds.origin.x + sidebar_width;
+        let y = bounds.origin.y + toolbar_height;
+        let mut points = vec![Point::new(x, y), Point::new(x + r, y)];
+        let n = crate::continuous_corner::polygon_segments(r * 4.0);
+        for i in 1..=n {
+            let p = crate::continuous_corner::sample(i * 1024 / n);
+            points.push(Point::new(x + r - r * p.0, y + r * p.1));
         }
+        context.display_list.push(DrawCommand::DrawContour {
+            points,
+            fill: context.theme.colors.surface_subtle,
+            stroke: crate::theme::Color::TRANSPARENT,
+            stroke_width: 0.0,
+        });
 
         self.toolbar.paint(toolbar, context);
         self.sidebar.paint(sidebar, context);
@@ -281,26 +265,28 @@ mod tests {
         assert_eq!(detail.get(), Some(Rect::new(240.0, 48.0, 800.0, 652.0)));
         assert!(display_list.commands().iter().any(|command| matches!(
             command,
-            DrawCommand::DrawSvg { command }
-                if command.bounds == Rect::new(240.0, 48.0, 10.0, 10.0)
+            DrawCommand::DrawContour { points, .. }
+                if points[0] == Point::new(240.0,48.0) && points[1] == Point::new(250.0,48.0)
         )));
         let corner_index = display_list
             .commands()
             .iter()
             .position(|command| matches!(
                 command,
-                DrawCommand::DrawSvg { command }
-                    if command.bounds == Rect::new(240.0, 48.0, 10.0, 10.0)
+                DrawCommand::DrawContour { points, .. }
+                    if points[0] == Point::new(240.0,48.0) && points[1] == Point::new(250.0,48.0)
             ))
             .expect("inner corner");
         let detail_index = display_list
             .commands()
             .iter()
-            .position(|command| matches!(
-                command,
-                DrawCommand::FillRect { rect, .. }
-                    if *rect == Rect::new(240.0, 48.0, 800.0, 652.0)
-            ))
+            .position(|command| {
+                matches!(
+                    command,
+                    DrawCommand::FillRect { rect, .. }
+                        if *rect == Rect::new(240.0, 48.0, 800.0, 652.0)
+                )
+            })
             .expect("detail paint");
         assert!(
             corner_index > detail_index,
@@ -336,8 +322,8 @@ mod tests {
 
         assert!(display_list.commands().iter().any(|command| matches!(
             command,
-            DrawCommand::DrawSvg { command }
-                if command.bounds == Rect::new(240.0, 48.0, 7.0, 7.0)
+            DrawCommand::DrawContour { points, .. }
+                if points[0] == Point::new(240.0,48.0) && points[1] == Point::new(247.0,48.0)
         )));
     }
 }

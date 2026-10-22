@@ -692,7 +692,12 @@ impl View for Slider {
                     metrics.track_height,
                 );
 
-                let pressed_inside_knob = knob_bounds.contains(*position);
+                let radius = context.theme.slider.knob_radius.resolve(
+                    &context.theme.radius,
+                    knob_bounds.size.width,
+                    knob_bounds.size.height,
+                );
+                let pressed_inside_knob = knob_bounds.contains_rounded(radius, *position);
 
                 let drag_offset_x = if pressed_inside_knob {
                     position.x

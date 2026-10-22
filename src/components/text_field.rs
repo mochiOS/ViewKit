@@ -1252,6 +1252,10 @@ impl View for TextField {
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
+        let radius = self
+            .radius
+            .unwrap_or(context.theme.text_field.radius)
+            .resolve(&context.theme.radius, bounds.size.width, bounds.size.height);
         let enabled_changed = self.interaction.set_enabled(self.enabled);
 
         if enabled_changed {
@@ -1299,7 +1303,7 @@ impl View for TextField {
             }
 
             ViewEvent::PointerMoved { position } => {
-                let hovered = bounds.contains(*position);
+                let hovered = bounds.contains_rounded(radius, *position);
                 let selecting = {
                     let mut inner = self.interaction.inner.borrow_mut();
                     let candidate_hover = inner
@@ -1376,7 +1380,7 @@ impl View for TextField {
                     context.request_redraw();
                     return EventResult::Consumed;
                 }
-                let should_focus = bounds.contains(*position);
+                let should_focus = bounds.contains_rounded(radius, *position);
                 let mut inner = self.interaction.inner.borrow_mut();
                 let changed = inner.focused != should_focus
                     || (!should_focus && inner.selection_anchor.is_some());
@@ -1402,7 +1406,7 @@ impl View for TextField {
                 position,
                 button: PointerButton::Primary,
             } => {
-                if !bounds.contains(*position) {
+                if !bounds.contains_rounded(radius, *position) {
                     if self.interaction.set_focused(false) {
                         context.request_redraw_in(bounds.expanded(16.0));
                     }

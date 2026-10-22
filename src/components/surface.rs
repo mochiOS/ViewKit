@@ -97,7 +97,25 @@ where
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
         self.chrome(context.theme).paint(bounds, context);
-        self.content.paint(bounds, context);
+        if self.kind == SurfaceKind::Floating {
+            let radius = context.theme.surface.floating_radius.resolve(
+                &context.theme.radius,
+                bounds.size.width,
+                bounds.size.height,
+            );
+            context
+                .display_list
+                .push(crate::draw_command::DrawCommand::PushRoundedClip {
+                    rect: bounds,
+                    radius,
+                });
+            self.content.paint(bounds, context);
+            context
+                .display_list
+                .push(crate::draw_command::DrawCommand::PopClip);
+        } else {
+            self.content.paint(bounds, context);
+        }
     }
 
     fn handle_event(
@@ -106,6 +124,17 @@ where
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
+        if self.kind == SurfaceKind::Floating {
+            let radius = context.theme.surface.floating_radius.resolve(
+                &context.theme.radius,
+                bounds.size.width,
+                bounds.size.height,
+            );
+            if matches!(event,ViewEvent::PointerPressed {position,..} if !bounds.contains_rounded(radius,*position))
+            {
+                return EventResult::Ignored;
+            }
+        }
         self.content.handle_event(bounds, event, context)
     }
 }

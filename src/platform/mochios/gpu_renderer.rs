@@ -78,6 +78,7 @@ pub(crate) struct GpuSceneRenderer {
     #[cfg(not(target_os = "linux"))]
     image_raster_cache: Vec<ImageRasterCacheEntry>,
     svg_raster_cache: Vec<SvgRasterCacheEntry>,
+    curve_scale: f32,
     frame_width: u32,
     frame_height: u32,
     frame_valid: bool,
@@ -100,6 +101,7 @@ impl GpuSceneRenderer {
             #[cfg(not(target_os = "linux"))]
             image_raster_cache: Vec::new(),
             svg_raster_cache: Vec::new(),
+            curve_scale: 1.0,
             frame_width: 0,
             frame_height: 0,
             frame_valid: false,
@@ -158,6 +160,7 @@ impl GpuSceneRenderer {
     ) -> Result<(), MochiOsBackendError> {
         self.reset()?;
         let scale = valid_scale_factor(viewport.scale_factor);
+        self.curve_scale = scale;
         let viewport_bounds = viewport.logical_bounds();
         let damage = if self.frame_valid
             && self.frame_width == viewport.physical_width
@@ -193,6 +196,18 @@ impl GpuSceneRenderer {
                     );
                 }
                 DrawCommand::FillRect { rect, color } => self.solid_rect(*rect, *color, viewport),
+                DrawCommand::FillRoundedCornersRect { rect, radii, color } => {
+                    self.fan(*rect, *radii, *color, viewport, false)
+                }
+                DrawCommand::StrokeInsideRoundedCornersRect {
+                    rect,
+                    radii,
+                    color,
+                    width,
+                } => self.stroke_inside_corners_rect(*rect, *radii, *width, *color, viewport),
+                DrawCommand::PushRoundedCornersClip { rect, radii } => {
+                    self.push_corners_clip(*rect, Some(*radii))
+                }
                 DrawCommand::FillRoundedRect {
                     rect,
                     radius,
@@ -205,6 +220,14 @@ impl GpuSceneRenderer {
                 }
                 DrawCommand::StrokeRect { rect, color, width } => {
                     self.stroke_rect(*rect, *width, *color, viewport);
+                }
+                DrawCommand::StrokeInsideRoundedRect {
+                    rect,
+                    radius,
+                    color,
+                    width,
+                } => {
+                    self.stroke_inside_rounded_rect(*rect, *radius, *width, *color, viewport);
                 }
                 DrawCommand::StrokeRoundedRect {
                     rect,
@@ -365,6 +388,9 @@ impl GpuSceneRenderer {
     }
 
     fn push_clip(&mut self, rect: Rect, radius: Option<f32>) {
+        self.push_corners_clip(rect, radius.map(|r| [r; 4]));
+    }
+    fn push_corners_clip(&mut self, rect: Rect, radii: Option<[f32; 4]>) {
         let Some(current) = self.clips.last() else {
             return;
         };
@@ -372,14 +398,18 @@ impl GpuSceneRenderer {
             .intersection(current.bounds)
             .unwrap_or(Rect::new(0.0, 0.0, 0.0, 0.0));
         let mut shapes = current.shapes.clone();
-        if let Some(radius) = radius {
-            let radius = radius
-                .max(0.0)
-                .min(rect.size.width.min(rect.size.height) * 0.5);
+        if let Some(radii) = radii {
+            let shape = crate::continuous_corner::shape(rect, radii);
             shapes.push(ClipShape::Rounded {
                 rect,
-                radius,
-                polygon: rounded_points(rect, radius),
+                radii: shape.radii,
+                polygon: crate::continuous_corner::polygon(
+                    rect,
+                    shape.radii,
+                    crate::continuous_corner::polygon_segments(
+                        shape.max_radius() * self.curve_scale,
+                    ),
+                ),
             });
         } else {
             shapes.push(ClipShape::Rect(rect));
@@ -487,20 +517,29 @@ impl GpuSceneRenderer {
     }
 
     fn rounded_rect(&mut self, rect: Rect, radius: f32, color: Color, viewport: Viewport) {
-        self.fan(rect, radius.max(0.0), color, viewport, false);
+        self.fan(rect, [radius; 4], color, viewport, false);
     }
 
     fn ellipse(&mut self, rect: Rect, color: Color, viewport: Viewport) {
         self.fan(
             rect,
-            rect.size.width.min(rect.size.height) * 0.5,
+            [rect.size.width.min(rect.size.height) * 0.5; 4],
             color,
             viewport,
             true,
         );
     }
 
-    fn fan(&mut self, rect: Rect, radius: f32, color: Color, viewport: Viewport, ellipse: bool) {
+    fn fan(
+        &mut self,
+        rect: Rect,
+        radii: [f32; 4],
+        color: Color,
+        viewport: Viewport,
+        ellipse: bool,
+    ) {
+        let shape = crate::continuous_corner::shape(rect, radii);
+        let radius = shape.max_radius();
         if rect.intersection(self.current_clip()).is_none() {
             return;
         }
@@ -511,15 +550,18 @@ impl GpuSceneRenderer {
             inner_rect.origin.x + inner_rect.size.width * 0.5,
             inner_rect.origin.y + inner_rect.size.height * 0.5,
         );
+        let segments = crate::continuous_corner::polygon_segments(
+            (radius + fringe) * valid_scale_factor(viewport.scale_factor),
+        );
         let points = if ellipse {
             ellipse_points(inner_rect)
         } else {
-            rounded_points(inner_rect, (radius - fringe).max(0.0))
+            crate::continuous_corner::polygon_offset(rect, shape.radii, segments, -fringe)
         };
         let outer = if ellipse {
             ellipse_points(outer_rect)
         } else {
-            rounded_points(outer_rect, radius + fringe)
+            crate::continuous_corner::polygon_offset(rect, shape.radii, segments, fringe)
         };
         if points.len() < 3 {
             return;
@@ -615,10 +657,13 @@ impl GpuSceneRenderer {
         let half = width * 0.5;
         let fringe = 0.5 / valid_scale_factor(viewport.scale_factor);
         let opaque_inset = half.min(fringe);
-        let outer_transparent = rounded_points_at_offset(rect, radius, half + fringe);
-        let outer_opaque = rounded_points_at_offset(rect, radius, half - opaque_inset);
-        let inner_opaque = rounded_points_at_offset(rect, radius, -half + opaque_inset);
-        let inner_transparent = rounded_points_at_offset(rect, radius, -half - fringe);
+        let segments = crate::continuous_corner::polygon_segments(
+            (radius + half + fringe) * valid_scale_factor(viewport.scale_factor),
+        );
+        let outer_transparent = rounded_points_at_offset(rect, radius, half + fringe, segments);
+        let outer_opaque = rounded_points_at_offset(rect, radius, half - opaque_inset, segments);
+        let inner_opaque = rounded_points_at_offset(rect, radius, -half + opaque_inset, segments);
+        let inner_transparent = rounded_points_at_offset(rect, radius, -half - fringe, segments);
         self.anti_aliased_ring(
             &outer_transparent,
             &outer_opaque,
@@ -627,6 +672,46 @@ impl GpuSceneRenderer {
             color,
             viewport,
         );
+    }
+
+    fn stroke_inside_rounded_rect(
+        &mut self,
+        rect: Rect,
+        radius: f32,
+        width: f32,
+        color: Color,
+        viewport: Viewport,
+    ) {
+        self.stroke_inside_corners_rect(rect, [radius; 4], width, color, viewport);
+    }
+    fn stroke_inside_corners_rect(
+        &mut self,
+        rect: Rect,
+        radii: [f32; 4],
+        width: f32,
+        color: Color,
+        viewport: Viewport,
+    ) {
+        let shape = crate::continuous_corner::shape(rect, radii);
+        let radius = shape.max_radius();
+        if !width.is_finite() || width <= 0.0 {
+            return;
+        }
+        if width >= rect.size.width.min(rect.size.height) * 0.5 {
+            self.fan(rect, shape.radii, color, viewport, false);
+            return;
+        }
+        let fringe = 0.5 / valid_scale_factor(viewport.scale_factor);
+        let aa = fringe.min(width * 0.5);
+        let n = crate::continuous_corner::polygon_segments(
+            (radius + fringe) * valid_scale_factor(viewport.scale_factor),
+        );
+        let outer_fade = crate::continuous_corner::polygon_offset(rect, shape.radii, n, fringe);
+        let outer = crate::continuous_corner::polygon_offset(rect, shape.radii, n, -aa);
+        let inner = crate::continuous_corner::polygon_offset(rect, shape.radii, n, -width + aa);
+        let inner_fade =
+            crate::continuous_corner::polygon_offset(rect, shape.radii, n, -width - fringe);
+        self.anti_aliased_ring(&outer_fade, &outer, &inner, &inner_fade, color, viewport);
     }
 
     fn stroke_ellipse(&mut self, rect: Rect, width: f32, color: Color, viewport: Viewport) {
@@ -1336,8 +1421,13 @@ fn offset_rect(rect: Rect, offset: f32) -> Rect {
     }
 }
 
-fn rounded_points_at_offset(rect: Rect, radius: f32, offset: f32) -> Vec<(f32, f32)> {
-    rounded_points(offset_rect(rect, offset), (radius + offset).max(0.0))
+fn rounded_points_at_offset(
+    rect: Rect,
+    radius: f32,
+    offset: f32,
+    segments: usize,
+) -> Vec<(f32, f32)> {
+    crate::continuous_corner::polygon_offset(rect, [radius; 4], segments, offset)
 }
 
 fn transparent(color: Color) -> Color {
@@ -1418,54 +1508,4 @@ fn ellipse_points(rect: Rect) -> Vec<(f32, f32)> {
             (center_x + angle.cos() * rx, center_y + angle.sin() * ry)
         })
         .collect()
-}
-
-fn rounded_points(rect: Rect, radius: f32) -> Vec<(f32, f32)> {
-    let radius = radius
-        .min(rect.size.width * 0.5)
-        .min(rect.size.height * 0.5)
-        .max(0.0);
-    if radius <= 0.0 {
-        return vec![
-            (rect.origin.x, rect.origin.y),
-            (rect.origin.x + rect.size.width, rect.origin.y),
-            (
-                rect.origin.x + rect.size.width,
-                rect.origin.y + rect.size.height,
-            ),
-            (rect.origin.x, rect.origin.y + rect.size.height),
-        ];
-    }
-    let centers = [
-        (
-            rect.origin.x + rect.size.width - radius,
-            rect.origin.y + radius,
-            -core::f32::consts::FRAC_PI_2,
-        ),
-        (
-            rect.origin.x + rect.size.width - radius,
-            rect.origin.y + rect.size.height - radius,
-            0.0,
-        ),
-        (
-            rect.origin.x + radius,
-            rect.origin.y + rect.size.height - radius,
-            core::f32::consts::FRAC_PI_2,
-        ),
-        (
-            rect.origin.x + radius,
-            rect.origin.y + radius,
-            core::f32::consts::PI,
-        ),
-    ];
-    let per_corner = CURVE_SEGMENTS / 4;
-    let mut points = Vec::with_capacity(CURVE_SEGMENTS);
-    for (cx, cy, start) in centers {
-        for step in 0..per_corner {
-            let angle =
-                start + core::f32::consts::FRAC_PI_2 * step as f32 / (per_corner - 1) as f32;
-            points.push((cx + angle.cos() * radius, cy + angle.sin() * radius));
-        }
-    }
-    points
 }

@@ -45,7 +45,10 @@ impl CornerRadius {
             Self::Custom(value) => value,
         };
 
-        value.max(0.0).min(width.min(height) / 2.0)
+        crate::draw_command::clamp_radius(
+            crate::geometry::Rect::new(0.0, 0.0, width, height),
+            value,
+        )
     }
 }
 use super::FigmaTokens;

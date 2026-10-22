@@ -99,7 +99,9 @@ impl Slider {
             ViewEvent::PointerPressed {
                 position,
                 button: PointerButton::Primary,
-            } if bounds.contains(*position) => {
+            } if bounds
+                .contains_rounded(bounds.size.width.min(bounds.size.height) * 0.5, *position) =>
+            {
                 self.interaction.inner.borrow_mut().dragging = true;
                 self.update_level(bounds, position.y);
                 context.request_redraw_in(bounds);

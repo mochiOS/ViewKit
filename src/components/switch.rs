@@ -199,7 +199,14 @@ impl Switch {
                 position,
                 button: PointerButton::Primary,
             } => {
-                if !bounds.contains(*position) {
+                if !bounds.contains_rounded(
+                    context.theme.button.radius.resolve(
+                        &context.theme.radius,
+                        bounds.size.width,
+                        bounds.size.height,
+                    ),
+                    *position,
+                ) {
                     return EventResult::Ignored;
                 }
 
@@ -326,7 +333,14 @@ impl Switch {
 
                 if was_dragging {
                     self.checked.set_if_changed(drag_checked);
-                } else if bounds.contains(*position) {
+                } else if bounds.contains_rounded(
+                    context.theme.button.radius.resolve(
+                        &context.theme.radius,
+                        bounds.size.width,
+                        bounds.size.height,
+                    ),
+                    *position,
+                ) {
                     self.checked.set(!self.checked.get());
                 }
 

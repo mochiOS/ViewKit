@@ -123,9 +123,10 @@ where
             )))
             .paint(bounds, context);
 
-        context
-            .display_list
-            .push(DrawCommand::PushClip { rect: bounds });
+        context.display_list.push(DrawCommand::PushRoundedClip {
+            rect: bounds,
+            radius: resolved_radius,
+        });
 
         context.push_corner_radius(resolved_radius);
         let inset = self.inset(context.theme);
@@ -141,11 +142,24 @@ where
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
-        self.content.handle_event(
+        let radius = self.radius.unwrap_or(context.theme.card.radius).resolve(
+            &context.theme.radius,
+            bounds.size.width,
+            bounds.size.height,
+        );
+        if matches!(event, ViewEvent::PointerPressed { position, .. }
+            if !bounds.contains_rounded(radius,*position))
+        {
+            return EventResult::Ignored;
+        }
+        context.push_corner_radius(radius);
+        let result = self.content.handle_event(
             inset_rect(bounds, self.inset(context.theme)),
             event,
             context,
-        )
+        );
+        context.pop_corner_radius();
+        result
     }
 }
 

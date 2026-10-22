@@ -13,7 +13,7 @@ pub(crate) enum ClipShape {
     Rect(Rect),
     Rounded {
         rect: Rect,
-        radius: f32,
+        radii: [f32; 4],
         polygon: Vec<(f32, f32)>,
     },
 }
@@ -28,7 +28,9 @@ impl ClipShape {
     pub(crate) fn contains(&self, point: (f32, f32)) -> bool {
         match self {
             Self::Rect(rect) => rect_contains(*rect, point),
-            Self::Rounded { rect, radius, .. } => rounded_rect_contains(*rect, *radius, point),
+            Self::Rounded { rect, radii, .. } => {
+                crate::continuous_corner::shape(*rect, *radii).contains(point)
+            }
         }
     }
 
@@ -99,34 +101,6 @@ fn rect_contains(rect: Rect, point: (f32, f32)) -> bool {
         && point.1 <= rect.origin.y + rect.size.height
 }
 
-fn rounded_rect_contains(rect: Rect, radius: f32, point: (f32, f32)) -> bool {
-    if !rect_contains(rect, point) {
-        return false;
-    }
-    let radius = radius
-        .max(0.0)
-        .min(rect.size.width.min(rect.size.height) * 0.5);
-    if radius == 0.0
-        || point.0 >= rect.origin.x + radius && point.0 <= rect.origin.x + rect.size.width - radius
-        || point.1 >= rect.origin.y + radius && point.1 <= rect.origin.y + rect.size.height - radius
-    {
-        return true;
-    }
-    let center_x = if point.0 < rect.origin.x + radius {
-        rect.origin.x + radius
-    } else {
-        rect.origin.x + rect.size.width - radius
-    };
-    let center_y = if point.1 < rect.origin.y + radius {
-        rect.origin.y + radius
-    } else {
-        rect.origin.y + rect.size.height - radius
-    };
-    let dx = point.0 - center_x;
-    let dy = point.1 - center_y;
-    dx * dx + dy * dy <= radius * radius + 0.001
-}
-
 fn polygon_area(polygon: &[(f32, f32)]) -> f32 {
     polygon
         .iter()
@@ -138,10 +112,13 @@ fn polygon_area(polygon: &[(f32, f32)]) -> f32 {
 
 fn edge_contains(start: (f32, f32), end: (f32, f32), point: (f32, f32), clockwise: bool) -> bool {
     let cross = (end.0 - start.0) * (point.1 - start.1) - (end.1 - start.1) * (point.0 - start.0);
+    // A fixed cross-product epsilon grows into a large distance error on
+    // subpixel corner edges. Scale it with edge length instead.
+    let epsilon = 0.00001 * ((end.0 - start.0).abs() + (end.1 - start.1).abs());
     if clockwise {
-        cross >= -0.001
+        cross >= -epsilon
     } else {
-        cross <= 0.001
+        cross <= epsilon
     }
 }
 
@@ -201,7 +178,7 @@ mod tests {
 
         let shape = ClipShape::Rounded {
             rect,
-            radius: 12.0,
+            radii: [12.0; 4],
             polygon: vec![(12.0, 0.0), (88.0, 0.0), (100.0, 12.0)],
         };
         assert_eq!(shape.polygon().len(), 3);

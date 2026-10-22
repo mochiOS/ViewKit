@@ -164,37 +164,7 @@ impl View for Rectangle {
             }
         }
 
-        if let Some((border_color, border_width)) = self.border.resolve(context) {
-            let half_width = border_width / 2.0;
-
-            let border_bounds = Rect::new(
-                bounds.origin.x + half_width,
-                bounds.origin.y + half_width,
-                (bounds.size.width - border_width).max(0.0),
-                (bounds.size.height - border_width).max(0.0),
-            );
-
-            if border_bounds.size.width > 0.0 && border_bounds.size.height > 0.0 {
-                let border_radius = (radius - half_width).max(0.0);
-
-                let command = if border_radius > 0.0 {
-                    DrawCommand::StrokeRoundedRect {
-                        rect: border_bounds,
-                        radius: border_radius,
-                        color: border_color,
-                        width: border_width,
-                    }
-                } else {
-                    DrawCommand::StrokeRect {
-                        rect: border_bounds,
-                        color: border_color,
-                        width: border_width,
-                    }
-                };
-
-                context.display_list.push(command);
-            }
-        }
+        paint_border(bounds, radius, self.border, context);
     }
 }
 
@@ -204,6 +174,17 @@ fn paint_border(bounds: Rect, radius: f32, border: BorderStyle, context: &mut Pa
         return;
     };
 
+    if radius > 0.0 {
+        context
+            .display_list
+            .push(DrawCommand::StrokeInsideRoundedRect {
+                rect: bounds,
+                radius,
+                color,
+                width,
+            });
+        return;
+    }
     let half_width = width / 2.0;
 
     let border_bounds = Rect::new(
