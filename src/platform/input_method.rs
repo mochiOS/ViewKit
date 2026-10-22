@@ -1,13 +1,13 @@
-#[cfg(target_os = "mochios")]
+#[cfg(any(target_os = "mochios", target_os = "linux"))]
 const CONVERT_OPCODE: u32 = u32::from_le_bytes(*b"IMEC");
-#[cfg(target_os = "mochios")]
+#[cfg(any(target_os = "mochios", target_os = "linux"))]
 const STATUS_OPCODE: u32 = u32::from_le_bytes(*b"IMES");
-#[cfg(target_os = "mochios")]
+#[cfg(any(target_os = "mochios", target_os = "linux"))]
 const TOGGLE_OPCODE: u32 = u32::from_le_bytes(*b"IMET");
-#[cfg(target_os = "mochios")]
+#[cfg(any(target_os = "mochios", target_os = "linux"))]
 const HEADER_LEN: usize = 12;
 const REPLY_HEADER_LEN: usize = 8;
-#[cfg(target_os = "mochios")]
+#[cfg(any(target_os = "mochios", target_os = "linux"))]
 const MAX_MESSAGE_LEN: usize = 4096;
 const MAX_CANDIDATES: usize = 20;
 
@@ -42,7 +42,7 @@ pub fn candidates(reading: &str) -> Vec<String> {
     decode_reply(&reply[..((message & 0xffff_ffff) as usize).min(reply.len())])
 }
 
-#[cfg(not(target_os = "mochios"))]
+#[cfg(not(any(target_os = "mochios", target_os = "linux")))]
 pub fn candidates(_reading: &str) -> Vec<String> {
     Vec::new()
 }
@@ -52,7 +52,7 @@ pub fn enabled() -> Option<bool> {
     state_call(STATUS_OPCODE)
 }
 
-#[cfg(not(target_os = "mochios"))]
+#[cfg(not(any(target_os = "mochios", target_os = "linux")))]
 pub fn enabled() -> Option<bool> {
     None
 }
@@ -62,7 +62,7 @@ pub fn toggle() -> Option<bool> {
     state_call(TOGGLE_OPCODE)
 }
 
-#[cfg(not(target_os = "mochios"))]
+#[cfg(not(any(target_os = "mochios", target_os = "linux")))]
 pub fn toggle() -> Option<bool> {
     None
 }
@@ -78,6 +78,63 @@ fn state_call(opcode: u32) -> Option<bool> {
     let mut reply = [0u8; 1];
     let message = platform::ipc::call(input, &opcode.to_le_bytes(), &mut reply).ok()?;
     ((message & 0xffff_ffff) == 1).then_some(reply[0] != 0)
+}
+
+#[cfg(target_os = "linux")]
+fn preview_call(request: &[u8]) -> Option<Vec<u8>> {
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixStream;
+    use std::time::Duration;
+    let socket = std::env::var_os("MOCHIOS_PREVIEW_IME_SOCKET")?;
+    let mut stream = UnixStream::connect(socket).ok()?;
+    stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(5)))
+        .ok()?;
+    stream
+        .write_all(&(request.len() as u32).to_le_bytes())
+        .ok()?;
+    stream.write_all(request).ok()?;
+    let mut header = [0; 4];
+    stream.read_exact(&mut header).ok()?;
+    let length = u32::from_le_bytes(header) as usize;
+    if length == 0 || length > MAX_MESSAGE_LEN {
+        return None;
+    }
+    let mut reply = vec![0; length];
+    stream.read_exact(&mut reply).ok()?;
+    Some(reply)
+}
+
+#[cfg(target_os = "linux")]
+pub fn enabled() -> Option<bool> {
+    let reply = preview_call(&STATUS_OPCODE.to_le_bytes())?;
+    (reply.len() == 1).then_some(reply[0] != 0)
+}
+
+#[cfg(target_os = "linux")]
+pub fn toggle() -> Option<bool> {
+    let reply = preview_call(&TOGGLE_OPCODE.to_le_bytes())?;
+    (reply.len() == 1).then_some(reply[0] != 0)
+}
+
+#[cfg(target_os = "linux")]
+pub fn candidates(reading: &str) -> Vec<String> {
+    if reading.is_empty() || HEADER_LEN + reading.len() > MAX_MESSAGE_LEN {
+        return Vec::new();
+    }
+    let Ok(length) = u16::try_from(reading.len()) else {
+        return Vec::new();
+    };
+    let mut request = Vec::with_capacity(HEADER_LEN + reading.len());
+    request.extend_from_slice(&CONVERT_OPCODE.to_le_bytes());
+    request.extend_from_slice(&length.to_le_bytes());
+    request.extend_from_slice(&(MAX_CANDIDATES as u16).to_le_bytes());
+    request.extend_from_slice(&[0; 4]);
+    request.extend_from_slice(reading.as_bytes());
+    preview_call(&request)
+        .map(|reply| decode_reply(&reply))
+        .unwrap_or_default()
 }
 
 fn decode_reply(reply: &[u8]) -> Vec<String> {
