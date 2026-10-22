@@ -13,6 +13,7 @@ pub struct AdaptiveGrid {
     cell_size: Size,
     column_gap: f32,
     row_gap: f32,
+    fills_columns: bool,
 }
 
 impl AdaptiveGrid {
@@ -22,6 +23,7 @@ impl AdaptiveGrid {
             cell_size: Size::new(sanitize(cell_width), sanitize(cell_height)),
             column_gap: 0.0,
             row_gap: 0.0,
+            fills_columns: false,
         }
     }
 
@@ -49,6 +51,25 @@ impl AdaptiveGrid {
         self
     }
 
+    /// Distributes available width across columns. The preferred cell width
+    /// controls wrapping; a single column also fits narrower windows.
+    pub fn fill_columns(mut self) -> Self {
+        self.fills_columns = true;
+        self
+    }
+
+    fn cell_width(&self, available_width: f32) -> f32 {
+        if !self.fills_columns {
+            return self.cell_size.width;
+        }
+        let columns = self
+            .columns(available_width)
+            .min(self.children.len().max(1));
+        ((sanitize(available_width) - self.column_gap * columns.saturating_sub(1) as f32)
+            / columns as f32)
+            .max(0.0)
+    }
+
     fn columns(&self, width: f32) -> usize {
         if self.children.is_empty() || self.cell_size.width <= 0.0 {
             return 1;
@@ -65,20 +86,23 @@ impl AdaptiveGrid {
         let columns = self.columns(available_width).min(self.children.len());
         let rows = self.children.len().div_ceil(columns);
         Size::new(
-            self.cell_size.width * columns as f32
+            self.cell_width(available_width) * columns as f32
                 + self.column_gap * columns.saturating_sub(1) as f32,
             self.cell_size.height * rows as f32 + self.row_gap * rows.saturating_sub(1) as f32,
         )
     }
 
     fn child_bounds(&self, bounds: Rect, index: usize) -> Rect {
-        let columns = self.columns(bounds.size.width);
+        let columns = self
+            .columns(bounds.size.width)
+            .min(self.children.len().max(1));
+        let width = self.cell_width(bounds.size.width);
         let column = index % columns;
         let row = index / columns;
         Rect::new(
-            bounds.origin.x + column as f32 * (self.cell_size.width + self.column_gap),
+            bounds.origin.x + column as f32 * (width + self.column_gap),
             bounds.origin.y + row as f32 * (self.cell_size.height + self.row_gap),
-            self.cell_size.width,
+            width,
             self.cell_size.height,
         )
     }
@@ -89,7 +113,8 @@ impl View for AdaptiveGrid {
         let available_width = if constraints.maximum.width.is_finite() {
             constraints.maximum.width
         } else {
-            self.content_size(f32::MAX).width
+            self.cell_size.width * self.children.len() as f32
+                + self.column_gap * self.children.len().saturating_sub(1) as f32
         };
         constraints.constrain(self.content_size(available_width))
     }
@@ -107,17 +132,16 @@ impl View for AdaptiveGrid {
         context: &mut EventContext<'_>,
     ) -> EventResult {
         if event.requires_broadcast() {
-            return self
-                .children
-                .iter()
-                .enumerate()
-                .fold(EventResult::Ignored, |result, (index, child)| {
+            return self.children.iter().enumerate().fold(
+                EventResult::Ignored,
+                |result, (index, child)| {
                     result.merge(child.handle_event(
                         self.child_bounds(bounds, index),
                         event,
                         context,
                     ))
-                });
+                },
+            );
         }
         let Some(position) = event.position() else {
             return EventResult::Ignored;
@@ -155,6 +179,36 @@ mod tests {
         fn paint(&self, bounds: Rect, _context: &mut PaintContext<'_>) {
             self.0.borrow_mut().push(bounds);
         }
+    }
+
+    #[test]
+    fn filled_columns_use_available_space_and_fit_a_narrow_window() {
+        let grid = AdaptiveGrid::new(300.0, 100.0)
+            .fill_columns()
+            .spacing(16.0, 8.0)
+            .children((0..3).map(|_| Recorder(Rc::new(RefCell::new(Vec::new())))));
+        let wide = Rect::new(20.0, 30.0, 752.0, 300.0);
+        assert_eq!(
+            grid.child_bounds(wide, 0),
+            Rect::new(20.0, 30.0, 368.0, 100.0)
+        );
+        assert_eq!(
+            grid.child_bounds(wide, 1),
+            Rect::new(404.0, 30.0, 368.0, 100.0)
+        );
+        assert_eq!(
+            grid.child_bounds(wide, 2),
+            Rect::new(20.0, 138.0, 368.0, 100.0)
+        );
+        let narrow = Rect::new(20.0, 30.0, 240.0, 400.0);
+        assert_eq!(
+            grid.child_bounds(narrow, 0),
+            Rect::new(20.0, 30.0, 240.0, 100.0)
+        );
+        assert_eq!(
+            grid.child_bounds(narrow, 2),
+            Rect::new(20.0, 246.0, 240.0, 100.0)
+        );
     }
 
     #[test]
