@@ -51,6 +51,77 @@ pub enum Packet {
         event: PlatformEvent,
     },
     ReloadAppearance,
+    ControlCenterCard {
+        bundle_id: String,
+        item_id: String,
+        title: String,
+        rows: Vec<(String, String)>,
+    },
+    UserNotification {
+        id: u64,
+        bundle_id: String,
+        title: String,
+        body: String,
+    },
+    FilePanelRequest {
+        configuration: Vec<u8>,
+        reply_socket: std::path::PathBuf,
+    },
+    FilePanelSelection {
+        path: Option<std::path::PathBuf>,
+    },
+    FilePanelOperation {
+        error: Option<String>,
+    },
+}
+
+thread_local! {
+    static APP_MESSAGES: RefCell<VecDeque<Packet>> = const { RefCell::new(VecDeque::new()) };
+}
+
+/// Queues declarative application data for the preview shell, including registration before App::new finishes.
+pub fn publish_control_center_card(
+    bundle_id: String,
+    item_id: String,
+    title: String,
+    rows: Vec<(String, String)>,
+) -> io::Result<()> {
+    APP_MESSAGES.with(|queue| {
+        let mut queue = queue.borrow_mut();
+        queue.retain(|packet| !matches!(packet, Packet::ControlCenterCard { bundle_id: old_bundle, item_id: old_item, .. } if old_bundle == &bundle_id && old_item == &item_id));
+        if queue.iter().filter(|packet| matches!(packet, Packet::ControlCenterCard { .. })).count() >= 32 { return Err(io::Error::other("too many pending Control Center cards")); }
+        queue.push_back(Packet::ControlCenterCard { bundle_id, item_id, title, rows });
+        Ok(())
+    })
+}
+
+/// Queues a session-local notification through the authenticated app connection.
+/// The ID is unique across preview processes, including registration in App::new.
+pub fn publish_notification(bundle_id: String, title: String, body: String) -> io::Result<u64> {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static NEXT_ID: AtomicU32 = AtomicU32::new(1);
+    APP_MESSAGES.with(|queue| {
+        let mut queue = queue.borrow_mut();
+        if queue
+            .iter()
+            .filter(|packet| matches!(packet, Packet::UserNotification { .. }))
+            .count()
+            >= 128
+        {
+            return Err(io::Error::other("too many pending notifications"));
+        }
+        let local = NEXT_ID
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .map_err(|_| io::Error::other("notification IDs exhausted"))?;
+        let id = ((std::process::id() as u64) << 32) | u64::from(local);
+        queue.push_back(Packet::UserNotification {
+            id,
+            bundle_id,
+            title,
+            body,
+        });
+        Ok(id)
+    })
 }
 
 /// Nonblocking, bounded framing shared by the shell and application backend.
@@ -340,6 +411,12 @@ pub(crate) fn run<A: PlatformApplication>(
                 })?;
             }
         }
+        // Delivery from event handlers must be flushed before final window
+        // close/exit as well as during normal frames.
+        let messages = APP_MESSAGES.with(|queue| std::mem::take(&mut *queue.borrow_mut()));
+        for packet in messages {
+            connection.send(packet)?;
+        }
         connection.flush()?;
         if windows.is_empty() || app.exit_requested() {
             return Ok(());
@@ -394,6 +471,16 @@ mod tests {
             radius: 6.0,
             color: Color::WHITE,
         });
+        list.push(DrawCommand::DrawContour {
+            points: vec![
+                crate::geometry::Point::new(0.0, 0.0),
+                crate::geometry::Point::new(30.0, 0.0),
+                crate::geometry::Point::new(15.0, 10.0),
+            ],
+            fill: Color::WHITE,
+            stroke: Color::BLACK,
+            stroke_width: 1.0,
+        });
         a.send(Packet::Frame {
             id: 3,
             list: list.clone(),
@@ -427,6 +514,48 @@ mod tests {
             a.write_all(&header).unwrap();
             assert_eq!(b.poll().unwrap_err().kind(), io::ErrorKind::InvalidData);
         }
+    }
+
+    #[test]
+    fn notification_published_on_final_close_is_delivered_before_exit() {
+        use std::os::unix::net::UnixListener;
+        struct Probe;
+        impl PlatformApplication for Probe {
+            fn handle_event(&mut self, event: PlatformEvent, _: &dyn PlatformWindow) {
+                if matches!(event, PlatformEvent::CloseRequested) {
+                    publish_notification(
+                        "org.example.app".into(),
+                        "完了".into(),
+                        "保存しました".into(),
+                    )
+                    .unwrap();
+                }
+            }
+        }
+        let directory =
+            std::env::temp_dir().join(format!("viewkit-notification-exit-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let socket = directory.join("preview.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let child_socket = socket.clone();
+        let child = std::thread::spawn(move || {
+            run(Probe, WindowConfig::default(), child_socket.as_os_str()).unwrap()
+        });
+        let (stream, _) = listener.accept().unwrap();
+        let mut server = Connection::new(stream).unwrap();
+        server
+            .send(Packet::Event {
+                id: 1,
+                event: PlatformEvent::CloseRequested,
+            })
+            .unwrap();
+        child.join().unwrap();
+        let packets = server.poll().unwrap();
+        assert!(packets.iter().any(|packet| matches!(packet, Packet::UserNotification { id, bundle_id, title, body }
+            if id >> 32 == std::process::id() as u64 && bundle_id == "org.example.app" && title == "完了" && body == "保存しました")));
+        drop(listener);
+        std::fs::remove_file(socket).unwrap();
+        std::fs::remove_dir(directory).unwrap();
     }
 
     #[test]
