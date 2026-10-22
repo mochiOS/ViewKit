@@ -4,7 +4,7 @@ use std::rc::Rc;
 use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
-use crate::layout::{StackAlignment, StackGap};
+use crate::layout::{IntoStackChild, StackAlignment, StackGap};
 use crate::theme::{Color, CornerRadius, ShadowStyle, Theme};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
@@ -21,6 +21,7 @@ type Callback = Rc<RefCell<Box<dyn FnMut()>>>;
 pub struct SidebarItem {
     label: String,
     symbol: Option<SymbolName>,
+    reserves_symbol_space: bool,
     selected: bool,
     interaction: ButtonInteractionState,
     on_select: Option<Callback>,
@@ -31,6 +32,7 @@ impl SidebarItem {
         Self {
             label: label.into(),
             symbol: None,
+            reserves_symbol_space: false,
             selected: false,
             interaction: ButtonInteractionState::new(),
             on_select: None,
@@ -39,6 +41,13 @@ impl SidebarItem {
 
     pub fn symbol(mut self, symbol: SymbolName) -> Self {
         self.symbol = Some(symbol);
+        self
+    }
+
+    /// Aligns labels with neighboring symbol-bearing items even when this
+    /// item has no available symbol.
+    pub fn reserve_symbol_space(mut self) -> Self {
+        self.reserves_symbol_space = true;
         self
     }
 
@@ -77,6 +86,14 @@ impl SidebarItem {
                 Icon::new(symbol)
                     .size(theme.layout.compact_icon_size)
                     .color(foreground),
+            );
+        } else if self.reserves_symbol_space {
+            content = content.child(
+                super::Spacer::new()
+                    .into_stack_child()
+                    .width(theme.layout.compact_icon_size)
+                    .flex_grow(0.0)
+                    .flex_shrink(0.0),
             );
         }
         content = content.child(
@@ -135,9 +152,7 @@ impl SidebarSection {
             content: VStack::new()
                 .alignment(StackAlignment::Stretch)
                 .gap(StackGap::ExtraSmall)
-                .child(
-                    Text::caption(title.into()).color(Theme::current().colors.text_secondary),
-                ),
+                .child(Text::caption(title.into()).color(Theme::current().colors.text_secondary)),
         }
     }
 

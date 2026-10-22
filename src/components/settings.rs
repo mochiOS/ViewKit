@@ -4,12 +4,13 @@ use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
 use crate::layout::{
     IntoStackChild, IntoStackChildren, StackAlignment, StackChild, StackDirection,
-    StackDistribution, StackGap, handle_stack_event, measure_stack, paint_stack,
+    StackDistribution, StackGap, handle_stack_event, layout_stack, measure_stack, paint_stack,
 };
 use crate::typography::{TextAlignment, TextRole};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
-use super::{FormSections, PageHeader, Text, TextTone, VStack};
+use super::{FormSections, PageHeader, Rectangle, RectangleColor, Text, TextTone, VStack};
+use crate::theme::CornerRadius;
 
 /// A page header followed by a centered, standard-width settings form.
 pub struct SettingsPage<Content> {
@@ -90,7 +91,10 @@ impl<Content: View> View for SettingsPage<Content> {
         let header = self.header().measure(constraints, context);
         let form = self.content.measure(
             Constraints::loose(Size::new(
-                constraints.maximum.width.min(context.theme.layout.form_width),
+                constraints
+                    .maximum
+                    .width
+                    .min(context.theme.layout.form_width),
                 constraints.maximum.height,
             )),
             context,
@@ -113,7 +117,12 @@ impl<Content: View> View for SettingsPage<Content> {
                 .height
         };
         self.header().paint(
-            Rect::new(bounds.origin.x, bounds.origin.y, bounds.size.width, header_height),
+            Rect::new(
+                bounds.origin.x,
+                bounds.origin.y,
+                bounds.size.width,
+                header_height,
+            ),
             context,
         );
         self.content.paint(
@@ -156,11 +165,12 @@ impl<Content: View> View for SettingsPage<Content> {
     }
 }
 
-/// A titled group of settings rows. Rows are separated by whitespace, never
-/// by automatically inserted dividers.
+/// A titled group of settings rows. The default presentation uses whitespace;
+/// `grouped()` opts into one inset surface with separators.
 pub struct SettingsSection {
     title: String,
     rows: Vec<StackChild>,
+    grouped: bool,
 }
 
 impl SettingsSection {
@@ -168,7 +178,15 @@ impl SettingsSection {
         Self {
             title: title.into(),
             rows: Vec::new(),
+            grouped: false,
         }
+    }
+
+    /// Places related rows on one inset surface with quiet separators.
+    /// Existing ungrouped forms retain their original presentation.
+    pub fn grouped(mut self) -> Self {
+        self.grouped = true;
+        self
     }
 
     pub fn row<Row: IntoStackChild>(mut self, row: Row) -> Self {
@@ -176,10 +194,7 @@ impl SettingsSection {
         self
     }
 
-    pub fn rows<Row: IntoStackChild>(
-        mut self,
-        rows: impl IntoIterator<Item = Row>,
-    ) -> Self {
+    pub fn rows<Row: IntoStackChild>(mut self, rows: impl IntoIterator<Item = Row>) -> Self {
         self.rows
             .extend(rows.into_iter().map(IntoStackChild::into_stack_child));
         self
@@ -190,20 +205,33 @@ impl SettingsSection {
             .weight(600)
             .tone(TextTone::Secondary)
     }
+
+    fn inset(&self, theme: &crate::theme::Theme) -> f32 {
+        if self.grouped {
+            theme.spacing.large
+        } else {
+            0.0
+        }
+    }
 }
 
 impl View for SettingsSection {
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
-        let title = self.title().measure(constraints, context);
+        let inset = self.inset(context.theme);
+        let inner = Constraints::loose(Size::new(
+            (constraints.maximum.width - inset * 2.0).max(0.0),
+            constraints.maximum.height,
+        ));
+        let title = self.title().measure(inner, context);
         let rows = measure_stack(
             StackDirection::Vertical,
             &self.rows,
             StackGap::None,
-            constraints,
+            inner,
             context,
         );
         constraints.constrain(Size::new(
-            title.width.max(rows.width),
+            title.width.max(rows.width) + inset * 2.0,
             title.height + context.theme.spacing.small + rows.height,
         ))
     }
@@ -216,23 +244,86 @@ impl View for SettingsSection {
                 text_measurer: &mut *context.text_measurer,
             };
             self.title()
-                .measure(Constraints::loose(bounds.size), &mut measure)
+                .measure(
+                    Constraints::loose(Size::new(
+                        (bounds.size.width - self.inset(context.theme) * 2.0).max(0.0),
+                        bounds.size.height,
+                    )),
+                    &mut measure,
+                )
                 .height
         };
         self.title().paint(
-            Rect::new(bounds.origin.x, bounds.origin.y, bounds.size.width, title_height),
+            Rect::new(
+                bounds.origin.x + self.inset(context.theme),
+                bounds.origin.y,
+                (bounds.size.width - self.inset(context.theme) * 2.0).max(0.0),
+                title_height,
+            ),
             context,
         );
         let rows_y = bounds.origin.y + title_height + context.theme.spacing.small;
+        let inset = self.inset(context.theme);
+        if self.grouped {
+            Rectangle::new()
+                .color(RectangleColor::Surface)
+                .radius(CornerRadius::Medium)
+                .paint(
+                    Rect::new(
+                        bounds.origin.x,
+                        rows_y,
+                        bounds.size.width,
+                        (bounds.origin.y + bounds.size.height - rows_y).max(0.0),
+                    ),
+                    context,
+                );
+        }
+        let rows_bounds = Rect::new(
+            bounds.origin.x + inset,
+            rows_y,
+            (bounds.size.width - inset * 2.0).max(0.0),
+            (bounds.origin.y + bounds.size.height - rows_y).max(0.0),
+        );
+        if self.grouped {
+            let regions = {
+                let mut measure = MeasureContext {
+                    theme: context.theme,
+                    typography: context.typography,
+                    text_measurer: &mut *context.text_measurer,
+                };
+                layout_stack(
+                    StackDirection::Vertical,
+                    &self.rows,
+                    rows_bounds,
+                    StackGap::None,
+                    StackAlignment::Stretch,
+                    StackDistribution::Start,
+                    context.theme,
+                    &mut measure,
+                )
+            };
+            for (index, (row, region)) in self.rows.iter().zip(regions).enumerate() {
+                if index > 0 {
+                    context
+                        .display_list
+                        .push(crate::draw_command::DrawCommand::FillRect {
+                            rect: Rect::new(
+                                rows_bounds.origin.x,
+                                region.origin.y,
+                                rows_bounds.size.width,
+                                context.theme.divider.thickness,
+                            ),
+                            color: context.theme.colors.border,
+                        });
+                }
+                row.paint(region, context);
+            }
+            return;
+        }
         paint_stack(
             StackDirection::Vertical,
             &self.rows,
-            Rect::new(
-                bounds.origin.x,
-                rows_y,
-                bounds.size.width,
-                (bounds.origin.y + bounds.size.height - rows_y).max(0.0),
-            ),
+            rows_bounds,
             StackGap::None,
             StackAlignment::Stretch,
             StackDistribution::Start,
@@ -253,17 +344,24 @@ impl View for SettingsSection {
                 text_measurer: &mut *context.text_measurer,
             };
             self.title()
-                .measure(Constraints::loose(bounds.size), &mut measure)
+                .measure(
+                    Constraints::loose(Size::new(
+                        (bounds.size.width - self.inset(context.theme) * 2.0).max(0.0),
+                        bounds.size.height,
+                    )),
+                    &mut measure,
+                )
                 .height
         };
         let rows_y = bounds.origin.y + title_height + context.theme.spacing.small;
+        let inset = self.inset(context.theme);
         handle_stack_event(
             StackDirection::Vertical,
             &self.rows,
             Rect::new(
-                bounds.origin.x,
+                bounds.origin.x + inset,
                 rows_y,
-                bounds.size.width,
+                (bounds.size.width - inset * 2.0).max(0.0),
                 (bounds.origin.y + bounds.size.height - rows_y).max(0.0),
             ),
             StackGap::None,
@@ -280,6 +378,7 @@ pub struct SettingsRow {
     title: String,
     description: Option<String>,
     control: StackChild,
+    compact: bool,
 }
 
 impl SettingsRow {
@@ -288,7 +387,15 @@ impl SettingsRow {
             title: title.into(),
             description: None,
             control: control.into_stack_child(),
+            compact: false,
         }
+    }
+
+    /// Uses native control typography and vertically centered labels. On narrow
+    /// windows the control moves below the label instead of crushing its text.
+    pub fn compact(mut self) -> Self {
+        self.compact = true;
+        self
     }
 
     pub fn description(mut self, description: impl Into<String>) -> Self {
@@ -301,13 +408,90 @@ impl SettingsRow {
         let mut labels = VStack::new()
             .alignment(StackAlignment::Stretch)
             .gap(StackGap::None)
-            .child(Text::styled(self.title.clone(), TextRole::Body).weight(600));
+            .child(
+                Text::styled(
+                    self.title.clone(),
+                    if self.compact {
+                        TextRole::Label
+                    } else {
+                        TextRole::Body
+                    },
+                )
+                .weight(if self.compact { 500 } else { 600 }),
+            );
         if let Some(description) = &self.description {
             labels = labels.child(
                 Text::styled(description.clone(), TextRole::Caption).tone(TextTone::Secondary),
             );
         }
         labels
+    }
+
+    fn compact_layout(&self, width: f32, context: &mut MeasureContext<'_>) -> (Size, Rect, Rect) {
+        let width = if width.is_finite() {
+            width.max(0.0)
+        } else {
+            context.theme.layout.form_width
+        };
+        let padding = context.theme.spacing.small;
+        let gap = context.theme.spacing.large;
+        let control = self
+            .control
+            .measure(Constraints::loose(Size::new(width, f32::INFINITY)), context);
+        let stacked = width < control.width + context.theme.layout.compact_form_control_width + gap;
+        let label_width = if stacked {
+            width
+        } else {
+            (width - control.width - gap).max(0.0)
+        };
+        let labels = self.labels().measure(
+            Constraints::loose(Size::new(label_width, f32::INFINITY)),
+            context,
+        );
+        if stacked {
+            let control_y = padding + labels.height + padding;
+            let height = control_y + control.height + padding;
+            (
+                Size::new(width, height),
+                Rect::new(0.0, padding, width, labels.height),
+                Rect::new(
+                    width - control.width,
+                    control_y,
+                    control.width,
+                    control.height,
+                ),
+            )
+        } else {
+            let height = labels
+                .height
+                .max(control.height)
+                .max(context.theme.controls.height)
+                + padding * 2.0;
+            (
+                Size::new(width, height),
+                Rect::new(
+                    0.0,
+                    (height - labels.height) / 2.0,
+                    label_width,
+                    labels.height,
+                ),
+                Rect::new(
+                    width - control.width,
+                    (height - control.height) / 2.0,
+                    control.width,
+                    control.height,
+                ),
+            )
+        }
+    }
+
+    fn compact_regions(&self, bounds: Rect, context: &mut MeasureContext<'_>) -> (Rect, Rect) {
+        let (_, mut labels, mut control) = self.compact_layout(bounds.size.width, context);
+        for rect in [&mut labels, &mut control] {
+            rect.origin.x += bounds.origin.x;
+            rect.origin.y += bounds.origin.y;
+        }
+        (labels, control)
     }
 
     fn layout(
@@ -337,6 +521,10 @@ impl SettingsRow {
 
 impl View for SettingsRow {
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
+        if self.compact {
+            return constraints
+                .constrain(self.compact_layout(constraints.maximum.width, context).0);
+        }
         let control = self.control.measure(constraints, context);
         let labels = self.labels().measure(
             Constraints::loose(Size::new(
@@ -352,6 +540,19 @@ impl View for SettingsRow {
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
+        if self.compact {
+            let (labels, control) = self.compact_regions(
+                bounds,
+                &mut MeasureContext {
+                    theme: context.theme,
+                    typography: context.typography,
+                    text_measurer: &mut *context.text_measurer,
+                },
+            );
+            self.labels().paint(labels, context);
+            self.control.paint(control, context);
+            return;
+        }
         let control_size = {
             let mut measure = MeasureContext {
                 theme: context.theme,
@@ -377,6 +578,17 @@ impl View for SettingsRow {
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
+        if self.compact {
+            let (_, control) = self.compact_regions(
+                bounds,
+                &mut MeasureContext {
+                    theme: context.theme,
+                    typography: context.typography,
+                    text_measurer: &mut *context.text_measurer,
+                },
+            );
+            return self.control.handle_event(control, event, context);
+        }
         let control_size = {
             let mut measure = MeasureContext {
                 theme: context.theme,
@@ -415,6 +627,7 @@ pub fn settings_value(
 mod tests {
     use super::*;
     use crate::draw_command::DisplayList;
+    use crate::layout::ViewExt;
     use crate::theme::Theme;
     use crate::typography::{TextMeasurer, Typography};
     use std::cell::Cell;
@@ -430,6 +643,96 @@ mod tests {
         fn paint(&self, bounds: Rect, _context: &mut PaintContext<'_>) {
             self.0.set(Some(bounds));
         }
+    }
+
+    #[test]
+    fn compact_row_keeps_labels_clear_and_its_control_clickable_after_reflow() {
+        use crate::components::Button;
+        use crate::geometry::Point;
+        use crate::platform::PointerButton;
+        for width in [280.0, 440.0, 640.0] {
+            let calls = Rc::new(Cell::new(0));
+            let click = calls.clone();
+            let row = SettingsRow::new(
+                "Language",
+                Button::new("Japanese")
+                    .on_click(move || click.set(click.get() + 1))
+                    .frame(264.0, 30.0),
+            )
+            .description("Primary system language")
+            .compact();
+            let mut measurer = TextMeasurer::new();
+            let mut measure = MeasureContext {
+                theme: &Theme::LIGHT,
+                typography: &Typography::DEFAULT,
+                text_measurer: &mut measurer,
+            };
+            let (size, labels, control) = row.compact_layout(width, &mut measure);
+            assert!(
+                labels.origin.x + labels.size.width <= control.origin.x
+                    || labels.origin.y + labels.size.height <= control.origin.y
+            );
+            assert!(control.origin.x >= 0.0);
+            assert!(control.origin.x + control.size.width <= size.width);
+            assert!(control.origin.y + control.size.height <= size.height);
+            let bounds = Rect::new(0.0, 0.0, size.width, size.height);
+            let position = Point::new(
+                control.origin.x + control.size.width / 2.0,
+                control.origin.y + control.size.height / 2.0,
+            );
+            let mut context = EventContext::new(&Theme::LIGHT, &Typography::DEFAULT, &mut measurer);
+            row.handle_event(
+                bounds,
+                &ViewEvent::PointerPressed {
+                    position,
+                    button: PointerButton::Primary,
+                },
+                &mut context,
+            );
+            row.handle_event(
+                bounds,
+                &ViewEvent::PointerReleased {
+                    position,
+                    button: PointerButton::Primary,
+                },
+                &mut context,
+            );
+            assert_eq!(calls.get(), 1, "control at width {width}");
+        }
+    }
+
+    #[test]
+    fn grouped_section_insets_both_rows_and_preserves_their_natural_height() {
+        let first = Rc::new(Cell::new(None));
+        let second = Rc::new(Cell::new(None));
+        let section = SettingsSection::new("Language & Region")
+            .grouped()
+            .row(Recorder(first.clone()))
+            .row(Recorder(second.clone()));
+        let mut list = DisplayList::new();
+        let mut measurer = TextMeasurer::new();
+        let size = section.measure(
+            Constraints::loose(Size::new(500.0, f32::INFINITY)),
+            &mut MeasureContext {
+                theme: &Theme::LIGHT,
+                typography: &Typography::DEFAULT,
+                text_measurer: &mut measurer,
+            },
+        );
+        let mut context = PaintContext::new(
+            &mut list,
+            &Theme::LIGHT,
+            &Typography::DEFAULT,
+            &mut measurer,
+        );
+        section.paint(Rect::new(20.0, 10.0, 500.0, size.height), &mut context);
+        let first = first.get().unwrap();
+        let second = second.get().unwrap();
+        assert_eq!(first.origin.x, 36.0);
+        assert_eq!(first.size.width, 468.0);
+        assert_eq!(second.origin.y, first.origin.y + first.size.height);
+        assert_eq!(first.size.height, 32.0);
+        assert_eq!(second.size.height, 32.0);
     }
 
     #[test]
