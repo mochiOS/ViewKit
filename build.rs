@@ -37,6 +37,15 @@ fn main() {
     println!("cargo:rerun-if-env-changed=VIEWKIT_JAPANESE_FONT_PATH");
     println!("cargo:rerun-if-env-changed=VIEWKIT_UI_FONT_FAMILY");
     println!("cargo:rerun-if-env-changed=VIEWKIT_MONOSPACE_FONT_FAMILY");
+    println!("cargo:rerun-if-env-changed=VIEWKIT_JAPANESE_FONT_FAMILY");
+    for cfg in [
+        "viewkit_embedded_japanese_font",
+        "viewkit_japanese_medium",
+        "viewkit_japanese_semibold",
+    ] {
+        println!("cargo:rustc-check-cfg=cfg({cfg})");
+    }
+    configure_japanese_fonts(&out_dir);
 
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("mochios") {
         return;
@@ -44,7 +53,6 @@ fn main() {
 
     let candidate = required_font("VIEWKIT_UI_FONT_PATH", "Inter Variable");
     let monospace = required_font("VIEWKIT_MONOSPACE_FONT_PATH", "UDEV Gothic");
-    let japanese = required_font("VIEWKIT_JAPANESE_FONT_PATH", "IBM Plex Sans JP");
 
     let target_path = out_dir.join("default_ui_font.ttf");
     fs::copy(&candidate.path, &target_path)
@@ -52,8 +60,6 @@ fn main() {
     let monospace_target_path = out_dir.join("default_monospace_font.ttf");
     fs::copy(&monospace.path, &monospace_target_path)
         .unwrap_or_else(|err| panic!("failed to copy default monospace font: {err}"));
-    fs::copy(&japanese.path, out_dir.join("default_japanese_font.ttf"))
-        .unwrap_or_else(|err| panic!("failed to copy Japanese fallback font: {err}"));
 
     println!(
         "cargo:rustc-env=VIEWKIT_DEFAULT_UI_FONT_FAMILY={}",
@@ -63,6 +69,50 @@ fn main() {
         "cargo:rustc-env=VIEWKIT_DEFAULT_MONOSPACE_FONT_FAMILY={}",
         monospace.family
     );
+}
+
+fn configure_japanese_fonts(out_dir: &Path) {
+    let family = env::var("VIEWKIT_JAPANESE_FONT_FAMILY")
+        .unwrap_or_else(|_| String::from("IBM Plex Sans JP"));
+    println!("cargo:rustc-env=VIEWKIT_DEFAULT_JAPANESE_FONT_FAMILY={family}");
+    let native = env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("mochios");
+    let path = if native || env::var_os("VIEWKIT_JAPANESE_FONT_PATH").is_some() {
+        required_font("VIEWKIT_JAPANESE_FONT_PATH", "IBM Plex Sans JP").path
+    } else {
+        Path::new(&env::var_os("CARGO_MANIFEST_DIR").expect("manifest directory"))
+            .join("../fonts/out/fonts/IBMPlexSansJP-Regular.ttf")
+    };
+    println!("cargo:rerun-if-changed={}", path.display());
+    if !path.is_file() {
+        return;
+    }
+    fs::copy(&path, out_dir.join("default_japanese_font.ttf"))
+        .expect("failed to copy Japanese regular font");
+    println!("cargo:rustc-cfg=viewkit_embedded_japanese_font");
+    // Match the actual UI weights, so a host's semibold Mincho face cannot win
+    // the shaper's exact-weight fallback over a regular-only Gothic family.
+    if family == "IBM Plex Sans JP" {
+        for (source, output, cfg) in [
+            (
+                "IBMPlexSansJP-Medium.ttf",
+                "japanese_medium.ttf",
+                "viewkit_japanese_medium",
+            ),
+            (
+                "IBMPlexSansJP-SemiBold.ttf",
+                "japanese_semibold.ttf",
+                "viewkit_japanese_semibold",
+            ),
+        ] {
+            let sibling = path.with_file_name(source);
+            println!("cargo:rerun-if-changed={}", sibling.display());
+            if sibling.is_file() {
+                fs::copy(&sibling, out_dir.join(output))
+                    .expect("failed to copy Japanese UI weight");
+                println!("cargo:rustc-cfg={cfg}");
+            }
+        }
+    }
 }
 
 fn generate_symbols(symbol_dir: &Path, out_dir: &Path) {
@@ -440,6 +490,7 @@ fn required_font(path_variable: &str, default_family: &'static str) -> FontCandi
         path: PathBuf::from(path),
         family: (match path_variable {
             "VIEWKIT_UI_FONT_PATH" => env::var("VIEWKIT_UI_FONT_FAMILY"),
+            "VIEWKIT_JAPANESE_FONT_PATH" => env::var("VIEWKIT_JAPANESE_FONT_FAMILY"),
             _ => env::var("VIEWKIT_MONOSPACE_FONT_FAMILY"),
         })
         .unwrap_or_else(|_| default_family.to_owned()),
