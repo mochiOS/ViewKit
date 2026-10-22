@@ -64,7 +64,8 @@ impl<'a> ViewAdapter<'a> {
                     .weight(properties.weight)
                     .alignment(properties.alignment)
                     .color(properties.color)
-                    .cache_layout(properties.cache_layout),
+                    .cache_layout(properties.cache_layout)
+                    .center_visible_ink(properties.center_visible_ink),
             ),
 
             ViewNodeKind::Button(properties) => {

@@ -28,6 +28,7 @@ pub struct Text {
     tone: TextTone,
     cache_layout: bool,
     accessibility_hidden: bool,
+    center_visible_ink: bool,
 }
 
 impl Text {
@@ -47,6 +48,7 @@ impl Text {
             tone: TextTone::Primary,
             cache_layout: true,
             accessibility_hidden: false,
+            center_visible_ink: false,
         }
     }
 
@@ -80,6 +82,13 @@ impl Text {
 
     pub fn style(mut self, role: TextRole) -> Self {
         self.role = role;
+        self
+    }
+
+    /// Centers the visible glyphs vertically, excluding line leading.
+    /// Opt in for short labels next to icons; ordinary text layout is unchanged.
+    pub fn center_visible_ink(mut self, centered: bool) -> Self {
+        self.center_visible_ink = centered;
         self
     }
 
@@ -172,7 +181,10 @@ impl Text {
             weight: style.weight.0.clamp(1, 1000),
             alignment: self.alignment,
         });
-        if let Some(size) = cache_key.as_ref().and_then(|key| measurer.cached_measurement(key)) {
+        if let Some(size) = cache_key
+            .as_ref()
+            .and_then(|key| measurer.cached_measurement(key))
+        {
             return size;
         }
         let metrics = Metrics::new(font_size, line_height);
@@ -208,7 +220,10 @@ impl Text {
             if let Some(maximum_width) = maximum_width {
                 measured_width = measured_width.min(maximum_width);
             }
-            Size::new(measured_width.max(0.0).ceil(), measured_height.max(0.0).ceil())
+            Size::new(
+                measured_width.max(0.0).ceil(),
+                measured_height.max(0.0).ceil(),
+            )
         };
         if let Some(key) = cache_key {
             measurer.cache_measurement(key, measured);
@@ -312,6 +327,7 @@ impl IntoViewNode for Text {
                     .color
                     .unwrap_or_else(|| self.tone.resolve(&Theme::current())),
                 cache_layout: self.cache_layout,
+                center_visible_ink: self.center_visible_ink,
             }),
         )
     }
@@ -355,11 +371,26 @@ impl View for Text {
             context.record_accessibility(node);
         }
 
+        let mut text_bounds = bounds;
+        if self.center_visible_ink {
+            let key = TextMeasurementKey {
+                text: self.value.clone(),
+                font_family: self.resolved_family(style.family).to_owned(),
+                font_size_bits: font_size.to_bits(),
+                line_height_bits: line_height.to_bits(),
+                maximum_width_bits: Some(bounds.size.width.to_bits()),
+                weight: style.weight.0.clamp(1, 1000),
+                alignment: self.alignment,
+            };
+            if let Some((top, bottom)) = context.text_measurer.vertical_ink_bounds(key) {
+                text_bounds.origin.y += (bounds.size.height - top - bottom) * 0.5;
+            }
+        }
         context.display_list.push(DrawCommand::DrawText {
             command: TextCommand {
                 text: self.value.clone(),
 
-                bounds,
+                bounds: text_bounds,
                 cache_layout: self.cache_layout,
 
                 font_family: self.resolved_family(style.family).to_owned(),
@@ -467,6 +498,54 @@ mod tests {
         assert_eq!(measurer.measurement_cache_len(), 2);
         measurer.set_font_scale(1.25);
         assert_eq!(measurer.measurement_cache_len(), 0);
+    }
+
+    #[test]
+    fn visible_ink_centering_is_opt_in_and_handles_latin_and_japanese_labels() {
+        use crate::{
+            draw_command::{DisplayList, DrawCommand},
+            geometry::Rect,
+            theme::Theme,
+            typography::TextMeasurementKey,
+            view::PaintContext,
+        };
+        let theme = Theme::current();
+        let mut measurer = TextMeasurer::new();
+        let bounds = Rect::new(20.0, 10.0, 104.0, 34.0);
+        for centered in [false, true] {
+            for value in ["A", "あ", "21 Oct, 21:00"] {
+                let text = Text::label(value)
+                    .font_size(14.0)
+                    .line_height(20.0)
+                    .weight(400)
+                    .center_visible_ink(centered);
+                let mut list = DisplayList::new();
+                text.paint(
+                    bounds,
+                    &mut PaintContext::new(&mut list, &theme, &theme.typography, &mut measurer),
+                );
+                let DrawCommand::DrawText { command } = &list.commands()[0] else {
+                    panic!("expected text");
+                };
+                assert_eq!(command.font_size, 14.0);
+                assert_eq!(command.line_height, 20.0);
+                if !centered {
+                    assert_eq!(command.bounds, bounds);
+                    continue;
+                }
+                let key = TextMeasurementKey {
+                    text: value.into(),
+                    font_family: command.font_family.clone(),
+                    font_size_bits: command.font_size.to_bits(),
+                    line_height_bits: command.line_height.to_bits(),
+                    maximum_width_bits: Some(bounds.size.width.to_bits()),
+                    weight: command.weight,
+                    alignment: command.alignment,
+                };
+                let (top, bottom) = measurer.vertical_ink_bounds(key).expect("visible glyphs");
+                assert!((command.bounds.origin.y + (top + bottom) * 0.5 - 27.0).abs() < 0.001);
+            }
+        }
     }
 
     #[test]
