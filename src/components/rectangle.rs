@@ -148,17 +148,20 @@ impl View for Rectangle {
             paint_shadow_set(bounds, radius, shadow_set, context);
         }
 
-        if radius > 0.0 {
-            context.display_list.push(DrawCommand::FillRoundedRect {
-                rect: bounds,
-                radius,
-                color,
-            });
-        } else {
-            context.display_list.push(DrawCommand::FillRect {
-                rect: bounds,
-                color,
-            });
+        // A transparent fill has no visible contribution, including on GPU backends.
+        if color.alpha != 0 {
+            if radius > 0.0 {
+                context.display_list.push(DrawCommand::FillRoundedRect {
+                    rect: bounds,
+                    radius,
+                    color,
+                });
+            } else {
+                context.display_list.push(DrawCommand::FillRect {
+                    rect: bounds,
+                    color,
+                });
+            }
         }
 
         if let Some((border_color, border_width)) = self.border.resolve(context) {

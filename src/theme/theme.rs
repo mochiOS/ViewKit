@@ -4,11 +4,11 @@
 
 use super::{
     AvatarTokens, BadgeTokens, BrowserTokens, ButtonTokens, CardTokens, Color, ColorTokens,
-    DialogTokens, DividerTokens, FigmaColorTokens, FigmaTokens, LayoutTokens, ListTokens, MenuTokens,
-    MessageBubbleTokens, MotionTokens, PickerTokens, PopoverTokens, ProgressBarTokens, RadiusTokens,
-    ScrollBarTokens, SegmentedControlTokens, SurfaceTokens,
-    SelectionControlTokens, ShadowTokens, ShellTokens, SliderTokens, SpacingTokens,
-    StepperTokens, SwitchTokens, TabsTokens, TextFieldTokens, TooltipTokens,
+    ControlMetrics, DialogTokens, DividerTokens, FigmaColorTokens, FigmaTokens, LayoutTokens,
+    ListTokens, MenuTokens, MessageBubbleTokens, MotionTokens, PickerTokens, PopoverTokens,
+    ProgressBarTokens, RadiusTokens, ScrollBarTokens, SegmentedControlTokens,
+    SelectionControlTokens, ShadowTokens, ShellTokens, SliderTokens, SpacingTokens, StepperTokens,
+    SurfaceTokens, SwitchTokens, TabsTokens, TextFieldTokens, TooltipTokens,
 };
 use crate::typography::Typography;
 use std::cell::Cell;
@@ -17,6 +17,7 @@ use std::cell::Cell;
 pub struct Theme {
     pub colors: ColorTokens,
     pub typography: Typography,
+    pub controls: ControlMetrics,
     pub button: ButtonTokens,
     pub text_field: TextFieldTokens,
     pub list: ListTokens,
@@ -52,6 +53,7 @@ impl Theme {
     pub const LIGHT: Self = Self {
         colors: colors_from_figma(FigmaTokens::LIGHT, false),
         typography: Typography::DEFAULT,
+        controls: ControlMetrics::DEFAULT,
         button: ButtonTokens::from_colors(colors_from_figma(FigmaTokens::LIGHT, false), false),
         text_field: TextFieldTokens::from_colors(colors_from_figma(FigmaTokens::LIGHT, false)),
         list: ListTokens::from_colors(colors_from_figma(FigmaTokens::LIGHT, false)),
@@ -73,7 +75,10 @@ impl Theme {
         stepper: StepperTokens::from_colors(colors_from_figma(FigmaTokens::LIGHT, false)),
         progress_bar: ProgressBarTokens::from_colors(colors_from_figma(FigmaTokens::LIGHT, false)),
         tooltip: TooltipTokens::from_colors(colors_from_figma(FigmaTokens::LIGHT, false)),
-        message_bubble: MessageBubbleTokens::from_colors(colors_from_figma(FigmaTokens::LIGHT, false)),
+        message_bubble: MessageBubbleTokens::from_colors(colors_from_figma(
+            FigmaTokens::LIGHT,
+            false,
+        )),
         badge: BadgeTokens::from_colors(colors_from_figma(FigmaTokens::LIGHT, false)),
         avatar: AvatarTokens::from_colors(colors_from_figma(FigmaTokens::LIGHT, false)),
         card: CardTokens::from_colors(colors_from_figma(FigmaTokens::LIGHT, false)),
@@ -92,6 +97,7 @@ impl Theme {
     pub const DARK: Self = Self {
         colors: colors_from_figma(FigmaTokens::DARK, true),
         typography: Typography::DEFAULT,
+        controls: ControlMetrics::DEFAULT,
         button: ButtonTokens::from_colors(colors_from_figma(FigmaTokens::DARK, true), true),
         text_field: TextFieldTokens::from_colors(colors_from_figma(FigmaTokens::DARK, true)),
         list: ListTokens::from_colors(colors_from_figma(FigmaTokens::DARK, true)),
@@ -113,7 +119,10 @@ impl Theme {
         stepper: StepperTokens::from_colors(colors_from_figma(FigmaTokens::DARK, true)),
         progress_bar: ProgressBarTokens::from_colors(colors_from_figma(FigmaTokens::DARK, true)),
         tooltip: TooltipTokens::from_colors(colors_from_figma(FigmaTokens::DARK, true)),
-        message_bubble: MessageBubbleTokens::from_colors(colors_from_figma(FigmaTokens::DARK, true)),
+        message_bubble: MessageBubbleTokens::from_colors(colors_from_figma(
+            FigmaTokens::DARK,
+            true,
+        )),
         badge: BadgeTokens::from_colors(colors_from_figma(FigmaTokens::DARK, true)),
         avatar: AvatarTokens::from_colors(colors_from_figma(FigmaTokens::DARK, true)),
         card: CardTokens::from_colors(colors_from_figma(FigmaTokens::DARK, true)),

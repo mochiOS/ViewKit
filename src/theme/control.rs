@@ -127,9 +127,9 @@ impl ButtonTokens {
                 colors.destructive,
                 Color::WHITE,
             ),
-            horizontal_padding: 18.0,
-            height: 32.0,
-            radius: CornerRadius::Medium,
+            horizontal_padding: super::ControlMetrics::HORIZONTAL_PADDING,
+            height: super::ControlMetrics::DEFAULT.height,
+            radius: super::ControlMetrics::RADIUS,
             stroke_width: FigmaTokens::SHAPE.stroke_default,
             focus_ring: colors.border_strong,
             focus_ring_width: 3.0,
@@ -179,7 +179,7 @@ impl TextFieldTokens {
             focus_ring: colors.focus_ring,
             selection: colors.accent_soft,
             caret: colors.accent,
-            horizontal_padding: FigmaTokens::SPACING.space_12,
+            horizontal_padding: super::ControlMetrics::HORIZONTAL_PADDING,
             text_offset_y: -1.0,
             min_width: 100.0,
             radius: CornerRadius::Small,
@@ -325,6 +325,8 @@ impl SwitchTokens {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SliderTokens {
+    pub level_track: Color,
+    pub level_fill: Color,
     pub label: Color,
     pub disabled_label: Color,
     pub track: Color,
@@ -346,6 +348,12 @@ pub struct SliderTokens {
 impl SliderTokens {
     pub const fn from_colors(colors: ColorTokens) -> Self {
         Self {
+            level_track: if colors.background.red < 128 {
+                Color::rgb(76, 76, 78)
+            } else {
+                Color::rgb(216, 216, 216)
+            },
+            level_fill: Color::WHITE,
             label: colors.text_primary,
             disabled_label: colors.text_disabled,
             track: colors.surface_muted,
@@ -443,6 +451,11 @@ impl PickerTokens {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MenuTokens {
+    pub compact_row_height: f32,
+    pub compact_font_size: f32,
+    pub compact_padding: f32,
+    pub compact_group_gap: f32,
+    pub compact_radius: f32,
     pub item_background: Color,
     pub item_hovered_background: Color,
     pub danger_hovered_background: Color,
@@ -697,6 +710,11 @@ impl StepperTokens {
 impl MenuTokens {
     pub const fn from_colors(colors: ColorTokens) -> Self {
         Self {
+            compact_row_height: 14.0,
+            compact_font_size: 10.0,
+            compact_padding: 10.0,
+            compact_group_gap: 13.0,
+            compact_radius: 14.0,
             item_background: Color::TRANSPARENT,
             item_hovered_background: colors.surface_subtle,
             danger_hovered_background: colors.destructive_soft,

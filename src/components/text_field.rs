@@ -24,6 +24,7 @@ use super::input_method::{
 };
 
 use crate::accessibility::{AccessibilityNode, AccessibilityRole};
+use crate::animation::AppearanceTransition;
 const CARET_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 const SECURE_GLYPH: char = '\u{2022}';
 
@@ -31,6 +32,8 @@ const SECURE_GLYPH: char = '\u{2022}';
 struct TextFieldInteractionInner {
     hovered: bool,
     focused: bool,
+    focus_visible: bool,
+    appearance: AppearanceTransition,
     enabled: bool,
     value: String,
     cursor: usize,
@@ -87,6 +90,9 @@ impl TextFieldInteractionState {
         let changed = inner.focused != focused;
 
         inner.focused = focused;
+        if !focused {
+            inner.focus_visible = false;
+        }
 
         changed
     }
@@ -96,6 +102,7 @@ impl TextFieldInteractionState {
 
         inner.hovered = false;
         inner.focused = false;
+        inner.focus_visible = false;
     }
 
     fn set_enabled(&self, enabled: bool) -> bool {
@@ -533,9 +540,9 @@ pub enum TextFieldSize {
 impl TextFieldSize {
     fn height(self, theme: &crate::theme::Theme) -> f32 {
         match self {
-            Self::Small => theme.layout.compact_control_height,
-            Self::Medium => theme.layout.control_height,
-            Self::Large => theme.layout.large_control_height,
+            Self::Small => theme.controls.small_height,
+            Self::Medium => theme.controls.height,
+            Self::Large => theme.controls.large_height,
         }
     }
 
@@ -545,8 +552,9 @@ impl TextFieldSize {
 
     const fn text_role(self) -> TextRole {
         match self {
-            Self::Small => TextRole::Label,
-            Self::Medium | Self::Large => TextRole::Body,
+            Self::Small => TextRole::Caption,
+            Self::Medium => TextRole::Label,
+            Self::Large => TextRole::Body,
         }
     }
 
@@ -569,7 +577,7 @@ pub struct TextField {
     placeholder: String,
 
     size: TextFieldSize,
-    radius: CornerRadius,
+    radius: Option<CornerRadius>,
     leading_symbol: Option<SymbolName>,
 
     enabled: bool,
@@ -605,7 +613,7 @@ impl TextField {
 
             placeholder: String::new(),
             size: TextFieldSize::Medium,
-            radius: CornerRadius::Small,
+            radius: None,
             leading_symbol: None,
 
             enabled: true,
@@ -623,7 +631,7 @@ impl TextField {
 
             placeholder: String::new(),
             size: TextFieldSize::Medium,
-            radius: CornerRadius::Small,
+            radius: None,
             leading_symbol: None,
 
             enabled: true,
@@ -651,7 +659,7 @@ impl TextField {
     }
 
     pub fn radius(mut self, radius: CornerRadius) -> Self {
-        self.radius = radius;
+        self.radius = Some(radius);
         self
     }
 
@@ -664,7 +672,7 @@ impl TextField {
     }
 
     pub fn capsule(mut self) -> Self {
-        self.radius = CornerRadius::Full;
+        self.radius = Some(CornerRadius::Full);
         self
     }
 
@@ -727,7 +735,7 @@ impl TextField {
 
         let border = if self.invalid {
             context.theme.text_field.invalid_border
-        } else if interaction.focused {
+        } else if interaction.focused && interaction.focus_visible {
             context.theme.text_field.focused_border
         } else if interaction.hovered {
             context.theme.text_field.hovered_border
@@ -834,6 +842,19 @@ impl View for TextField {
         self.interaction.set_enabled(self.enabled);
 
         let appearance = self.appearance(context);
+        let (appearance, next) = self.interaction.inner.borrow_mut().appearance.sample(
+            crate::theme::ControlAppearance {
+                background: appearance.background,
+                border: appearance.border,
+                foreground: appearance.foreground,
+            },
+            context.theme.motion.fast,
+            Instant::now(),
+            !self.enabled || self.invalid,
+        );
+        if let Some(next) = next {
+            context.request_redraw_in_at(bounds.expanded(16.0), next);
+        }
 
         let (value, cursor, focused, stored_scroll_offset_x, selection, marked, converting) = {
             let inner = self.interaction.inner.borrow();
@@ -885,12 +906,12 @@ impl View for TextField {
         accessibility.invalid = self.invalid;
         context.record_accessibility(accessibility);
 
-        if focused {
+        let radius = self.radius.unwrap_or(context.theme.text_field.radius);
+        if focused && self.interaction.inner.borrow().focus_visible {
             let ring_width = context.theme.text_field.focus_ring_width;
 
             let radius =
-                self.radius
-                    .resolve(&context.theme.radius, bounds.size.width, bounds.size.height);
+                radius.resolve(&context.theme.radius, bounds.size.width, bounds.size.height);
 
             let ring_bounds = Rect::new(
                 bounds.origin.x - ring_width,
@@ -909,7 +930,7 @@ impl View for TextField {
 
         Rectangle::new()
             .color(RectangleColor::Custom(appearance.background))
-            .radius(self.radius)
+            .radius(radius)
             .shadow(ShadowStyle::None)
             .border(BorderStyle::custom(
                 appearance.border,
@@ -1254,8 +1275,10 @@ impl View for TextField {
             ViewEvent::KeyboardFocusRequested { bounds: target } => {
                 let should_focus = target.is_some_and(|target| target == bounds);
                 let mut inner = self.interaction.inner.borrow_mut();
-                let changed = inner.focused != should_focus;
+                let changed = inner.focused != should_focus
+                    || inner.focus_visible != (should_focus && context.focus_visible());
                 inner.focused = should_focus && inner.enabled;
+                inner.focus_visible = should_focus && context.focus_visible();
                 if !should_focus {
                     let mut input_method = std::mem::take(&mut inner.input_method);
                     let mut cursor = inner.cursor;

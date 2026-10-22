@@ -20,9 +20,9 @@ use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::error::{EventLoopError, OsError};
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::keyboard::{Key as WinitKey, NamedKey};
+use winit::keyboard::{Key as WinitKey, KeyCode, NamedKey, PhysicalKey};
 use winit::window::CursorIcon as WinitCursorIcon;
-use winit::window::{Fullscreen, Window, WindowId};
+use winit::window::{CursorGrabMode, Fullscreen, Window, WindowId};
 
 const LINE_SCROLL_PIXELS: f32 = 40.0;
 
@@ -102,6 +102,10 @@ struct LinuxWindowState {
     renderer: GpuRenderer,
     modifiers: KeyModifiers,
     pending_pointer_move: Option<(f32, f32)>,
+    preview_capture: bool,
+    capture_requested: bool,
+    cursor_captured: bool,
+    release_shortcut_down: bool,
 }
 
 impl<A> LinuxBackend<A>
@@ -233,11 +237,41 @@ where
                 renderer,
                 modifiers: KeyModifiers::default(),
                 pending_pointer_move: None,
+                preview_capture: id == ViewKitWindowId::PRIMARY
+                    && std::env::var_os("VIEWKIT_PREVIEW_CAPTURE")
+                        .is_some_and(|value| value == "1"),
+                capture_requested: true,
+                cursor_captured: false,
+                release_shortcut_down: false,
             },
         );
         self.emit(window_id, PlatformEvent::Resumed { viewport });
         self.request_redraw(id);
         Ok(())
+    }
+
+    fn set_preview_capture(&mut self, window_id: WindowId, capture: bool) {
+        let Some(state) = self.windows.get_mut(&window_id) else {
+            return;
+        };
+        if !state.preview_capture || state.cursor_captured == capture {
+            return;
+        }
+        let mode = if capture {
+            CursorGrabMode::Confined
+        } else {
+            CursorGrabMode::None
+        };
+        match state.window.set_cursor_grab(mode) {
+            Ok(()) => {
+                state.cursor_captured = capture;
+                state.window.set_cursor_visible(!capture);
+            }
+            Err(error) => eprintln!(
+                "[ViewKit] could not {} preview mouse capture: {error}",
+                if capture { "enable" } else { "release" }
+            ),
+        }
     }
 
     fn process_window_commands(&mut self, event_loop: &ActiveEventLoop) {
@@ -340,9 +374,16 @@ where
             }
 
             WindowEvent::Focused(focused) => {
+                let capture = focused
+                    && self
+                        .windows
+                        .get(&window_id)
+                        .is_some_and(|state| state.capture_requested);
+                self.set_preview_capture(window_id, capture);
                 if !focused {
                     if let Some(state) = self.windows.get_mut(&window_id) {
                         state.modifiers = KeyModifiers::default();
+                        state.release_shortcut_down = false;
                     }
                 }
                 self.emit(window_id, PlatformEvent::Focused(focused));
@@ -386,6 +427,12 @@ where
             }
 
             WindowEvent::MouseInput { state, button, .. } => {
+                if state == ElementState::Pressed && button == MouseButton::Left {
+                    if let Some(state) = self.windows.get_mut(&window_id) {
+                        state.capture_requested = true;
+                    }
+                    self.set_preview_capture(window_id, true);
+                }
                 self.flush_pending_pointer_move(window_id);
                 self.emit(
                     window_id,
@@ -426,6 +473,34 @@ where
                     .windows
                     .get(&window_id)
                     .map_or(KeyModifiers::default(), |state| state.modifiers);
+                let capture_enabled = self
+                    .windows
+                    .get(&window_id)
+                    .is_some_and(|state| state.preview_capture);
+                if capture_enabled && event.physical_key == PhysicalKey::Code(KeyCode::KeyG) {
+                    let releasing = self
+                        .windows
+                        .get(&window_id)
+                        .is_some_and(|state| state.release_shortcut_down);
+                    if event.state == ElementState::Released && releasing {
+                        if let Some(state) = self.windows.get_mut(&window_id) {
+                            state.release_shortcut_down = false;
+                        }
+                        return;
+                    }
+                    if event.state == ElementState::Pressed
+                        && (releasing || (modifiers.control() && modifiers.alt()))
+                    {
+                        if !event.repeat {
+                            if let Some(state) = self.windows.get_mut(&window_id) {
+                                state.capture_requested = false;
+                                state.release_shortcut_down = true;
+                            }
+                            self.set_preview_capture(window_id, false);
+                        }
+                        return;
+                    }
+                }
                 if event.state == ElementState::Released {
                     if let Some(key) = convert_key(&event.logical_key) {
                         self.emit(window_id, PlatformEvent::KeyReleased { key, modifiers });

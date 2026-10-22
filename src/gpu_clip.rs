@@ -32,6 +32,7 @@ impl ClipShape {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn polygon(&self) -> Vec<(f32, f32)> {
         match self {
             Self::Rect(rect) => vec![
@@ -58,7 +59,7 @@ pub(crate) fn premultiplied_color(color: Color) -> [f32; 4] {
     ]
 }
 
-pub(crate) fn clip_polygon(mut subject: Vec<ClipVertex>, clip: Vec<(f32, f32)>) -> Vec<ClipVertex> {
+pub(crate) fn clip_polygon(mut subject: Vec<ClipVertex>, clip: &[(f32, f32)]) -> Vec<ClipVertex> {
     if subject.len() < 3 || clip.len() < 3 {
         return Vec::new();
     }
@@ -215,7 +216,7 @@ mod tests {
         let triangle = vec![vertex(-5.0, 5.0), vertex(5.0, -5.0), vertex(10.0, 10.0)];
         let clipped = clip_polygon(
             triangle,
-            vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)],
+            &[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)],
         );
         assert!(clipped.len() >= 3);
         for vertex in clipped {

@@ -3,12 +3,12 @@ use std::mem;
 use std::rc::Rc;
 
 use cosmic_text::{Buffer, FontSystem, SwashCache};
-use mochios_viewkit_gpu_protocol::{ATLAS_HEIGHT, ATLAS_WIDTH, VERTEX_STRIDE, decode};
+use mochios_viewkit_gpu_protocol::{VERTEX_STRIDE, decode};
 use winit::event_loop::OwnedDisplayHandle;
 use winit::window::Window;
 
-use super::gpu_scene::{GpuSceneError, GpuSceneRenderer, TextLayoutKey};
-use crate::draw_command::DisplayList;
+use super::gpu_scene::{ATLAS_HEIGHT, ATLAS_WIDTH, GpuSceneError, GpuSceneRenderer, TextLayoutKey};
+use crate::draw_command::{DisplayList, DrawCommand};
 use crate::font::create_font_system;
 use crate::geometry::Rect;
 use crate::image::ImageData;
@@ -46,6 +46,9 @@ pub struct GpuRenderer {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     pipeline: wgpu::RenderPipeline,
+    sample_count: u32,
+    multisample_view: Option<wgpu::TextureView>,
+    retained_valid: bool,
     atlas_texture: wgpu::Texture,
     atlas_bind_group: wgpu::BindGroup,
     vertex_buffer: wgpu::Buffer,
@@ -132,9 +135,18 @@ impl GpuRenderer {
             present_mode,
             alpha_mode,
             view_formats: vec![],
-            desired_maximum_frame_latency: 2,
+            desired_maximum_frame_latency: 1,
         };
         surface.configure(&device, &config);
+        let format_flags = adapter.get_texture_format_features(format).flags;
+        let sample_count = if format_flags.sample_count_supported(4)
+            && format_flags.contains(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_RESOLVE)
+        {
+            4
+        } else {
+            1
+        };
+        let multisample_view = multisample_target(&device, &config, sample_count);
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("ViewKit GPU scene atlas layout"),
@@ -211,7 +223,10 @@ impl GpuRenderer {
                 ..Default::default()
             },
             depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState {
+                count: sample_count,
+                ..Default::default()
+            },
             multiview_mask: None,
             cache: None,
         });
@@ -266,6 +281,9 @@ impl GpuRenderer {
             queue,
             config,
             pipeline,
+            sample_count,
+            multisample_view,
+            retained_valid: false,
             atlas_texture,
             atlas_bind_group,
             vertex_buffer,
@@ -293,7 +311,7 @@ impl GpuRenderer {
     }
 
     fn acquire_frame(
-        &self,
+        &mut self,
     ) -> Result<Option<(wgpu::SurfaceTexture, wgpu::TextureView)>, GpuRendererError> {
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame)
@@ -303,6 +321,7 @@ impl GpuRenderer {
             }
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                 self.surface.configure(&self.device, &self.config);
+                self.retained_valid = false;
                 return Ok(None);
             }
             wgpu::CurrentSurfaceTexture::Validation => {
@@ -318,6 +337,31 @@ impl GpuRenderer {
     }
 }
 
+fn multisample_target(
+    device: &wgpu::Device,
+    config: &wgpu::SurfaceConfiguration,
+    sample_count: u32,
+) -> Option<wgpu::TextureView> {
+    (sample_count > 1).then(|| {
+        device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("ViewKit retained MSAA scene"),
+                size: wgpu::Extent3d {
+                    width: config.width,
+                    height: config.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count,
+                dimension: wgpu::TextureDimension::D2,
+                format: config.format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            })
+            .create_view(&wgpu::TextureViewDescriptor::default())
+    })
+}
+
 impl Renderer for GpuRenderer {
     type Error = GpuRendererError;
 
@@ -326,20 +370,33 @@ impl Renderer for GpuRenderer {
         self.config.width = viewport.physical_width.max(1);
         self.config.height = viewport.physical_height.max(1);
         self.surface.configure(&self.device, &self.config);
+        self.multisample_view = multisample_target(&self.device, &self.config, self.sample_count);
+        self.retained_valid = false;
         Ok(())
     }
 
     fn render(
         &mut self,
         display_list: &DisplayList,
-        _dirty_bounds: Rect,
+        dirty_bounds: Rect,
     ) -> Result<(), Self::Error> {
-        // The swapchain does not preserve prior contents. Rebuild the entire
-        // frame on the GPU until retained render targets are introduced.
-        let full_frame = self.viewport.logical_bounds();
+        let Some((frame, view)) = self.acquire_frame()? else {
+            return Ok(());
+        };
+        // Retain multisample contents across swapchain frames. Opaque scene
+        // clears replace the damaged region exactly; transparent roots require
+        // a full clear so repeated source-over blending cannot leave trails.
+        let retain = self.multisample_view.is_some()
+            && self.retained_valid
+            && matches!(display_list.commands().first(), Some(DrawCommand::Clear { color }) if color.alpha == 255);
+        let damage = if retain {
+            pixel_damage(dirty_bounds, self.viewport)
+        } else {
+            self.viewport.logical_bounds()
+        };
         self.scene_renderer.render(
             self.viewport,
-            full_frame,
+            damage,
             display_list,
             &mut self.font_system,
             &mut self.swash_cache,
@@ -350,12 +407,14 @@ impl Renderer for GpuRenderer {
         // Raster images have independent textures. The small shared atlas is
         // reserved for glyphs and vector controls; wallpapers retain their
         // original resolution and no longer compete with text for space.
-        self.image_textures.retain(|texture| {
-            self.scene_renderer
-                .external_images
-                .iter()
-                .any(|draw| draw.image == texture.image)
-        });
+        if !retain || self.image_textures.len() > 128 {
+            self.image_textures.retain(|texture| {
+                self.scene_renderer
+                    .external_images
+                    .iter()
+                    .any(|draw| draw.image == texture.image)
+            });
+        }
         let images: Vec<_> = self
             .scene_renderer
             .external_images
@@ -483,9 +542,6 @@ impl Renderer for GpuRenderer {
                 },
             );
         }
-        let Some((frame, view)) = self.acquire_frame()? else {
-            return Ok(());
-        };
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -495,11 +551,15 @@ impl Renderer for GpuRenderer {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("ViewKit GPU scene pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view: self.multisample_view.as_ref().unwrap_or(&view),
                     depth_slice: None,
-                    resolve_target: None,
+                    resolve_target: self.multisample_view.as_ref().map(|_| &view),
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        load: if retain {
+                            wgpu::LoadOp::Load
+                        } else {
+                            wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
+                        },
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -532,6 +592,44 @@ impl Renderer for GpuRenderer {
         }
         self.queue.submit(Some(encoder.finish()));
         self.queue.present(frame);
+        self.retained_valid = true;
         Ok(())
+    }
+}
+
+fn pixel_damage(bounds: Rect, viewport: Viewport) -> Rect {
+    let scale = if viewport.scale_factor.is_finite() && viewport.scale_factor > 0.0 {
+        viewport.scale_factor as f32
+    } else {
+        1.0
+    };
+    let x = (bounds.origin.x * scale).floor() / scale;
+    let y = (bounds.origin.y * scale).floor() / scale;
+    let right = ((bounds.origin.x + bounds.size.width) * scale).ceil() / scale;
+    let bottom = ((bounds.origin.y + bounds.size.height) * scale).ceil() / scale;
+    Rect::new(x, y, right - x, bottom - y)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geometry::Size;
+
+    #[test]
+    fn fractional_damage_covers_whole_physical_pixels_at_fractional_scale() {
+        let viewport = Viewport::new(Size::new(800.0, 600.0), 1200, 900, 1.5);
+        let original = Rect::new(10.1, 20.3, 3.2, 4.6);
+        let damage = pixel_damage(original, viewport);
+        assert!(damage.origin.x <= original.origin.x && damage.origin.y <= original.origin.y);
+        assert!(damage.origin.x + damage.size.width >= original.origin.x + original.size.width);
+        assert!(damage.origin.y + damage.size.height >= original.origin.y + original.size.height);
+        for edge in [
+            damage.origin.x,
+            damage.origin.y,
+            damage.origin.x + damage.size.width,
+            damage.origin.y + damage.size.height,
+        ] {
+            assert!((edge * 1.5 - (edge * 1.5).round()).abs() < 0.0001);
+        }
     }
 }

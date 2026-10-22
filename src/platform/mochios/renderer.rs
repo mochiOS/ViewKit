@@ -139,6 +139,47 @@ pub(super) fn render_display_list(
                     pixmap.fill_rect(rect, &paint, transform, clip_masks.get(clip_depth));
                 }
             }
+            DrawCommand::DrawContour {
+                points,
+                fill,
+                stroke,
+                stroke_width,
+            } => {
+                let points = crate::contour::clean(points);
+                if points.len() < 3 {
+                    continue;
+                }
+                let mut builder = PathBuilder::new();
+                builder.move_to(points[0].x, points[0].y);
+                for point in &points[1..] {
+                    builder.line_to(point.x, point.y);
+                }
+                builder.close();
+                let Some(path) = builder.finish() else {
+                    continue;
+                };
+                if fill.alpha > 0 {
+                    pixmap.fill_path(
+                        &path,
+                        &solid_paint(*fill),
+                        FillRule::Winding,
+                        transform,
+                        clip_masks.get(clip_depth),
+                    );
+                }
+                if stroke.alpha > 0 && stroke_width.is_finite() && *stroke_width > 0.0 {
+                    pixmap.stroke_path(
+                        &path,
+                        &solid_paint(*stroke),
+                        &Stroke {
+                            width: *stroke_width,
+                            ..Default::default()
+                        },
+                        transform,
+                        clip_masks.get(clip_depth),
+                    );
+                }
+            }
             DrawCommand::FillRect { rect, color } => {
                 if rect.intersection(dirty_bounds).is_none() {
                     continue;

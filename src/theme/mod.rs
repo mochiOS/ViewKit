@@ -1,6 +1,7 @@
 mod application;
 mod color;
 mod control;
+mod control_metrics;
 mod divider;
 mod figma;
 mod layout;
@@ -23,6 +24,7 @@ pub use control::{
     PopoverTokens, ProgressBarTokens, SegmentedControlTokens, SelectionControlTokens, SliderTokens,
     StepperTokens, SurfaceTokens, SwitchTokens, TabsTokens, TextFieldTokens, TooltipTokens,
 };
+pub use control_metrics::ControlMetrics;
 pub use divider::{DividerThickness, DividerTokens};
 pub use figma::{
     AccentColorTokens, BackgroundColorTokens, BorderColorTokens, ErrorColorTokens,

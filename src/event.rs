@@ -242,6 +242,7 @@ pub struct EventContext<'a> {
     cursor_icon: Option<CursorIcon>,
     context_menu_request: Option<ContextMenuRequest>,
     keyboard_focus_request: Option<Option<Rect>>,
+    focus_visible: bool,
     pointer_press_intercepted: bool,
     command_requests: Vec<CommandId>,
     command_statuses: &'a [CommandStatus],
@@ -262,6 +263,7 @@ impl<'a> EventContext<'a> {
             cursor_icon: None,
             context_menu_request: None,
             keyboard_focus_request: None,
+            focus_visible: true,
             pointer_press_intercepted: false,
             command_requests: Vec::new(),
             command_statuses: &[],
@@ -335,6 +337,12 @@ impl<'a> EventContext<'a> {
         self.keyboard_focus_request = Some(Some(bounds));
     }
 
+    /// キーボード操作に対応するフォーカス表示が必要かを返します。
+    /// フォーカスの所有と、ポインター操作時の枠表示を区別するために使います。
+    pub fn focus_visible(&self) -> bool {
+        self.focus_visible
+    }
+
     pub fn clear_keyboard_focus(&mut self) {
         self.keyboard_focus_request = Some(None);
     }
@@ -370,6 +378,7 @@ pub struct EventDispatcher {
     focus_scopes: Vec<FocusScopeState>,
     pending_focus_request: Option<Option<Rect>>,
     window_focused: bool,
+    focus_visible: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -500,6 +509,7 @@ impl EventDispatcher {
         context: &mut EventContext<'_>,
     ) -> EventResult {
         let mut result = EventResult::Ignored;
+        context.focus_visible = self.focus_visible;
 
         if let PlatformEvent::Focused(focused) = event {
             self.window_focused = *focused;
@@ -532,6 +542,8 @@ impl EventDispatcher {
             modifiers,
         } = event
         {
+            self.focus_visible = true;
+            context.focus_visible = true;
             // Give the focused control the first opportunity to consume Tab.
             // Multi-line editors use it as document input, while controls that
             // ignore it retain the normal keyboard focus traversal behavior.
@@ -566,6 +578,8 @@ impl EventDispatcher {
         );
 
         if is_primary_press && let Some(position) = self.pointer_position {
+            self.focus_visible = false;
+            context.focus_visible = false;
             let focus_result = root.handle_event(
                 bounds,
                 &ViewEvent::PointerFocusRequested { position },
@@ -724,6 +738,55 @@ mod tests {
     use crate::typography::TextMeasurer;
     use crate::view::{PaintContext, View};
     use std::cell::Cell;
+
+    #[test]
+    fn pointer_focus_keeps_keyboard_input_without_showing_keyboard_focus_ring() {
+        struct FocusRecorder(Cell<(bool, bool)>);
+        impl View for FocusRecorder {
+            fn paint(&self, _: Rect, _: &mut PaintContext<'_>) {}
+            fn handle_event(
+                &self,
+                _: Rect,
+                event: &ViewEvent,
+                context: &mut EventContext<'_>,
+            ) -> EventResult {
+                if let ViewEvent::KeyboardFocusRequested { bounds } = event {
+                    self.0.set((bounds.is_some(), context.focus_visible()));
+                }
+                EventResult::Ignored
+            }
+        }
+        let root = FocusRecorder(Cell::new((false, false)));
+        let bounds = Rect::new(0.0, 0.0, 100.0, 40.0);
+        let mut node = AccessibilityNode::new(AccessibilityRole::Button, bounds);
+        node.focusable = true;
+        let mut dispatcher = EventDispatcher::new();
+        dispatcher.set_accessibility_nodes(&[node]);
+        let theme = Theme::current();
+        let mut measurer = TextMeasurer::new();
+        let mut context = EventContext::new(&theme, &theme.typography, &mut measurer);
+        for event in [
+            PlatformEvent::Focused(true),
+            PlatformEvent::PointerMoved { x: 20.0, y: 20.0 },
+            PlatformEvent::PointerButton {
+                button: PointerButton::Primary,
+                state: ButtonState::Pressed,
+            },
+        ] {
+            dispatcher.dispatch(&root, bounds, &event, &mut context);
+        }
+        assert_eq!(root.0.get(), (true, false));
+        dispatcher.dispatch(
+            &root,
+            bounds,
+            &PlatformEvent::KeyPressed {
+                key: crate::platform::Key::Tab,
+                modifiers: crate::platform::KeyModifiers::default(),
+            },
+            &mut context,
+        );
+        assert_eq!(root.0.get(), (true, true));
+    }
 
     struct PointerRecorder {
         presses: Cell<usize>,

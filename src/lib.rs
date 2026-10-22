@@ -4,6 +4,8 @@ pub mod app;
 pub mod appearance;
 pub mod components;
 pub mod command;
+mod contour;
+pub mod omochi;
 pub mod draw_command;
 pub mod edge_insets;
 pub mod event;

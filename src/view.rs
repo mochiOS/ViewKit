@@ -1,6 +1,6 @@
 use crate::accessibility::AccessibilityNode;
 use crate::command::CommandStatus;
-use crate::draw_command::DisplayList;
+use crate::draw_command::{DisplayList, PaintTransform};
 use crate::event::{EventContext, EventResult, RedrawRequest, ViewEvent};
 use crate::geometry::{Rect, Size};
 use crate::theme::Theme;
@@ -75,6 +75,30 @@ pub struct PaintContext<'a> {
 }
 
 impl<'a> PaintContext<'a> {
+    /// 子のレイアウトを固定したまま描画だけを変換します。
+    /// フォーカスが毎フレーム移らないよう、アクセシビリティのboundsは論理座標を維持します。
+    /// ポインター配送時は同じ変換のinverse_pointを使用してください。
+    /// interactive=falseでは、閉じている途中の子をフォーカス順から取り除きます。
+    pub fn with_presentation(
+        &mut self,
+        transform: PaintTransform,
+        interactive: bool,
+        paint: impl FnOnce(&mut Self),
+    ) {
+        let start = self.display_list.commands().len();
+        let nodes = self
+            .accessibility_nodes
+            .as_ref()
+            .map_or(0, |nodes| nodes.len());
+        paint(self);
+        self.display_list.transform_since(start, transform);
+        if !interactive {
+            if let Some(nodes_list) = self.accessibility_nodes.as_deref_mut() {
+                nodes_list.truncate(nodes);
+            }
+        }
+    }
+
     pub fn new(
         display_list: &'a mut DisplayList,
         theme: &'a Theme,

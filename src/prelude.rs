@@ -6,7 +6,7 @@
 
 pub use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 pub use crate::animation::{
-    Animation, AnimationSample, Easing, Interpolate, Transition, interpolate,
+    Animation, AnimationSample, Easing, Interpolate, Transition, VisibilityTransition, interpolate,
 };
 pub use crate::app::{App, ViewContext, WindowId, WindowOptions};
 pub use crate::command::{CommandId, CommandStatus, standard as standard_commands};

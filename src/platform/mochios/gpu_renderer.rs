@@ -3,13 +3,18 @@ use super::*;
 use crate::gpu_clip::{ClipRegion, ClipShape, ClipVertex, clip_polygon, premultiplied_color};
 use cosmic_text::{CacheKey, SwashContent, SwashImage};
 
-use mochios_viewkit_gpu_protocol::{
-    ATLAS_HEIGHT, ATLAS_WIDTH, HEADER_LEN, VERTEX_STRIDE, encode_header,
-};
+#[cfg(target_os = "linux")]
+use super::{ATLAS_HEIGHT, ATLAS_WIDTH};
+#[cfg(not(target_os = "linux"))]
+use mochios_viewkit_gpu_protocol::{ATLAS_HEIGHT, ATLAS_WIDTH};
+use mochios_viewkit_gpu_protocol::{HEADER_LEN, VERTEX_STRIDE, encode_header};
 const CURVE_SEGMENTS: usize = 48;
 #[cfg(not(target_os = "linux"))]
 const IMAGE_RASTER_CACHE_CAPACITY: usize = 128;
+#[cfg(not(target_os = "linux"))]
 const SVG_RASTER_CACHE_CAPACITY: usize = 128;
+#[cfg(target_os = "linux")]
+const SVG_RASTER_CACHE_CAPACITY: usize = 1024;
 
 #[derive(Clone, Copy)]
 struct Vertex {
@@ -170,6 +175,12 @@ impl GpuSceneRenderer {
         });
         for command in display_list.commands() {
             match command {
+                DrawCommand::DrawContour {
+                    points,
+                    fill,
+                    stroke,
+                    stroke_width,
+                } => self.contour(points, *fill, *stroke, *stroke_width, viewport),
                 DrawCommand::Clear { color } => {
                     self.solid_rect(
                         viewport.logical_bounds(),
@@ -393,6 +404,88 @@ impl GpuSceneRenderer {
         );
     }
 
+    fn contour(
+        &mut self,
+        points: &[crate::geometry::Point],
+        fill: Color,
+        stroke: Color,
+        width: f32,
+        viewport: Viewport,
+    ) {
+        let points = crate::contour::clean(points);
+        if points.len() < 3 {
+            return;
+        }
+        let fringe = 0.5 / valid_scale_factor(viewport.scale_factor);
+        let uv = self.uv_center(AtlasRect {
+            x: 0,
+            y: 0,
+            width: 1,
+            height: 1,
+        });
+        let positions = |point: crate::geometry::Point| (point.x, point.y);
+        if fill.alpha > 0 {
+            let inner = crate::contour::offset(&points, -fringe);
+            let outer = crate::contour::offset(&points, fringe);
+            for triangle in crate::contour::tessellate(&inner) {
+                self.push_triangle(triangle.map(positions), [uv; 3], fill, viewport);
+            }
+            self.contour_strip(&inner, &outer, fill, transparent(fill), uv, viewport);
+        }
+        if stroke.alpha > 0 && width.is_finite() && width > 0.0 {
+            let half = width * 0.5;
+            let aa = fringe.min(half);
+            let inner_fade = crate::contour::offset(&points, -half - fringe);
+            let inner = crate::contour::offset(&points, -half + aa);
+            let outer = crate::contour::offset(&points, half - aa);
+            let outer_fade = crate::contour::offset(&points, half + fringe);
+            self.contour_strip(
+                &inner_fade,
+                &inner,
+                transparent(stroke),
+                stroke,
+                uv,
+                viewport,
+            );
+            self.contour_strip(&inner, &outer, stroke, stroke, uv, viewport);
+            self.contour_strip(
+                &outer,
+                &outer_fade,
+                stroke,
+                transparent(stroke),
+                uv,
+                viewport,
+            );
+        }
+    }
+
+    fn contour_strip(
+        &mut self,
+        inner: &[crate::geometry::Point],
+        outer: &[crate::geometry::Point],
+        inside: Color,
+        outside: Color,
+        uv: [f32; 2],
+        viewport: Viewport,
+    ) {
+        let p = |point: crate::geometry::Point| (point.x, point.y);
+        for i in 0..inner.len() {
+            let next = (i + 1) % inner.len();
+            self.push_triangle_colors(
+                [p(inner[i]), p(outer[i]), p(outer[next])],
+                [uv; 3],
+                [inside, outside, outside],
+                viewport,
+            );
+            self.push_triangle_colors(
+                [p(inner[i]), p(outer[next]), p(inner[next])],
+                [uv; 3],
+                [inside, outside, inside],
+                viewport,
+            );
+        }
+    }
+
     fn rounded_rect(&mut self, rect: Rect, radius: f32, color: Color, viewport: Viewport) {
         self.fan(rect, radius.max(0.0), color, viewport, false);
     }
@@ -411,8 +504,9 @@ impl GpuSceneRenderer {
         if rect.intersection(self.current_clip()).is_none() {
             return;
         }
-        let inner_rect = inset_rect(rect, 0.5);
-        let outer_rect = rect.expanded(0.5);
+        let fringe = 0.5 / valid_scale_factor(viewport.scale_factor);
+        let inner_rect = inset_rect(rect, fringe);
+        let outer_rect = rect.expanded(fringe);
         let center = (
             inner_rect.origin.x + inner_rect.size.width * 0.5,
             inner_rect.origin.y + inner_rect.size.height * 0.5,
@@ -420,12 +514,12 @@ impl GpuSceneRenderer {
         let points = if ellipse {
             ellipse_points(inner_rect)
         } else {
-            rounded_points(inner_rect, (radius - 0.5).max(0.0))
+            rounded_points(inner_rect, (radius - fringe).max(0.0))
         };
         let outer = if ellipse {
             ellipse_points(outer_rect)
         } else {
-            rounded_points(outer_rect, radius + 0.5)
+            rounded_points(outer_rect, radius + fringe)
         };
         if points.len() < 3 {
             return;
@@ -519,11 +613,12 @@ impl GpuSceneRenderer {
             return;
         }
         let half = width * 0.5;
-        let opaque_inset = half.min(0.5);
-        let outer_transparent = rounded_points_at_offset(rect, radius, half + 0.5);
+        let fringe = 0.5 / valid_scale_factor(viewport.scale_factor);
+        let opaque_inset = half.min(fringe);
+        let outer_transparent = rounded_points_at_offset(rect, radius, half + fringe);
         let outer_opaque = rounded_points_at_offset(rect, radius, half - opaque_inset);
         let inner_opaque = rounded_points_at_offset(rect, radius, -half + opaque_inset);
-        let inner_transparent = rounded_points_at_offset(rect, radius, -half - 0.5);
+        let inner_transparent = rounded_points_at_offset(rect, radius, -half - fringe);
         self.anti_aliased_ring(
             &outer_transparent,
             &outer_opaque,
@@ -539,11 +634,12 @@ impl GpuSceneRenderer {
             return;
         }
         let half = width * 0.5;
-        let opaque_inset = half.min(0.5);
-        let outer_transparent = ellipse_points(offset_rect(rect, half + 0.5));
+        let fringe = 0.5 / valid_scale_factor(viewport.scale_factor);
+        let opaque_inset = half.min(fringe);
+        let outer_transparent = ellipse_points(offset_rect(rect, half + fringe));
         let outer_opaque = ellipse_points(offset_rect(rect, half - opaque_inset));
         let inner_opaque = ellipse_points(offset_rect(rect, -half + opaque_inset));
-        let inner_transparent = ellipse_points(offset_rect(rect, -half - 0.5));
+        let inner_transparent = ellipse_points(offset_rect(rect, -half - fringe));
         self.anti_aliased_ring(
             &outer_transparent,
             &outer_opaque,
@@ -625,7 +721,7 @@ impl GpuSceneRenderer {
     fn image(
         &mut self,
         command: &ImageCommand,
-        scale: f32,
+        _scale: f32,
         viewport: Viewport,
     ) -> Result<(), MochiOsBackendError> {
         if command.bounds.intersection(self.current_clip()).is_none() {
@@ -635,7 +731,7 @@ impl GpuSceneRenderer {
         {
             let start = self.vertices.len() as u32;
             self.textured_quad_uv(
-                scale_rect(command.bounds, scale),
+                command.bounds,
                 (0.0, 0.0, 1.0, 1.0),
                 command.opacity,
                 viewport,
@@ -670,8 +766,7 @@ impl GpuSceneRenderer {
                 });
                 atlas
             };
-            let rect = scale_rect(command.bounds, scale);
-            self.textured_quad(rect, atlas, command.opacity, viewport);
+            self.textured_quad(command.bounds, atlas, command.opacity, viewport);
             Ok(())
         }
     }
@@ -736,7 +831,12 @@ impl GpuSceneRenderer {
             });
             atlas
         };
-        self.textured_quad(output_bounds, atlas, command.opacity, viewport);
+        self.textured_quad(
+            scale_rect(output_bounds, 1.0 / scale),
+            atlas,
+            command.opacity,
+            viewport,
+        );
         Ok(())
     }
 
@@ -820,8 +920,7 @@ impl GpuSceneRenderer {
             command.color.blue,
             command.color.alpha,
         );
-        let text_clip = scale_rect(command.bounds, scale);
-        self.push_clip(text_clip, None);
+        self.push_clip(command.bounds, None);
         for glyph in glyphs {
             let atlas_key = GlyphAtlasKey {
                 cache_key: glyph.cache_key,
@@ -860,7 +959,7 @@ impl GpuSceneRenderer {
                 entry.atlas.width as f32,
                 entry.atlas.height as f32,
             );
-            self.textured_quad(rect, entry.atlas, 1.0, viewport);
+            self.textured_quad(scale_rect(rect, 1.0 / scale), entry.atlas, 1.0, viewport);
         }
         self.clips.pop();
         Ok(())
@@ -954,6 +1053,17 @@ impl GpuSceneRenderer {
         let Some(clip) = self.clips.last() else {
             return;
         };
+        if positions.iter().all(|p| p.0 <= clip.bounds.origin.x)
+            || positions.iter().all(|p| p.1 <= clip.bounds.origin.y)
+            || positions
+                .iter()
+                .all(|p| p.0 >= clip.bounds.origin.x + clip.bounds.size.width)
+            || positions
+                .iter()
+                .all(|p| p.1 >= clip.bounds.origin.y + clip.bounds.size.height)
+        {
+            return;
+        }
         if clip.shapes.iter().all(|shape| {
             triangle
                 .iter()
@@ -966,7 +1076,26 @@ impl GpuSceneRenderer {
         }
         let mut polygon = triangle.to_vec();
         for shape in &clip.shapes {
-            polygon = clip_polygon(polygon, shape.polygon());
+            if polygon.iter().all(|vertex| shape.contains(vertex.position)) {
+                continue;
+            }
+            polygon = match shape {
+                ClipShape::Rect(rect) => clip_polygon(
+                    polygon,
+                    &[
+                        (rect.origin.x, rect.origin.y),
+                        (rect.origin.x + rect.size.width, rect.origin.y),
+                        (
+                            rect.origin.x + rect.size.width,
+                            rect.origin.y + rect.size.height,
+                        ),
+                        (rect.origin.x, rect.origin.y + rect.size.height),
+                    ],
+                ),
+                ClipShape::Rounded {
+                    polygon: boundary, ..
+                } => clip_polygon(polygon, boundary),
+            };
             if polygon.len() < 3 {
                 return;
             }
@@ -979,8 +1108,9 @@ impl GpuSceneRenderer {
     }
 
     fn push_clipped_vertex(&mut self, vertex: ClipVertex, viewport: Viewport) {
-        let x = vertex.position.0 / viewport.physical_width as f32 * 2.0 - 1.0;
-        let y = vertex.position.1 / viewport.physical_height as f32 * 2.0 - 1.0;
+        let scale = valid_scale_factor(viewport.scale_factor);
+        let x = vertex.position.0 * scale / viewport.physical_width as f32 * 2.0 - 1.0;
+        let y = vertex.position.1 * scale / viewport.physical_height as f32 * 2.0 - 1.0;
         self.vertices.push(Vertex {
             position: [x, y, 0.0],
             uv: vertex.uv,

@@ -10,7 +10,7 @@ use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 use super::{
     BorderStyle, Button, ButtonInteractionState, ButtonStyle, Card, Divider, HStack, Padding,
-    Spacer, Text, VStack, ZStackAlignment,
+    Rectangle, RectangleColor, Spacer, Text, VStack, ZStackAlignment,
 };
 
 type Callback = Rc<RefCell<Box<dyn FnMut()>>>;
@@ -54,6 +54,7 @@ where
 }
 
 pub struct MenuItem {
+    compact: bool,
     label: String,
     shortcut: Option<String>,
 
@@ -67,6 +68,7 @@ pub struct MenuItem {
 impl MenuItem {
     pub fn new(label: impl Into<String>) -> Self {
         Self {
+            compact: false,
             label: label.into(),
             shortcut: None,
 
@@ -117,16 +119,20 @@ impl MenuItem {
             theme.menu.disabled_foreground
         };
 
+        let label = Text::label(self.label.clone())
+            .accessibility_hidden(true)
+            .color(foreground);
+        let label = if self.compact {
+            label
+                .font_size(theme.menu.compact_font_size)
+                .line_height(theme.menu.compact_row_height)
+        } else {
+            label
+        };
         let mut content = HStack::new()
             .alignment(StackAlignment::Center)
             .gap(StackGap::Medium)
-            .child(
-                Text::label(self.label.clone())
-                    .accessibility_hidden(true)
-                    .color(foreground)
-                    .layout()
-                    .flex_grow(1.0),
-            );
+            .child(label.layout().flex_grow(1.0));
 
         if let Some(shortcut) = self.shortcut.as_ref() {
             content = content.child(
@@ -138,16 +144,16 @@ impl MenuItem {
 
         let style = if self.danger {
             ButtonStyle::Custom {
-                background: theme.menu.item_background,
-                hovered_background: theme.menu.danger_hovered_background,
+                background: Color::TRANSPARENT,
+                hovered_background: Color::TRANSPARENT,
                 border: Color::TRANSPARENT,
                 hovered_border: Color::TRANSPARENT,
                 foreground: theme.menu.danger_foreground,
             }
         } else {
             ButtonStyle::Custom {
-                background: theme.menu.item_background,
-                hovered_background: theme.menu.item_hovered_background,
+                background: Color::TRANSPARENT,
+                hovered_background: Color::TRANSPARENT,
                 border: Color::TRANSPARENT,
                 hovered_border: Color::TRANSPARENT,
                 foreground: theme.menu.foreground,
@@ -165,8 +171,16 @@ impl MenuItem {
             .accessibility_value_option(self.shortcut.clone())
             .content(
                 Padding::symmetric(
-                    theme.menu.item_horizontal_padding,
-                    theme.menu.item_vertical_padding,
+                    if self.compact {
+                        0.0
+                    } else {
+                        theme.menu.item_horizontal_padding
+                    },
+                    if self.compact {
+                        0.0
+                    } else {
+                        theme.menu.item_vertical_padding
+                    },
                 )
                 .content(content),
             );
@@ -205,11 +219,17 @@ impl View for MenuItem {
 
 pub struct Menu {
     content: VStack,
+    compact: bool,
+    rows: Vec<(f32, f32, bool, ButtonInteractionState)>,
+    height: f32,
 }
 
 impl Default for Menu {
     fn default() -> Self {
         Self {
+            compact: false,
+            rows: Vec::new(),
+            height: 0.0,
             content: VStack::new()
                 .alignment(StackAlignment::Stretch)
                 .gap(StackGap::None),
@@ -222,14 +242,40 @@ impl Menu {
         Self::default()
     }
 
-    pub fn item(mut self, item: MenuItem) -> Self {
-        self.content = std::mem::take(&mut self.content)
-            .child(item.height(Theme::current().layout.compact_control_height));
+    /// Selects compact desktop presentation before adding items; other menus retain their defaults.
+    pub fn compact(mut self) -> Self {
+        self.compact = true;
+        self
+    }
+
+    /// Separates semantic groups with whitespace.
+    pub fn group(mut self) -> Self {
+        self.height += Theme::current().menu.compact_group_gap;
+        self.content = std::mem::take(&mut self.content).child(
+            Spacer::new()
+                .into_stack_child()
+                .height(Theme::current().menu.compact_group_gap),
+        );
+        self
+    }
+
+    pub fn item(mut self, mut item: MenuItem) -> Self {
+        item.compact = self.compact;
+        let height = if self.compact {
+            Theme::current().menu.compact_row_height
+        } else {
+            Theme::current().layout.compact_control_height
+        };
+        self.rows
+            .push((self.height, height, item.enabled, item.interaction.clone()));
+        self.height += height;
+        self.content = std::mem::take(&mut self.content).child(item.height(height));
         self
     }
 
     pub fn separator(mut self) -> Self {
         let spacing = Theme::current().spacing.extra_small;
+        self.height += spacing * 2.0 + Theme::current().divider.thickness;
         self.content = std::mem::take(&mut self.content)
             .child(Spacer::new().into_stack_child().height(spacing))
             .child(Divider::new())
@@ -252,12 +298,32 @@ impl Menu {
 
 impl View for Menu {
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
-        self.card().measure(constraints, context)
+        if self.compact {
+            Padding::all(context.theme.menu.compact_padding)
+                .content(ViewRef::new(&self.content))
+                .measure(constraints, context)
+        } else {
+            self.card().measure(constraints, context)
+        }
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
-        context.record_accessibility(AccessibilityNode::new(AccessibilityRole::Menu, bounds));
-        self.card().paint(bounds, context);
+        let mut node = AccessibilityNode::new(AccessibilityRole::Menu, bounds);
+        node.focus_scope = self.compact;
+        context.record_accessibility(node);
+        if self.compact {
+            Rectangle::new()
+                .color(RectangleColor::Custom(context.theme.card.background))
+                .radius(crate::theme::CornerRadius::Custom(
+                    context.theme.menu.compact_radius,
+                ))
+                .paint(bounds, context);
+            Padding::all(context.theme.menu.compact_padding)
+                .content(ViewRef::new(&self.content))
+                .paint(bounds, context);
+        } else {
+            self.card().paint(bounds, context);
+        }
     }
 
     fn handle_event(
@@ -266,6 +332,122 @@ impl View for Menu {
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
-        self.card().handle_event(bounds, event, context)
+        if self.compact {
+            if let ViewEvent::KeyPressed {
+                key: crate::platform::Key::ArrowDown | crate::platform::Key::ArrowUp,
+                ..
+            } = event
+            {
+                let enabled = self
+                    .rows
+                    .iter()
+                    .filter(|(_, _, enabled, _)| *enabled)
+                    .collect::<Vec<_>>();
+                if !enabled.is_empty() {
+                    let current = enabled
+                        .iter()
+                        .position(|(_, _, _, state)| state.is_focused());
+                    let down = matches!(
+                        event,
+                        ViewEvent::KeyPressed {
+                            key: crate::platform::Key::ArrowDown,
+                            ..
+                        }
+                    );
+                    let next = match current {
+                        Some(i) if down => (i + 1) % enabled.len(),
+                        Some(i) => (i + enabled.len() - 1) % enabled.len(),
+                        None if down => 0,
+                        None => enabled.len() - 1,
+                    };
+                    let (offset, height, _, _) = enabled[next];
+                    let padding = context.theme.menu.compact_padding;
+                    context.request_keyboard_focus(Rect::new(
+                        bounds.origin.x + padding,
+                        bounds.origin.y + padding + offset,
+                        (bounds.size.width - padding * 2.0).max(0.0),
+                        *height,
+                    ));
+                }
+                return EventResult::Consumed;
+            }
+        }
+        if self.compact {
+            Padding::all(context.theme.menu.compact_padding)
+                .content(ViewRef::new(&self.content))
+                .handle_event(bounds, event, context)
+        } else {
+            self.card().handle_event(bounds, event, context)
+        }
+    }
+}
+
+#[cfg(test)]
+mod compact_tests {
+    use super::*;
+    use crate::{
+        platform::{Key, KeyModifiers},
+        typography::TextMeasurer,
+    };
+    use std::cell::Cell;
+    #[test]
+    fn compact_items_activate_by_keyboard_but_disabled_user_label_does_not() {
+        let calls = Rc::new(Cell::new(0));
+        let callback_calls = Rc::clone(&calls);
+        let menu = Menu::new()
+            .compact()
+            .item(
+                MenuItem::new("User")
+                    .enabled(false)
+                    .on_select(|| panic!("disabled item activated")),
+            )
+            .item(
+                MenuItem::new("Settings")
+                    .on_select(move || callback_calls.set(callback_calls.get() + 1)),
+            );
+        let theme = Theme::current();
+        let mut measurer = TextMeasurer::new();
+        let mut context = EventContext::new(&theme, &theme.typography, &mut measurer);
+        let bounds = Rect::new(15.0, 47.0, 150.0, 48.0);
+        let item_bounds = |index: f32| {
+            Rect::new(
+                25.0,
+                57.0 + theme.menu.compact_row_height * index,
+                130.0,
+                theme.menu.compact_row_height,
+            )
+        };
+        menu.handle_event(
+            bounds,
+            &ViewEvent::KeyboardFocusRequested {
+                bounds: Some(item_bounds(0.0)),
+            },
+            &mut context,
+        );
+        menu.handle_event(
+            bounds,
+            &ViewEvent::KeyPressed {
+                key: Key::Enter,
+                modifiers: KeyModifiers::default(),
+            },
+            &mut context,
+        );
+        assert_eq!(calls.get(), 0);
+        menu.handle_event(
+            bounds,
+            &ViewEvent::KeyboardFocusRequested {
+                bounds: Some(item_bounds(1.0)),
+            },
+            &mut context,
+        );
+        menu.handle_event(
+            bounds,
+            &ViewEvent::KeyPressed {
+                key: Key::Enter,
+                modifiers: KeyModifiers::default(),
+            },
+            &mut context,
+        );
+        assert_eq!(calls.get(), 1);
     }
 }
