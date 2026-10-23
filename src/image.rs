@@ -161,6 +161,35 @@ impl ImageData {
         (self.inner.width, self.inner.height)
     }
 
+    /// Returns a lossless clockwise quarter-turn without re-encoding the image.
+    pub fn rotated_quarter_turns(&self, turns: u8) -> Result<Self, ImageError> {
+        let turns = turns % 4;
+        if turns == 0 {
+            return Ok(self.clone());
+        }
+        let (width, height) = self.dimensions();
+        let (out_width, out_height) = if turns % 2 == 0 {
+            (width, height)
+        } else {
+            (height, width)
+        };
+        let mut pixels = vec![0; self.inner.pixels.len()];
+        for y in 0..height {
+            for x in 0..width {
+                let (dx, dy) = match turns {
+                    1 => (height - 1 - y, x),
+                    2 => (width - 1 - x, height - 1 - y),
+                    _ => (y, width - 1 - x),
+                };
+                let source = (y as usize * width as usize + x as usize) * 4;
+                let destination = (dy as usize * out_width as usize + dx as usize) * 4;
+                pixels[destination..destination + 4]
+                    .copy_from_slice(&self.inner.pixels[source..source + 4]);
+            }
+        }
+        Self::from_premultiplied_rgba8(out_width, out_height, pixels)
+    }
+
     pub(crate) fn premultiplied_rgba8(&self) -> &[u8] {
         &self.inner.pixels
     }
@@ -227,4 +256,41 @@ fn premultiply_channel(channel: u8, alpha: u8) -> u8 {
     let alpha = u16::from(alpha);
 
     ((channel * alpha + 127) / 255) as u8
+}
+
+#[cfg(test)]
+mod rotation_tests {
+    use super::*;
+    #[test]
+    fn rectangular_quarter_turns_preserve_pixel_order_and_premultiplied_alpha() {
+        let image = ImageData::from_premultiplied_rgba8(
+            2,
+            3,
+            (1..=6).flat_map(|v| [v, 0, 0, 64]).collect::<Vec<_>>(),
+        )
+        .unwrap();
+        for (turns, dimensions, expected) in [
+            (1, (3, 2), vec![5, 3, 1, 6, 4, 2]),
+            (2, (2, 3), vec![6, 5, 4, 3, 2, 1]),
+            (3, (3, 2), vec![2, 4, 6, 1, 3, 5]),
+        ] {
+            let result = image.rotated_quarter_turns(turns).unwrap();
+            assert_eq!(result.dimensions(), dimensions);
+            assert_eq!(
+                result
+                    .premultiplied_rgba8()
+                    .chunks_exact(4)
+                    .map(|p| p[0])
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            assert!(
+                result
+                    .premultiplied_rgba8()
+                    .chunks_exact(4)
+                    .all(|p| p[3] == 64)
+            );
+        }
+        assert_eq!(image.rotated_quarter_turns(4).unwrap(), image);
+    }
 }
