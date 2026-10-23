@@ -73,6 +73,64 @@ pub enum Packet {
     FilePanelOperation {
         error: Option<String>,
     },
+    OpenDocument {
+        path: std::path::PathBuf,
+        content_type: String,
+        bundle_id: String,
+        roles: u16,
+    },
+    DocumentOpened {
+        process_id: Option<u32>,
+        error: Option<String>,
+    },
+}
+
+/// Opens an image through the authenticated host preview broker.
+pub fn open_document(
+    path: &std::path::Path,
+    content_type: &str,
+    bundle_id: &str,
+    roles: u16,
+) -> io::Result<u64> {
+    let socket = std::env::var_os(SOCKET_ENV).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::Unsupported,
+            "The preview desktop is unavailable.",
+        )
+    })?;
+    let path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    let mut connection = Connection::new(UnixStream::connect(socket)?)?;
+    connection.send(Packet::OpenDocument {
+        path,
+        content_type: content_type.into(),
+        bundle_id: bundle_id.into(),
+        roles,
+    })?;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        for packet in connection.poll()? {
+            if let Packet::DocumentOpened { process_id, error } = packet {
+                return process_id
+                    .filter(|pid| *pid != 0)
+                    .map(u64::from)
+                    .ok_or_else(|| {
+                        io::Error::other(
+                            error.unwrap_or_else(|| "The document could not be opened.".into()),
+                        )
+                    });
+            }
+            return Err(invalid("invalid document-open response"));
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    Err(io::Error::new(
+        io::ErrorKind::TimedOut,
+        "The preview desktop did not respond.",
+    ))
 }
 
 thread_local! {
