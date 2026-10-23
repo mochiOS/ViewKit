@@ -5,6 +5,7 @@ pub mod appearance;
 pub mod components;
 pub mod command;
 mod contour;
+mod backdrop;
 pub mod continuous_corner;
 pub mod omochi;
 pub mod draw_command;
