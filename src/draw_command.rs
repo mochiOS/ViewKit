@@ -143,6 +143,17 @@ impl PaintTransform {
         )
     }
 
+    // Color::alpha sets an absolute alpha. Presentation opacity instead
+    // multiplies the paint's existing alpha, including fully transparent fills.
+    fn color(self, color: Color) -> Color {
+        let opacity = if self.opacity.is_nan() {
+            0.0
+        } else {
+            self.opacity.clamp(0.0, 1.0)
+        };
+        color.with_alpha((f32::from(color.alpha) * opacity).round() as u8)
+    }
+
     fn command(self, command: &mut DrawCommand) {
         match command {
             DrawCommand::DrawContour {
@@ -154,14 +165,14 @@ impl PaintTransform {
                 for point in points {
                     *point = self.point(*point);
                 }
-                *fill = fill.alpha(self.opacity);
-                *stroke = stroke.alpha(self.opacity);
+                *fill = self.color(*fill);
+                *stroke = self.color(*stroke);
                 *stroke_width *= self.scale;
             }
             DrawCommand::Clear { .. } | DrawCommand::PopClip => {}
             DrawCommand::FillRect { rect, color } | DrawCommand::FillEllipse { rect, color } => {
                 *rect = self.rect(*rect);
-                *color = color.alpha(self.opacity);
+                *color = self.color(*color);
             }
             DrawCommand::FillRoundedRect {
                 rect,
@@ -170,13 +181,13 @@ impl PaintTransform {
             } => {
                 *rect = self.rect(*rect);
                 *radius *= self.scale;
-                *color = color.alpha(self.opacity);
+                *color = self.color(*color);
             }
             DrawCommand::StrokeRect { rect, color, width }
             | DrawCommand::StrokeEllipse { rect, color, width } => {
                 *rect = self.rect(*rect);
                 *width *= self.scale;
-                *color = color.alpha(self.opacity);
+                *color = self.color(*color);
             }
             DrawCommand::StrokeInsideRoundedRect {
                 rect,
@@ -193,12 +204,12 @@ impl PaintTransform {
                 *rect = self.rect(*rect);
                 *radius *= self.scale;
                 *width *= self.scale;
-                *color = color.alpha(self.opacity);
+                *color = self.color(*color);
             }
             DrawCommand::FillRoundedCornersRect { rect, radii, color } => {
                 *rect = self.rect(*rect);
                 *radii = radii.map(|r| r * self.scale);
-                *color = color.alpha(self.opacity);
+                *color = self.color(*color);
             }
             DrawCommand::StrokeInsideRoundedCornersRect {
                 rect,
@@ -208,7 +219,7 @@ impl PaintTransform {
             } => {
                 *rect = self.rect(*rect);
                 *radii = radii.map(|r| r * self.scale);
-                *color = color.alpha(self.opacity);
+                *color = self.color(*color);
                 *width *= self.scale;
             }
             DrawCommand::PushRoundedCornersClip { rect, radii } => {
@@ -219,7 +230,7 @@ impl PaintTransform {
                 command.bounds = self.rect(command.bounds);
                 command.font_size *= self.scale;
                 command.line_height *= self.scale;
-                command.color = command.color.alpha(self.opacity);
+                command.color = self.color(command.color);
             }
             DrawCommand::DrawImage { command } => {
                 command.bounds = self.rect(command.bounds);
@@ -317,6 +328,89 @@ pub fn clamp_radius(rect: Rect, radius: f32) -> f32 {
 #[cfg(test)]
 mod presentation_tests {
     use super::*;
+
+    #[test]
+    fn presentation_preserves_existing_alpha_and_composes_nested_fades() {
+        let rect = Rect::new(10.0, 20.0, 288.0, 34.0);
+        let transparent = Color::rgba(255, 255, 255, 0);
+        let glass = Color::rgba(255, 255, 255, 64);
+        let hover = Color::rgba(0, 0, 0, 14);
+        let mut list = DisplayList::new();
+        list.push(DrawCommand::FillRoundedRect {
+            rect,
+            radius: 17.0,
+            color: glass,
+        });
+        list.push(DrawCommand::FillRect {
+            rect,
+            color: transparent,
+        });
+        list.push(DrawCommand::StrokeRect {
+            rect,
+            color: hover,
+            width: 1.0,
+        });
+        list.push(DrawCommand::DrawContour {
+            points: vec![rect.origin],
+            fill: glass,
+            stroke: transparent,
+            stroke_width: 0.0,
+        });
+        list.push(DrawCommand::DrawText {
+            command: TextCommand {
+                text: "Status".into(),
+                bounds: rect,
+                cache_layout: true,
+                font_family: "sans-serif".into(),
+                font_size: 14.0,
+                line_height: 20.0,
+                weight: 400,
+                alignment: TextAlignment::Start,
+                color: Color::rgba(0, 0, 0, 128),
+            },
+        });
+        let original = list.commands().to_vec();
+        let mut transform = PaintTransform {
+            anchor: Point::new(0.0, 0.0),
+            scale: 1.0,
+            offset: Point::new(0.0, 0.0),
+            opacity: 1.0,
+        };
+        list.transform_since(0, transform);
+        assert_eq!(
+            list.commands(),
+            original.as_slice(),
+            "opacity 1 must leave translucent and transparent surfaces unchanged"
+        );
+        transform.opacity = 0.5;
+        list.transform_since(0, transform);
+        list.transform_since(0, transform);
+        assert!(matches!(
+            list.commands()[0],
+            DrawCommand::FillRoundedRect {
+                color: Color { alpha: 16, .. },
+                ..
+            }
+        ));
+        assert!(matches!(
+            list.commands()[1],
+            DrawCommand::FillRect {
+                color: Color { alpha: 0, .. },
+                ..
+            }
+        ));
+        assert!(matches!(
+            list.commands()[3],
+            DrawCommand::DrawContour {
+                fill: Color { alpha: 16, .. },
+                stroke: Color { alpha: 0, .. },
+                ..
+            }
+        ));
+        assert!(
+            matches!(&list.commands()[4], DrawCommand::DrawText { command } if command.color.alpha == 32)
+        );
+    }
 
     #[test]
     fn presentation_preserves_layout_ratios_clips_and_preceding_commands() {
