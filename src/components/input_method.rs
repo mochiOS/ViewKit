@@ -622,6 +622,13 @@ fn roman_to_hiragana(raw: &str, flush: bool) -> (String, String) {
                 input = &input[2..];
                 continue;
             }
+            // Before a consonant, `nn` completes one ん. Only retain the
+            // second n when it can begin the following syllable (e.g. nni).
+            if next == b'n' && !matches!(bytes[2], b'a' | b'i' | b'u' | b'e' | b'o' | b'y' | b'n') {
+                output.push('ん');
+                input = &input[2..];
+                continue;
+            }
             if next == b'n' || !matches!(next, b'a' | b'i' | b'u' | b'e' | b'o' | b'y') {
                 output.push('ん');
                 input = &input[1..];
@@ -872,6 +879,33 @@ mod tests {
             roman_to_hiragana("kan'i", false),
             ("かんい".into(), "".into())
         );
+    }
+
+    #[test]
+    fn doubled_n_before_consonants_produces_one_nasal() {
+        for (raw, expected) in [
+            ("annpannman", "あんぱんまん"),
+            ("kannpai", "かんぱい"),
+            ("annnai", "あんない"),
+            ("konnichiha", "こんにちは"),
+        ] {
+            assert_eq!(
+                roman_to_hiragana(raw, true),
+                (expected.into(), String::new())
+            );
+        }
+        let mut state = InputMethodState {
+            enabled_override: Some(true),
+            ..InputMethodState::default()
+        };
+        let mut value = String::new();
+        let mut cursor = 0;
+        for character in "annpannman".chars() {
+            assert!(state.handle_text(&mut value, &mut cursor, None, &character.to_string()));
+        }
+        assert_eq!(value, "あんぱんまn");
+        assert!(state.commit(&mut value, &mut cursor));
+        assert_eq!(value, "あんぱんまん");
     }
 
     #[test]
