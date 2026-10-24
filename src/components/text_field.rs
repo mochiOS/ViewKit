@@ -124,6 +124,29 @@ impl TextFieldInteractionState {
         self.inner.borrow().value.clone()
     }
 
+    /// 選択範囲をUTF-8のバイト位置で返します。未選択の場合はキャレット位置です。
+    pub fn selection_range(&self) -> Range<usize> {
+        let inner = self.inner.borrow();
+        selection_range(&inner).unwrap_or(inner.cursor..inner.cursor)
+    }
+
+    /// UTF-8境界へ切り下げて選択範囲を設定します。
+    pub fn set_selection(&self, range: Range<usize>) {
+        let mut inner = self.inner.borrow_mut();
+        let boundary = |mut index: usize| {
+            index = index.min(inner.value.len());
+            while !inner.value.is_char_boundary(index) {
+                index -= 1;
+            }
+            index
+        };
+        let start = boundary(range.start);
+        let end = boundary(range.end);
+        inner.cursor = end;
+        inner.selection_anchor = (start != end).then_some(start);
+        inner.selecting = false;
+    }
+
     pub fn set_value(&self, value: impl Into<String>) {
         let value = value.into();
         let mut inner = self.inner.borrow_mut();
@@ -583,6 +606,7 @@ pub struct TextField {
     enabled: bool,
     invalid: bool,
     secure: bool,
+    bordered: bool,
     on_submit: Option<RefCell<Box<dyn FnMut()>>>,
 }
 
@@ -619,6 +643,7 @@ impl TextField {
             enabled: true,
             invalid: false,
             secure: false,
+            bordered: true,
             on_submit: None,
         }
     }
@@ -637,6 +662,7 @@ impl TextField {
             enabled: true,
             invalid: false,
             secure: false,
+            bordered: true,
             on_submit: None,
         }
     }
@@ -644,6 +670,12 @@ impl TextField {
     pub fn value(self, value: impl Into<String>) -> Self {
         self.interaction.initialize_value(value.into());
 
+        self
+    }
+
+    /// 背景と輪郭の描画を切り替えます。入力・選択・IME・フォーカス操作は維持します。
+    pub fn bordered(mut self, bordered: bool) -> Self {
+        self.bordered = bordered;
         self
     }
 
@@ -928,15 +960,17 @@ impl View for TextField {
                 .paint(ring_bounds, context);
         }
 
-        Rectangle::new()
-            .color(RectangleColor::Custom(appearance.background))
-            .radius(radius)
-            .shadow(ShadowStyle::None)
-            .border(BorderStyle::custom(
-                appearance.border,
-                context.theme.text_field.stroke_width,
-            ))
-            .paint(bounds, context);
+        if self.bordered {
+            Rectangle::new()
+                .color(RectangleColor::Custom(appearance.background))
+                .radius(radius)
+                .shadow(ShadowStyle::None)
+                .border(BorderStyle::custom(
+                    appearance.border,
+                    context.theme.text_field.stroke_width,
+                ))
+                .paint(bounds, context);
+        }
 
         let showing_placeholder = value.is_empty();
 
@@ -1956,6 +1990,36 @@ fn delete_selection(inner: &mut TextFieldInteractionInner) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn programmatic_selection_is_utf8_safe_and_plain_fields_keep_input() {
+        let state = TextFieldInteractionState::new();
+        state.set_value("12あ34");
+        state.set_selection(3..5);
+        assert_eq!(state.selection_range(), 2..5);
+        state.set_selection(usize::MAX..usize::MAX);
+        assert_eq!(state.selection_range(), 7..7);
+        state.set_focused(true);
+        let field = TextField::with_interaction(state.clone()).bordered(false);
+        let bounds = Rect::new(0.0, 0.0, 240.0, 32.0);
+        let theme = crate::theme::Theme::current();
+        let mut measurer = crate::typography::TextMeasurer::new();
+        let mut list = crate::draw_command::DisplayList::new();
+        field.paint(
+            bounds,
+            &mut PaintContext::new(&mut list, &theme, &theme.typography, &mut measurer),
+        );
+        assert!(!list.commands().iter().any(
+            |cmd| matches!(cmd, DrawCommand::FillRoundedRect { rect, .. } if *rect == bounds)
+        ));
+        field.handle_event(
+            bounds,
+            &ViewEvent::TextInput { text: "5".into() },
+            &mut EventContext::new(&theme, &theme.typography, &mut measurer),
+        );
+        assert_eq!(state.value(), "12あ345");
+        assert!(TextField::new(crate::state::State::new(String::new()).binding()).bordered);
+    }
 
     #[test]
     fn secure_field_masks_each_character() {
