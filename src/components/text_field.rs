@@ -18,6 +18,7 @@ use std::ops::Range;
 use std::rc::Rc;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
+use zeroize::{Zeroize, Zeroizing};
 
 use super::input_method::{
     CandidatePanelLayout, InputMethodState, paint_candidates, paint_input_mode_indicator,
@@ -28,14 +29,15 @@ use crate::animation::AppearanceTransition;
 const CARET_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 const SECURE_GLYPH: char = '\u{2022}';
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Default, PartialEq)]
 struct TextFieldInteractionInner {
     hovered: bool,
     focused: bool,
     focus_visible: bool,
     appearance: AppearanceTransition,
     enabled: bool,
-    value: String,
+    value: Zeroizing<String>,
+    sensitive: bool,
     cursor: usize,
     scroll_offset_x: f32,
     selection_anchor: Option<usize>,
@@ -46,6 +48,14 @@ struct TextFieldInteractionInner {
 
     value_initialized: bool,
     caret_blink_origin: Option<Instant>,
+}
+impl core::fmt::Debug for TextFieldInteractionInner {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("TextFieldInteractionInner")
+            .field("focused", &self.focused)
+            .field("value", &"[REDACTED]")
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Clone)]
@@ -121,7 +131,17 @@ impl TextFieldInteractionState {
     }
 
     pub fn value(&self) -> String {
-        self.inner.borrow().value.clone()
+        self.inner.borrow().value.to_string()
+    }
+    /// 値の所有権を移し、入力欄を空にします。秘密情報は呼出側で消去してください。
+    pub fn take_value(&self) -> String {
+        let mut inner = self.inner.borrow_mut();
+        let value = std::mem::take(&mut *inner.value);
+        inner.cursor = 0;
+        inner.scroll_offset_x = 0.0;
+        inner.selection_anchor = None;
+        inner.selecting = false;
+        value
     }
 
     /// 選択範囲をUTF-8のバイト位置で返します。未選択の場合はキャレット位置です。
@@ -153,7 +173,7 @@ impl TextFieldInteractionState {
 
         inner.cursor = value.len();
         inner.scroll_offset_x = 0.0;
-        inner.value = value;
+        inner.value = Zeroizing::new(value);
         inner.value_initialized = true;
         inner.selection_anchor = None;
         inner.selecting = false;
@@ -162,11 +182,7 @@ impl TextFieldInteractionState {
     /// 値が保持していた領域をNULで上書きしてから空にします。
     pub fn clear(&self) {
         let mut inner = self.inner.borrow_mut();
-        let byte_len = inner.value.len();
-        if byte_len != 0 {
-            inner.value.replace_range(.., &"\0".repeat(byte_len));
-            inner.value.clear();
-        }
+        inner.value.zeroize();
         inner.cursor = 0;
         inner.scroll_offset_x = 0.0;
         inner.selection_anchor = None;
@@ -174,6 +190,7 @@ impl TextFieldInteractionState {
     }
 
     fn initialize_value(&self, value: String) {
+        let value = Zeroizing::new(value);
         let mut inner = self.inner.borrow_mut();
 
         if inner.value_initialized {
@@ -211,9 +228,7 @@ impl TextFieldInteractionState {
             return false;
         }
 
-        inner
-            .value
-            .replace_range(cursor..cursor + character_length, "");
+        replace_value_range(&mut inner, cursor..cursor + character_length, "");
 
         true
     }
@@ -242,10 +257,8 @@ impl TextFieldInteractionState {
     }
 
     fn insert_text(&self, text: &str) -> bool {
-        let filtered: String = text
-            .chars()
-            .filter(|character| !character.is_control())
-            .collect();
+        let mut filtered = Zeroizing::new(String::with_capacity(text.len()));
+        filtered.extend(text.chars().filter(|character| !character.is_control()));
 
         if filtered.is_empty() {
             return false;
@@ -255,7 +268,7 @@ impl TextFieldInteractionState {
 
         delete_selection(&mut inner);
         let cursor = inner.cursor.min(inner.value.len());
-        inner.value.insert_str(cursor, filtered.as_str());
+        replace_value_range(&mut inner, cursor..cursor, filtered.as_str());
         inner.cursor = cursor + filtered.len();
         inner.selection_anchor = None;
         inner.selecting = false;
@@ -464,7 +477,7 @@ impl TextFieldInteractionState {
             .map(|(index, _)| index)
             .unwrap_or(0);
 
-        inner.value.replace_range(previous..cursor, "");
+        replace_value_range(&mut inner, previous..cursor, "");
         inner.cursor = previous;
         true
     }
@@ -721,6 +734,11 @@ impl TextField {
     /// 入力値を伏字で表示します。保持される値自体は変更しません。
     pub fn secure(mut self, secure: bool) -> Self {
         self.secure = secure;
+        if secure {
+            let mut inner = self.interaction.inner.borrow_mut();
+            inner.sensitive = true;
+            inner.input_method = InputMethodState::default();
+        }
         self
     }
 
@@ -735,7 +753,7 @@ impl TextField {
     }
 
     fn display_text(&self) -> String {
-        let value = self.interaction.value();
+        let value = self.interaction.inner.borrow().value.clone();
 
         if value.is_empty() {
             self.placeholder.clone()
@@ -930,7 +948,7 @@ impl View for TextField {
             accessibility.label = Some(self.placeholder.clone());
         }
         if !self.secure {
-            accessibility.value = Some(value.clone());
+            accessibility.value = Some(value.to_string());
         }
         accessibility.enabled = self.enabled;
         accessibility.focusable = true;
@@ -1978,7 +1996,7 @@ fn delete_selection(inner: &mut TextFieldInteractionInner) -> bool {
         return false;
     };
 
-    inner.value.replace_range(range.clone(), "");
+    replace_value_range(inner, range.clone(), "");
 
     inner.cursor = range.start;
     inner.selection_anchor = None;
@@ -1987,9 +2005,95 @@ fn delete_selection(inner: &mut TextFieldInteractionInner) -> bool {
     true
 }
 
+fn replace_value_range(inner: &mut TextFieldInteractionInner, range: Range<usize>, text: &str) {
+    if !inner.sensitive {
+        inner.value.replace_range(range, text);
+        return;
+    }
+    // String insertion may realloc, while deletion leaves copies in spare
+    // capacity. Build separately so every superseded secret buffer is erased.
+    let length = inner.value.len() - range.len() + text.len();
+    let mut next = Zeroizing::new(String::with_capacity(length));
+    next.push_str(&inner.value[..range.start]);
+    next.push_str(text);
+    next.push_str(&inner.value[range.end..]);
+    inner.value = next;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    struct AuditAllocator;
+    static WATCHED: AtomicUsize = AtomicUsize::new(0);
+    static WATCHED_LEN: AtomicUsize = AtomicUsize::new(0);
+    static RELEASED: AtomicBool = AtomicBool::new(false);
+    static UNWIPED: AtomicBool = AtomicBool::new(false);
+    fn inspect_release(ptr: *mut u8, layout: Layout) {
+        if WATCHED
+            .compare_exchange(ptr as usize, 0, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
+            let len = WATCHED_LEN.load(Ordering::SeqCst).min(layout.size());
+            // Only initialized bytes, while this allocation is still live.
+            let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
+            UNWIPED.store(bytes.iter().any(|&b| b != 0), Ordering::SeqCst);
+            RELEASED.store(true, Ordering::SeqCst);
+        }
+    }
+    unsafe impl GlobalAlloc for AuditAllocator {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            unsafe { System.alloc(layout) }
+        }
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            inspect_release(ptr, layout);
+            unsafe { System.dealloc(ptr, layout) }
+        }
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, size: usize) -> *mut u8 {
+            inspect_release(ptr, layout);
+            unsafe { System.realloc(ptr, layout, size) }
+        }
+    }
+    #[global_allocator]
+    static ALLOCATOR: AuditAllocator = AuditAllocator;
+    fn watch_value(state: &TextFieldInteractionState) {
+        let inner = state.inner.borrow();
+        RELEASED.store(false, Ordering::SeqCst);
+        UNWIPED.store(false, Ordering::SeqCst);
+        WATCHED_LEN.store(inner.value.len(), Ordering::SeqCst);
+        WATCHED.store(inner.value.as_ptr() as usize, Ordering::SeqCst);
+    }
+    fn assert_erased() {
+        assert!(RELEASED.load(Ordering::SeqCst));
+        assert!(!UNWIPED.load(Ordering::SeqCst));
+    }
+    #[test]
+    fn secure_editing_and_drop_erase_released_buffers() {
+        let state = TextFieldInteractionState::new();
+        let field = TextField::with_interaction(state.clone()).secure(true);
+        state.set_value("秘密 password");
+        assert!(!format!("{:?}", state.inner.borrow()).contains("password"));
+        watch_value(&state);
+        state.insert_text(" and more");
+        assert_erased();
+        state.set_selection(0..6);
+        watch_value(&state);
+        state.delete_backward();
+        assert_erased();
+        assert_eq!(state.value(), " password and more");
+        watch_value(&state);
+        let extracted = Zeroizing::new(state.take_value());
+        assert!(state.value().is_empty());
+        assert!(!RELEASED.load(Ordering::SeqCst));
+        drop(extracted);
+        assert_erased();
+        state.set_value("erase on destruction");
+        watch_value(&state);
+        drop(field);
+        drop(state);
+        assert_erased();
+    }
 
     #[test]
     fn programmatic_selection_is_utf8_safe_and_plain_fields_keep_input() {
