@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 use crate::animation::AppearanceTransition;
-use crate::components::{BorderStyle, Text};
+use crate::components::{BorderStyle, Icon, SymbolName, Text};
 use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
@@ -302,6 +302,7 @@ impl ButtonInteractionState {
 pub struct Button {
     interaction: ButtonInteractionState,
     label: Option<String>,
+    leading_symbol: Option<SymbolName>,
     content: Option<StackChild>,
     intrinsic_label_size: RefCell<Option<Size>>,
     style: ButtonStyle,
@@ -324,6 +325,7 @@ impl Button {
         Self {
             interaction: ButtonInteractionState::new(),
             label: Some(label.into()),
+            leading_symbol: None,
             content: None,
             style: ButtonStyle::Standard,
             size: ButtonSize::Medium,
@@ -366,11 +368,20 @@ impl Button {
             )
     }
 
+    /// テキストラベルの先頭にVK Symbolを配置します。
+    /// 寸法・余白・文字サイズ・状態色はButtonの共通規則に従います。
+    /// `.content()`による任意の子Viewには適用しません。
+    pub fn leading_symbol(mut self, symbol: SymbolName) -> Self {
+        self.leading_symbol = Some(symbol);
+        self
+    }
+
     pub fn content<C>(mut self, content: C) -> Self
     where
         C: IntoStackChild,
     {
         self.label = None;
+        self.leading_symbol = None;
         self.content = Some(content.into_stack_child());
 
         self
@@ -455,6 +466,7 @@ impl Button {
         Self {
             interaction,
             label: None,
+            leading_symbol: None,
             content: None,
             style: ButtonStyle::Standard,
             size: ButtonSize::Medium,
@@ -644,6 +656,78 @@ impl View for Button {
         }
 
         if let Some(label) = self.label.as_ref() {
+            if let Some(symbol) = self.leading_symbol {
+                let single_line = label.replace(['\n', '\r'], " ");
+                let label = &single_line;
+                let inner = Rect::new(
+                    bounds.origin.x + horizontal_padding,
+                    bounds.origin.y,
+                    (bounds.size.width - 2.0 * horizontal_padding).max(0.0),
+                    bounds.size.height,
+                );
+                let icon_size = self
+                    .size
+                    .icon_size(context.theme)
+                    .min(inner.size.width)
+                    .min(inner.size.height);
+                let gap = if label.is_empty() {
+                    0.0
+                } else {
+                    context
+                        .theme
+                        .spacing
+                        .extra_small
+                        .min((inner.size.width - icon_size).max(0.0))
+                };
+                let available = (inner.size.width - icon_size - gap).max(0.0);
+                let text = Text::styled(label.as_str(), label_role)
+                    .font_size(label_style.size)
+                    .line_height(label_style.line_height);
+                let natural = text
+                    .measure_unbounded_with_typography(context.text_measurer, context.typography);
+                let row = Size::new(
+                    (icon_size + gap + natural.width).min(inner.size.width),
+                    inner.size.height,
+                );
+                let row = self.alignment.child_bounds(inner, row);
+                let icon_bounds = Rect::new(
+                    row.origin.x,
+                    row.origin.y + (row.size.height - icon_size) * self.label_vertical_factor(),
+                    icon_size,
+                    icon_size,
+                );
+                let height = (label_style.line_height * context.text_measurer.font_scale())
+                    .min(row.size.height);
+                let text_bounds = Rect::new(
+                    row.origin.x + icon_size + gap,
+                    row.origin.y + (row.size.height - height) * self.label_vertical_factor(),
+                    available.min(natural.width),
+                    height,
+                );
+                let fitted = fit_symbol_label(
+                    label,
+                    available,
+                    label_role,
+                    label_style.size,
+                    label_style.line_height,
+                    context,
+                );
+                context
+                    .display_list
+                    .push(DrawCommand::PushClip { rect: inner });
+                Icon::new(symbol)
+                    .size(icon_size)
+                    .color(appearance.foreground)
+                    .paint(icon_bounds, context);
+                Text::styled(fitted, label_role)
+                    .font_size(label_style.size)
+                    .line_height(label_style.line_height)
+                    .accessibility_hidden(true)
+                    .color(appearance.foreground)
+                    .paint(text_bounds, context);
+                context.display_list.push(DrawCommand::PopClip);
+                return;
+            }
             let text_height = (label_style.line_height * context.text_measurer.font_scale())
                 .min(bounds.size.height);
 
@@ -947,13 +1031,26 @@ impl View for Button {
         let width = if width_is_fixed {
             constraints.minimum.width
         } else if let Some(label) = self.label.as_ref() {
+            let label = if self.leading_symbol.is_some() {
+                std::borrow::Cow::Owned(label.replace(['\n', '\r'], " "))
+            } else {
+                std::borrow::Cow::Borrowed(label.as_str())
+            };
+            let symbol_width = self.leading_symbol.map_or(0.0, |_| {
+                self.size.icon_size(context.theme)
+                    + if label.is_empty() {
+                        0.0
+                    } else {
+                        context.theme.spacing.extra_small
+                    }
+            });
             let maximum_text_width = if constraints.maximum.width.is_finite() {
-                (constraints.maximum.width - horizontal_padding * 2.0).max(0.0)
+                (constraints.maximum.width - horizontal_padding * 2.0 - symbol_width).max(0.0)
             } else {
                 f32::INFINITY
             };
 
-            let text = Text::styled(label.as_str(), label_role);
+            let text = Text::styled(label.as_ref(), label_role);
             let text = if self.size == ButtonSize::Medium {
                 text.font_size(context.theme.controls.font_size)
                     .line_height(context.theme.controls.line_height)
@@ -965,11 +1062,13 @@ impl View for Button {
                 context,
             );
 
-            (measured.width + horizontal_padding * 2.0).max(if self.size == ButtonSize::Small {
-                0.0
-            } else {
-                context.theme.controls.button_min_width
-            })
+            (measured.width + symbol_width + horizontal_padding * 2.0).max(
+                if self.size == ButtonSize::Small {
+                    0.0
+                } else {
+                    context.theme.controls.button_min_width
+                },
+            )
         } else {
             0.0
         };
@@ -982,6 +1081,47 @@ impl View for Button {
 
         constraints.constrain(Size::new(width, height))
     }
+}
+
+fn fit_symbol_label(
+    label: &str,
+    width: f32,
+    role: TextRole,
+    size: f32,
+    line_height: f32,
+    context: &mut PaintContext<'_>,
+) -> String {
+    let label = label.replace(['\n', '\r'], " ");
+    let measure = |value: &str, c: &mut PaintContext<'_>| {
+        Text::styled(value, role)
+            .font_size(size)
+            .line_height(line_height)
+            .measure_unbounded_with_typography(c.text_measurer, c.typography)
+            .width
+    };
+    if measure(&label, context) <= width {
+        return label;
+    }
+    if measure("…", context) > width {
+        return String::new();
+    }
+    let boundaries: Vec<_> = label
+        .char_indices()
+        .map(|(i, _)| i)
+        .chain(std::iter::once(label.len()))
+        .collect();
+    let mut low = 0;
+    let mut high = boundaries.len() - 1;
+    while low < high {
+        let mid = (low + high).div_ceil(2);
+        let candidate = format!("{}…", &label[..boundaries[mid]]);
+        if measure(&candidate, context) <= width {
+            low = mid;
+        } else {
+            high = mid - 1;
+        }
+    }
+    format!("{}…", &label[..boundaries[low]])
 }
 
 #[cfg(test)]
@@ -1120,5 +1260,183 @@ mod tests {
             &mut context,
         );
         assert!(!button.interaction.inner.borrow().surface.is_active());
+    }
+    fn render(
+        button: &Button,
+        theme: &Theme,
+        bounds: Rect,
+    ) -> (crate::draw_command::DisplayList, Vec<AccessibilityNode>) {
+        let mut measurer = crate::typography::TextMeasurer::new();
+        let mut list = crate::draw_command::DisplayList::new();
+        let mut nodes = vec![];
+        button.paint(
+            bounds,
+            &mut PaintContext::new(&mut list, theme, &theme.typography, &mut measurer)
+                .with_accessibility_nodes(&mut nodes),
+        );
+        (list, nodes)
+    }
+    #[test]
+    fn symbol_labels_have_shared_padding_centering_and_one_accessible_button() {
+        let theme = Theme::LIGHT;
+        let bounds = Rect::new(20.0, 12.0, 176.0, 30.0);
+        let button = Button::new("New Message")
+            .size(ButtonSize::Small)
+            .leading_symbol(SymbolName::Pencil);
+        let (list, nodes) = render(&button, &theme, bounds);
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].label.as_deref(), Some("New Message"));
+        assert_eq!(nodes[0].bounds, bounds);
+        let text = list
+            .commands()
+            .iter()
+            .find_map(|c| match c {
+                DrawCommand::DrawText { command } => Some(command),
+                _ => None,
+            })
+            .unwrap();
+        let icon = button.size.icon_size(&theme);
+        let gap = theme.spacing.extra_small;
+        let left = text.bounds.origin.x - icon - gap;
+        let right = text.bounds.origin.x + text.bounds.size.width;
+        assert!((left + right - (bounds.origin.x * 2.0 + bounds.size.width)).abs() < 0.1);
+        assert!(left >= bounds.origin.x + button.size.horizontal_padding(&theme));
+        assert!(
+            (text.bounds.origin.y + text.bounds.size.height / 2.0
+                - (bounds.origin.y + bounds.size.height / 2.0))
+                .abs()
+                < 0.1
+        );
+        assert_eq!(
+            text.font_size,
+            theme.typography.style(TextRole::Caption).size
+        );
+    }
+    #[test]
+    fn symbol_and_label_share_state_colors_in_both_themes() {
+        for theme in [Theme::LIGHT, Theme::DARK] {
+            for style in [
+                ButtonStyle::Standard,
+                ButtonStyle::Primary,
+                ButtonStyle::Accent,
+                ButtonStyle::Ghost,
+                ButtonStyle::Danger,
+            ] {
+                for enabled in [true, false] {
+                    let button = Button::new("Apply")
+                        .leading_symbol(SymbolName::Pencil)
+                        .style(style)
+                        .enabled(enabled);
+                    let (list, _) = render(&button, &theme, Rect::new(0.0, 0.0, 140.0, 30.0));
+                    let text = list
+                        .commands()
+                        .iter()
+                        .find_map(|c| match c {
+                            DrawCommand::DrawText { command } => Some(command.color),
+                            _ => None,
+                        })
+                        .unwrap();
+                    let tint = list
+                        .commands()
+                        .iter()
+                        .find_map(|c| match c {
+                            DrawCommand::DrawSvg { command } => command.tint,
+                            _ => None,
+                        })
+                        .unwrap();
+                    assert_eq!(text, tint);
+                    let expected = style.resolve(&theme, ControlVisualState::Rest);
+                    assert_eq!(
+                        text,
+                        if enabled {
+                            expected.foreground
+                        } else {
+                            expected
+                                .with_opacity(theme.button.disabled_opacity)
+                                .foreground
+                        }
+                    );
+                }
+            }
+        }
+    }
+    #[test]
+    fn symbol_measurement_includes_padding_and_constrained_labels_stay_on_one_line() {
+        let theme = Theme::LIGHT;
+        let mut measurer = crate::typography::TextMeasurer::new();
+        let mut context = MeasureContext {
+            theme: &theme,
+            typography: &theme.typography,
+            text_measurer: &mut measurer,
+        };
+        let constraints = Constraints::loose(Size::new(f32::INFINITY, f32::INFINITY));
+        let plain = Button::new("New Message")
+            .size(ButtonSize::Small)
+            .measure(constraints, &mut context);
+        let symbol = Button::new("New Message")
+            .size(ButtonSize::Small)
+            .leading_symbol(SymbolName::Pencil)
+            .measure(constraints, &mut context);
+        assert!(
+            (symbol.width
+                - plain.width
+                - ButtonSize::Small.icon_size(&theme)
+                - theme.spacing.extra_small)
+                .abs()
+                < 0.1
+        );
+        assert_eq!(symbol.height, plain.height);
+        for scale in [1.0, 2.0] {
+            let button = Button::new("Very long 日本語 label\nNew Message")
+                .size(ButtonSize::Small)
+                .leading_symbol(SymbolName::Pencil);
+            let mut measurer = crate::typography::TextMeasurer::new();
+            measurer.set_font_scale(scale);
+            let mut list = crate::draw_command::DisplayList::new();
+            button.paint(
+                Rect::new(0.0, 0.0, 100.0, 30.0),
+                &mut PaintContext::new(&mut list, &theme, &theme.typography, &mut measurer),
+            );
+            let text = list
+                .commands()
+                .iter()
+                .find_map(|c| match c {
+                    DrawCommand::DrawText { command } => Some(command),
+                    _ => None,
+                })
+                .unwrap();
+            assert!(text.text.ends_with('…'));
+            assert!(!text.text.contains('\n'));
+            assert!(
+                text.bounds.origin.x + text.bounds.size.width
+                    <= 100.0 - ButtonSize::Small.horizontal_padding(&theme) + 0.1
+            );
+        }
+    }
+    #[test]
+    fn plain_and_custom_content_buttons_keep_existing_layout_contract() {
+        let plain = Button::new("Apply");
+        assert!(plain.leading_symbol.is_none());
+        let custom = Button::new("Apply")
+            .leading_symbol(SymbolName::Pencil)
+            .content(Text::label("Custom"));
+        assert!(custom.leading_symbol.is_none());
+        assert!(custom.label.is_none());
+        let theme = Theme::LIGHT;
+        let bounds = Rect::new(0.0, 0.0, 110.0, 30.0);
+        let (list, _) = render(&plain, &theme, bounds);
+        let text = list
+            .commands()
+            .iter()
+            .find_map(|c| match c {
+                DrawCommand::DrawText { command } => Some(command),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(text.bounds.origin.x, theme.button.horizontal_padding);
+        assert_eq!(
+            text.bounds.size.width,
+            110.0 - 2.0 * theme.button.horizontal_padding
+        );
     }
 }

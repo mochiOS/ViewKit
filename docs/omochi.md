@@ -21,6 +21,15 @@ Dockなどの個別の確定デザインを、共通部品の更新に便乗し�
 | 余白・曲率・影 | `theme.spacing`、`theme.radius`、`theme.shadows` |
 | 動き | `theme.motion` |
 
+## アイコン付きボタン
+
+テキストとVK Symbolを組み合わせる通常の操作には、
+`Button::new("New Message").leading_symbol(SymbolName::Pencil)`を使います。
+`ButtonSize`に応じた文字・アイコンの寸法、内側の余白、間隔、配置をButtonで計算し、
+文字とアイコンに同じ状態色を適用します。狭い幅ではラベルを1行で省略します。
+アプリ側でHStackを組み、ボタンごとの余白・文字サイズを再定義しないでください。
+独自の行部品などのための`Button::content()`の配置規則は維持します。
+
 ## 操作状態
 
 - 通常、ホバー、押下、無効、キーボードフォーカスを区別します。

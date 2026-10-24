@@ -79,6 +79,19 @@ IconButton::new(SymbolName::ChevronLeft)
     .accessibility_label("Back")
 ```
 
+Text buttons can include a standard VK Symbol without assembling their own
+layout:
+
+```rust
+Button::new("New Message")
+    .size(ButtonSize::Small)
+    .leading_symbol(SymbolName::Pencil)
+```
+
+Button owns the icon size, label metrics, padding, spacing, alignment and state
+colors. Constrained labels stay on one line and use an ellipsis. Custom `.content()`
+remains available for rows and other layouts that supply their own appearance.
+
 `IconName` remains as a deprecated compatibility alias. New code should use
 `SymbolName`.
 
