@@ -1,16 +1,20 @@
-use super::{BorderStyle, Button, ButtonInteractionState, ButtonStyle, Rectangle, RectangleColor};
+use super::omochi_shape::{MagneticSelectionMotion, OmochiPreset, OmochiShape};
+use super::{
+    BorderStyle, Button, ButtonInteractionState, ButtonStyle, Rectangle, RectangleColor, Text,
+    ZStackAlignment,
+};
+use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
-use crate::geometry::{Rect, Size};
-use crate::omochi::moving::SelectionSurface;
-use crate::omochi::{Material, button_contour};
-use crate::platform::Key;
+use crate::geometry::{Point, Rect, Size};
+use crate::layout::ViewExt;
+use crate::platform::{Key, PointerButton};
 use crate::state::Binding;
 use crate::theme::{Color, CornerRadius, ShadowStyle};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 struct SegmentedItem {
     value: usize,
@@ -19,15 +23,20 @@ struct SegmentedItem {
     interaction: ButtonInteractionState,
 }
 
-/// Retains the selected surface and each segment's focus state across rebuilds.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct SegmentedControlInteractionState {
-    surface: Rc<RefCell<SelectionSurface>>,
+    indicator_shape: OmochiShape,
+    selection_motion: MagneticSelectionMotion,
     items: Rc<RefCell<Vec<ButtonInteractionState>>>,
 }
+
 impl SegmentedControlInteractionState {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            indicator_shape: OmochiShape::displacement(OmochiPreset::SelectionIndicator),
+            selection_motion: MagneticSelectionMotion::default(),
+            items: Rc::new(RefCell::new(Vec::new())),
+        }
     }
     fn item(&self, index: usize) -> ButtonInteractionState {
         let mut items = self.items.borrow_mut();
@@ -38,50 +47,59 @@ impl SegmentedControlInteractionState {
     }
 }
 
+impl Default for SegmentedControlInteractionState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct SegmentedControl {
-    interaction: SegmentedControlInteractionState,
     selection: Binding<usize>,
     items: Vec<SegmentedItem>,
     enabled: bool,
     accessibility_label: Option<String>,
     on_change: Option<Rc<RefCell<Box<dyn FnMut(usize)>>>>,
+    interaction_state: SegmentedControlInteractionState,
 }
 
 impl SegmentedControl {
     pub fn new(selection: Binding<usize>) -> Self {
         Self::with_interaction(selection, SegmentedControlInteractionState::new())
     }
+
     pub fn with_interaction(
         selection: Binding<usize>,
-        interaction: SegmentedControlInteractionState,
+        interaction_state: SegmentedControlInteractionState,
     ) -> Self {
         Self {
-            interaction,
             selection,
             items: Vec::new(),
             enabled: true,
             accessibility_label: None,
             on_change: None,
+            interaction_state,
         }
     }
 
     pub fn item(mut self, value: usize, label: impl Into<String>) -> Self {
+        let interaction = self.interaction_state.item(self.items.len());
         self.items.push(SegmentedItem {
             value,
             label: label.into(),
             enabled: true,
-            interaction: self.interaction.item(self.items.len()),
+            interaction,
         });
 
         self
     }
 
     pub fn disabled_item(mut self, value: usize, label: impl Into<String>) -> Self {
+        let interaction = self.interaction_state.item(self.items.len());
         self.items.push(SegmentedItem {
             value,
             label: label.into(),
             enabled: false,
-            interaction: self.interaction.item(self.items.len()),
+            interaction,
         });
 
         self
@@ -106,29 +124,45 @@ impl SegmentedControl {
         self.selection.get()
     }
 
-    fn item_button(&self, item: &SegmentedItem) -> Button {
+    fn item_button(&self, item: &SegmentedItem, theme: &crate::theme::Theme) -> Button {
         let enabled = self.enabled && item.enabled;
+        let selected = self.selection.get() == item.value;
+        let foreground = if !enabled {
+            theme.segmented_control.disabled_foreground
+        } else if selected {
+            theme.segmented_control.selected_foreground
+        } else {
+            theme.segmented_control.foreground
+        };
 
-        let selection = self.selection.clone();
-        let value = item.value;
-        let on_change = self.on_change.clone();
-
-        Button::with_interaction_and_label(item.interaction.clone(), item.label.clone())
-            .style(ButtonStyle::Ghost)
-            .radius(CornerRadius::ExtraLarge)
+        Button::with_interaction(item.interaction.clone())
+            .content_padding(false)
+            .style(ButtonStyle::Custom {
+                background: Color::TRANSPARENT,
+                hovered_background: Color::TRANSPARENT,
+                border: Color::TRANSPARENT,
+                hovered_border: Color::TRANSPARENT,
+                foreground,
+            })
+            .radius(CornerRadius::Full)
             .shadow(ShadowStyle::None)
+            .focus_ring(false)
+            .omochi(false)
+            .alignment(ZStackAlignment::Center)
             .enabled(enabled)
             .accessibility_role(AccessibilityRole::RadioButton)
-            .accessibility_checked(self.selection.get() == value)
-            .accessibility_selected(self.selection.get() == value)
-            .on_click(move || {
-                if selection.get() != value {
-                    selection.set(value);
-                    if let Some(on_change) = on_change.as_ref() {
-                        (on_change.borrow_mut())(value);
-                    }
-                }
-            })
+            .accessibility_label(item.label.clone())
+            .accessibility_checked(selected)
+            .accessibility_selected(selected)
+            .content(
+                Text::label(item.label.clone())
+                    .accessibility_hidden(true)
+                    .font_size(13.0)
+                    .weight(if selected { 600 } else { 500 })
+                    .alignment(crate::typography::TextAlignment::Center)
+                    .color(foreground)
+                    .height(18.0),
+            )
     }
 
     fn selected_index(&self, value: usize) -> Option<usize> {
@@ -160,6 +194,13 @@ impl SegmentedControl {
                     inner_bounds.size.height,
                 )
             })
+            .collect()
+    }
+
+    fn segment_centers(&self, segment_bounds: &[Rect]) -> Vec<f32> {
+        segment_bounds
+            .iter()
+            .map(|segment| segment.origin.x + segment.size.width / 2.0)
             .collect()
     }
 
@@ -214,7 +255,7 @@ impl View for SegmentedControl {
         let mut maximum_width = context.theme.layout.segmented_item_min_width;
 
         for item in &self.items {
-            let measured = self.item_button(item).measure(
+            let measured = self.item_button(item, context.theme).measure(
                 Constraints::loose(Size::new(f32::INFINITY, segment_height)),
                 context,
             );
@@ -231,6 +272,9 @@ impl View for SegmentedControl {
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
         if bounds.size.width <= 0.0 || bounds.size.height <= 0.0 {
             return;
+        }
+        if !self.enabled && self.interaction_state.indicator_shape.is_animating() {
+            self.interaction_state.indicator_shape.reset();
         }
 
         let mut node = AccessibilityNode::new(AccessibilityRole::RadioGroup, bounds);
@@ -250,6 +294,21 @@ impl View for SegmentedControl {
             ))
             .paint(bounds, context);
 
+        if self
+            .items
+            .iter()
+            .any(|item| item.interaction.is_focus_visible())
+        {
+            Rectangle::new()
+                .color(RectangleColor::Custom(crate::theme::Color::TRANSPARENT))
+                .radius(context.theme.segmented_control.radius)
+                .border(BorderStyle::custom(
+                    context.theme.segmented_control.focus_ring,
+                    context.theme.segmented_control.focus_ring_width,
+                ))
+                .paint(bounds, context);
+        }
+
         let inset = context.theme.layout.segmented_control_inset;
         let segment_bounds = self.segment_bounds(bounds, inset);
 
@@ -257,83 +316,84 @@ impl View for SegmentedControl {
             return;
         }
 
-        let now = Instant::now();
-        let mut motion = context.theme.motion.omochi;
-        motion.enabled &= self.enabled;
-        motion.material =
-            Material::SELECTION.for_height(segment_bounds[0].size.height * 30.0 / 38.0);
-        if let Some(index) = self.selected_index(self.selection.get()) {
+        if let Some(selected_index) = self.selected_index(self.selection.get()) {
             let segment_width = segment_bounds[0].size.width;
-            let base_center = segment_bounds[0].origin.x - bounds.origin.x + segment_width * 0.5;
-            let target = base_center + segment_width * index as f32;
-            let mut surface = self.interaction.surface.borrow_mut();
-            if let Some(transition) = self
-                .selection
-                .transition()
-                .filter(|t| t.to == self.selection.get())
-            {
-                if now.saturating_duration_since(transition.started_at)
-                    < context.theme.motion.selection.duration
-                {
-                    if let Some(from) = self.selected_index(transition.from) {
-                        surface.initialize(
-                            base_center + segment_width * from as f32,
-                            transition.started_at,
-                        );
-                    }
+            let fallback_center = segment_bounds[selected_index].origin.x + segment_width / 2.0;
+            let sample = self
+                .interaction_state
+                .selection_motion
+                .sample_for_motion(fallback_center, context.theme.motion.omochi.enabled);
+            let previous_direction = self.interaction_state.selection_motion.surface_direction();
+
+            if sample.direction != 0.0 && sample.pull_distance > 0.0 {
+                if previous_direction != 0.0 && previous_direction != sample.direction {
+                    self.interaction_state.indicator_shape.end();
                 }
+                if previous_direction != sample.direction
+                    || !self.interaction_state.indicator_shape.is_active()
+                {
+                    let edge = sample.direction * segment_width / 2.0;
+                    self.interaction_state
+                        .indicator_shape
+                        .begin(Point::new(edge, 0.0));
+                    self.interaction_state
+                        .selection_motion
+                        .set_surface_direction(sample.direction);
+                }
+                let edge = sample.direction * segment_width / 2.0;
+                self.interaction_state.indicator_shape.moved(Point::new(
+                    edge + sample.direction * sample.pull_distance,
+                    0.0,
+                ));
             }
-            let sample = surface.sample(target, segment_bounds[0].size, motion, now);
-            if let Some(next) = sample.next_redraw_at {
-                context.request_redraw_in_at(bounds.expanded(motion.material.max_pull + 6.0), next);
+            if sample.completed {
+                self.interaction_state.indicator_shape.end();
+                self.interaction_state
+                    .selection_motion
+                    .set_surface_direction(0.0);
+                self.selection.commit();
             }
+            if sample.animating || self.interaction_state.indicator_shape.is_animating() {
+                context.request_redraw_in_at(
+                    bounds.expanded(20.0),
+                    Instant::now() + Duration::from_millis(8),
+                );
+            }
+
             let indicator_bounds = Rect::new(
-                bounds.origin.x + surface.center - segment_width * 0.5,
+                sample.center - segment_width / 2.0,
                 segment_bounds[0].origin.y,
                 segment_width,
                 segment_bounds[0].size.height,
             );
-            drop(surface);
+
             let outer_radius = context.theme.segmented_control.radius.resolve(
                 &context.theme.radius,
                 bounds.size.width,
                 bounds.size.height,
             );
+
             let indicator_radius = (outer_radius - inset).max(0.0);
-            if sample.pull.x.hypot(sample.pull.y) > 0.001 {
-                Rectangle::new()
-                    .color(RectangleColor::Custom(Color::TRANSPARENT))
-                    .radius(CornerRadius::Custom(indicator_radius))
-                    .shadow(ShadowStyle::Card)
-                    .paint(indicator_bounds, context);
-                context.display_list.push(DrawCommand::DrawContour {
-                    points: button_contour(
-                        indicator_bounds,
-                        indicator_radius,
-                        sample,
-                        motion.material,
-                    ),
-                    fill: context.theme.segmented_control.indicator_background,
-                    stroke: context.theme.segmented_control.indicator_border,
-                    stroke_width: context.theme.segmented_control.stroke_width,
-                });
-            } else {
-                Rectangle::new()
-                    .color(RectangleColor::Custom(
-                        context.theme.segmented_control.indicator_background,
-                    ))
-                    .radius(CornerRadius::Custom(indicator_radius))
-                    .shadow(ShadowStyle::Card)
-                    .border(BorderStyle::custom(
-                        context.theme.segmented_control.indicator_border,
-                        context.theme.segmented_control.stroke_width,
-                    ))
-                    .paint(indicator_bounds, context);
-            }
+
+            context.display_list.push(DrawCommand::PushRoundedClip {
+                rect: bounds,
+                radius: outer_radius,
+            });
+            self.interaction_state.indicator_shape.paint_styled(
+                indicator_bounds,
+                indicator_radius,
+                context.theme.segmented_control.indicator_background,
+                context.theme.segmented_control.indicator_border,
+                context.theme.segmented_control.stroke_width,
+                context.theme.segmented_control.indicator_shadow,
+                context,
+            );
+            context.display_list.push(DrawCommand::PopClip);
         }
 
         for (item, item_bounds) in self.items.iter().zip(segment_bounds) {
-            self.item_button(item).paint(item_bounds, context);
+            self.item_button(item, context.theme)
+                .paint(item_bounds, context);
         }
     }
 
@@ -343,13 +403,96 @@ impl View for SegmentedControl {
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
-        let segment_bounds =
-            self.segment_bounds(bounds, context.theme().layout.segmented_control_inset);
+        let inset = context.theme().layout.segmented_control_inset;
+        let segment_bounds = self.segment_bounds(bounds, inset);
+        let centers = self.segment_centers(&segment_bounds);
+        let selected_index = self.selected_index(self.selection.get()).unwrap_or(0);
+        let current_center = centers
+            .get(selected_index)
+            .copied()
+            .unwrap_or(bounds.origin.x);
+
+        match event {
+            ViewEvent::PointerPressed {
+                position,
+                button: PointerButton::Primary,
+            } if self.enabled && bounds.contains(*position) && !centers.is_empty() => {
+                self.interaction_state.selection_motion.begin_drag(
+                    position.x,
+                    current_center,
+                    &centers,
+                );
+                context.request_redraw_in(bounds.expanded(20.0));
+                return EventResult::Consumed;
+            }
+            ViewEvent::PointerMoved { position }
+                if self.interaction_state.selection_motion.is_dragging() =>
+            {
+                self.interaction_state
+                    .selection_motion
+                    .move_drag(position.x, &centers);
+                context.request_redraw_in(bounds.expanded(20.0));
+                return EventResult::Consumed;
+            }
+            ViewEvent::PointerReleased {
+                position,
+                button: PointerButton::Primary,
+            } if self.interaction_state.selection_motion.is_dragging() => {
+                let mut index = self
+                    .interaction_state
+                    .selection_motion
+                    .end_drag(position.x, &centers);
+                if !self.items.get(index).is_some_and(|item| item.enabled) {
+                    index = self
+                        .items
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, item)| item.enabled)
+                        .min_by(|(lhs, _), (rhs, _)| {
+                            (centers[*lhs] - position.x)
+                                .abs()
+                                .total_cmp(&(centers[*rhs] - position.x).abs())
+                        })
+                        .map(|(index, _)| index)
+                        .unwrap_or(selected_index);
+                    self.interaction_state
+                        .selection_motion
+                        .select(current_center, centers[index]);
+                }
+                let value = self.items[index].value;
+                if self.selection.get() != value {
+                    self.selection.set_without_notification(value);
+                    if let Some(on_change) = self.on_change.as_ref() {
+                        (on_change.borrow_mut())(value);
+                    }
+                }
+                context.request_keyboard_focus(segment_bounds[index]);
+                context.request_redraw_in(bounds.expanded(20.0));
+                return EventResult::Consumed;
+            }
+            ViewEvent::FocusChanged { focused: false }
+                if self.interaction_state.selection_motion.is_dragging() =>
+            {
+                self.interaction_state
+                    .selection_motion
+                    .cancel(current_center);
+                self.interaction_state.indicator_shape.end();
+            }
+            _ => {}
+        }
 
         if let Some(index) = self.keyboard_target(event)
             && let Some(target_bounds) = segment_bounds.get(index).copied()
         {
-            self.selection.set_if_changed(self.items[index].value);
+            let from_center = centers
+                .get(selected_index)
+                .copied()
+                .unwrap_or(current_center);
+            self.selection
+                .set_without_notification(self.items[index].value);
+            self.interaction_state
+                .selection_motion
+                .select(from_center, centers[index]);
             if let Some(on_change) = self.on_change.as_ref() {
                 (on_change.borrow_mut())(self.items[index].value);
             }
@@ -366,9 +509,9 @@ impl View for SegmentedControl {
                 continue;
             }
 
-            let item_result = self
-                .item_button(item)
-                .handle_event(item_bounds, event, context);
+            let item_result =
+                self.item_button(item, context.theme())
+                    .handle_event(item_bounds, event, context);
 
             result = result.merge(item_result);
 
@@ -380,12 +523,20 @@ impl View for SegmentedControl {
         result
     }
 }
-use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{state::State, theme::Theme, typography::TextMeasurer};
+    use super::{MagneticSelectionMotion, SegmentedControl, SegmentedControlInteractionState};
+    use crate::draw_command::{DisplayList, DrawCommand};
+    use crate::event::{EventContext, ViewEvent};
+    use crate::geometry::Rect;
+    use crate::platform::Key;
+    use crate::state::State;
+    use crate::theme::Theme;
+    use crate::typography::{TextAlignment, TextMeasurer, Typography};
+    use crate::view::{PaintContext, View};
+    use std::rc::Rc;
+
     #[test]
     fn rebuild_retains_segment_focus_and_keyboard_skips_disabled_items() {
         let value = State::new(10);
@@ -413,8 +564,8 @@ mod tests {
         let rebuilt = build();
         assert!(rebuilt.items[0].interaction.is_focused());
         assert!(Rc::ptr_eq(
-            &original.interaction.surface,
-            &rebuilt.interaction.surface
+            &original.interaction_state.items,
+            &rebuilt.interaction_state.items
         ));
         rebuilt.handle_event(
             bounds,
@@ -451,5 +602,58 @@ mod tests {
         let expected = regions[2];
         assert!(list.commands().iter().any(|cmd| matches!(cmd,
             DrawCommand::FillRoundedRect { rect, .. } if *rect == expected)));
+    }
+    #[test]
+    fn magnetic_center_clamps_to_reference_end_stops() {
+        let centers = [70.0, 170.0, 270.0];
+        assert_eq!(
+            MagneticSelectionMotion::magnetic_center(&centers, -50.0, 0.0),
+            70.0
+        );
+        assert_eq!(
+            MagneticSelectionMotion::magnetic_center(&centers, 400.0, 0.0),
+            270.0
+        );
+    }
+
+    #[test]
+    fn fast_drag_weakens_magnetic_capture() {
+        let centers = [70.0, 170.0, 270.0];
+        let slow = MagneticSelectionMotion::magnetic_center(&centers, 100.0, 0.0);
+        let fast = MagneticSelectionMotion::magnetic_center(&centers, 100.0, 2_000.0);
+        assert!(slow < fast);
+        assert!((70.0..=100.0).contains(&slow));
+        assert!((70.0..=100.0).contains(&fast));
+    }
+
+    #[test]
+    fn labels_are_centered_in_each_segment() {
+        let selection = State::new(0_usize);
+        let control = SegmentedControl::new(selection.binding()).item(0, "Canvas");
+        let theme = Theme::LIGHT;
+        let bounds = Rect::new(20.0, 30.0, 104.0, 34.0);
+        let mut display_list = DisplayList::new();
+        let mut text_measurer = TextMeasurer::new();
+        let mut paint_context = PaintContext::new(
+            &mut display_list,
+            &theme,
+            &Typography::DEFAULT,
+            &mut text_measurer,
+        );
+        control.paint(bounds, &mut paint_context);
+
+        let command = display_list
+            .commands()
+            .iter()
+            .find_map(|command| match command {
+                DrawCommand::DrawText { command } if command.text == "Canvas" => Some(command),
+                _ => None,
+            });
+        let command = command.expect("segment label should be painted");
+        assert_eq!(command.alignment, TextAlignment::Center);
+        assert_eq!(command.bounds.origin.x, bounds.origin.x + 2.0);
+        assert_eq!(command.bounds.size.width, 100.0);
+        assert_eq!(command.bounds.size.height, 18.0);
+        assert_eq!(command.bounds.origin.y, bounds.origin.y + 8.0);
     }
 }

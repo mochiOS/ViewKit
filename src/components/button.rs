@@ -8,9 +8,8 @@ use crate::animation::AppearanceTransition;
 use crate::components::{BorderStyle, Icon, SymbolName, Text};
 use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
-use crate::geometry::{Rect, Size};
+use crate::geometry::{Point, Rect, Size};
 use crate::layout::{IntoStackChild, StackChild};
-use crate::omochi::{OmochiMotion, OmochiSurface, button_contour};
 use crate::platform::{Key, PointerButton};
 use crate::theme::{
     Color, ControlAppearance, ControlVisualState, CornerRadius, ShadowStyle, Theme,
@@ -18,6 +17,7 @@ use crate::theme::{
 use crate::typography::{TextAlignment, TextRole};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
+use super::omochi_shape::{OmochiPreset, OmochiShape};
 use super::{Rectangle, RectangleColor, ZStackAlignment};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -41,9 +41,9 @@ pub enum ButtonStyle {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ButtonSize {
+    #[default]
     Small,
 
-    #[default]
     Medium,
 
     Large,
@@ -182,9 +182,6 @@ struct ButtonInteractionInner {
     hovered: bool,
     focused: bool,
     focus_visible: bool,
-    appearance: AppearanceTransition,
-    surface: OmochiSurface,
-    keyboard_pressure: bool,
 
     /*
      * このButton上でPrimaryボタンが
@@ -200,11 +197,14 @@ struct ButtonInteractionInner {
 
     clicked: bool,
     enabled: bool,
+    appearance: AppearanceTransition,
+    keyboard_pressure: bool,
 }
 
 #[derive(Clone)]
 pub struct ButtonInteractionState {
     inner: Rc<RefCell<ButtonInteractionInner>>,
+    omochi: OmochiShape,
 }
 
 impl Default for ButtonInteractionState {
@@ -215,6 +215,7 @@ impl Default for ButtonInteractionState {
 
                 ..ButtonInteractionInner::default()
             })),
+            omochi: OmochiShape::displacement(OmochiPreset::CompactControl),
         }
     }
 }
@@ -240,6 +241,11 @@ impl ButtonInteractionState {
         self.inner.borrow().focused
     }
 
+    pub(crate) fn is_focus_visible(&self) -> bool {
+        let inner = self.inner.borrow();
+        inner.focused && inner.focus_visible
+    }
+
     pub fn take_clicked(&self) -> bool {
         let mut inner = self.inner.borrow_mut();
 
@@ -255,12 +261,12 @@ impl ButtonInteractionState {
 
         inner.hovered = false;
         inner.focused = false;
-        inner.focus_visible = false;
         inner.armed = false;
         inner.pressed = false;
         inner.clicked = false;
-        inner.surface = OmochiSurface::default();
         inner.keyboard_pressure = false;
+        drop(inner);
+        self.omochi.reset();
     }
 
     fn set_enabled(&self, enabled: bool) -> bool {
@@ -273,7 +279,6 @@ impl ButtonInteractionState {
         if !enabled {
             inner.hovered = false;
             inner.focused = false;
-            inner.focus_visible = false;
             inner.armed = false;
             inner.pressed = false;
         }
@@ -309,16 +314,17 @@ pub struct Button {
     style: ButtonStyle,
     size: ButtonSize,
     radius: Option<CornerRadius>,
-    shadow: ShadowStyle,
+    shadow: Option<ShadowStyle>,
     alignment: ZStackAlignment,
     enabled: bool,
-    omochi: bool,
     accessibility_label: Option<String>,
     accessibility_value: Option<String>,
     accessibility_role: AccessibilityRole,
     accessibility_checked: Option<bool>,
     accessibility_selected: bool,
     on_click: Option<RefCell<Box<dyn FnMut()>>>,
+    omochi_enabled: bool,
+    focus_ring_visible: bool,
 }
 
 impl Button {
@@ -330,56 +336,33 @@ impl Button {
             content: None,
             content_padding: true,
             style: ButtonStyle::Standard,
-            size: ButtonSize::Medium,
+            size: ButtonSize::Small,
             radius: None,
-            shadow: ShadowStyle::None,
+            shadow: None,
             alignment: ZStackAlignment::Center,
             enabled: true,
-            omochi: true,
             accessibility_label: None,
             accessibility_value: None,
             accessibility_role: AccessibilityRole::Button,
             accessibility_checked: None,
             accessibility_selected: false,
             on_click: None,
+            omochi_enabled: true,
+            focus_ring_visible: true,
             intrinsic_label_size: RefCell::new(None),
         }
     }
 
-    /// 独立した操作面のomochi反応を有効にします。Ghost/Customには適用しません。
-    pub fn omochi(mut self, enabled: bool) -> Self {
-        self.omochi = enabled;
-        self
-    }
-
-    fn omochi_motion(&self, theme: &Theme, bounds: Rect) -> OmochiMotion {
-        let mut motion = theme.motion.omochi;
-        motion.enabled &= self.enabled && self.omochi_surface_enabled();
-        motion.material = motion.material.for_height(bounds.size.height);
-        motion
-    }
-
-    fn omochi_surface_enabled(&self) -> bool {
-        self.omochi
-            && matches!(
-                self.style,
-                ButtonStyle::Standard
-                    | ButtonStyle::Primary
-                    | ButtonStyle::Accent
-                    | ButtonStyle::Danger
-            )
-    }
-
-    /// テキストラベルの先頭にVK Symbolを配置します。
-    /// 寸法・余白・文字サイズ・状態色はButtonの共通規則に従います。
-    /// `.content()`による任意の子Viewには適用しません。
     pub fn leading_symbol(mut self, symbol: SymbolName) -> Self {
         self.leading_symbol = Some(symbol);
         self
     }
 
-    /// 任意の内容にもButtonSizeに対応する共通の左右余白を適用します。
-    /// 内容側が余白や座標を管理する場合は`content_padding(false)`を指定します。
+    pub fn content_padding(mut self, enabled: bool) -> Self {
+        self.content_padding = enabled;
+        self
+    }
+
     pub fn content<C>(mut self, content: C) -> Self
     where
         C: IntoStackChild,
@@ -388,13 +371,6 @@ impl Button {
         self.leading_symbol = None;
         self.content = Some(content.into_stack_child());
 
-        self
-    }
-
-    /// カスタム内容への共通左右余白の適用を切り替えます。
-    /// 通常のラベル・leading_symbolと背景・入力領域には影響しません。
-    pub fn content_padding(mut self, enabled: bool) -> Self {
-        self.content_padding = enabled;
         self
     }
 
@@ -420,7 +396,7 @@ impl Button {
     }
 
     pub fn shadow(mut self, shadow: ShadowStyle) -> Self {
-        self.shadow = shadow;
+        self.shadow = Some(shadow);
         self
     }
 
@@ -473,6 +449,38 @@ impl Button {
         &self.interaction
     }
 
+    /// Retained-state constructor kept for existing AppCore applications.
+    pub fn with_interaction_and_label(
+        interaction: ButtonInteractionState,
+        label: impl Into<String>,
+    ) -> Self {
+        Self::with_interaction_state(label, interaction)
+    }
+
+    /// Creates a regular button with interaction state retained by the caller.
+    /// This keeps omochi recovery continuous when the action rebuilds the view.
+    pub fn with_interaction_state(
+        label: impl Into<String>,
+        interaction: ButtonInteractionState,
+    ) -> Self {
+        let mut button = Self::with_interaction(interaction);
+        button.label = Some(label.into());
+        button.size = ButtonSize::Small;
+        button.omochi_enabled = true;
+        button
+    }
+
+    /// Enables or disables omochi contour feedback for this button.
+    pub fn omochi(mut self, enabled: bool) -> Self {
+        self.omochi_enabled = enabled;
+        self
+    }
+
+    pub(crate) fn focus_ring(mut self, visible: bool) -> Self {
+        self.focus_ring_visible = visible;
+        self
+    }
+
     pub(crate) fn with_interaction(interaction: ButtonInteractionState) -> Self {
         Self {
             interaction,
@@ -483,28 +491,19 @@ impl Button {
             style: ButtonStyle::Standard,
             size: ButtonSize::Medium,
             radius: None,
-            shadow: ShadowStyle::None,
+            shadow: None,
             alignment: ZStackAlignment::Center,
             enabled: true,
-            omochi: true,
             accessibility_label: None,
             accessibility_value: None,
             accessibility_role: AccessibilityRole::Button,
             accessibility_checked: None,
             accessibility_selected: false,
             on_click: None,
+            omochi_enabled: false,
+            focus_ring_visible: true,
             intrinsic_label_size: RefCell::new(None),
         }
-    }
-
-    /// View再構築後もホバー・押下・色の遷移を保つ共有操作状態で作成します。
-    pub fn with_interaction_and_label(
-        interaction: ButtonInteractionState,
-        label: impl Into<String>,
-    ) -> Self {
-        let mut button = Self::with_interaction(interaction);
-        button.label = Some(label.into());
-        button
     }
 
     #[must_use]
@@ -541,6 +540,13 @@ impl Button {
             | ZStackAlignment::Bottom
             | ZStackAlignment::BottomTrailing => 1.0,
         }
+    }
+
+    fn local_point(bounds: Rect, point: Point) -> Point {
+        Point::new(
+            point.x - bounds.origin.x - bounds.size.width / 2.0,
+            point.y - bounds.origin.y - bounds.size.height / 2.0,
+        )
     }
 }
 
@@ -580,7 +586,8 @@ impl View for Button {
         if visual_state == ControlVisualState::Disabled {
             appearance = appearance.with_opacity(context.theme.button.disabled_opacity);
         }
-        let (appearance, next) = self.interaction.inner.borrow_mut().appearance.sample(
+
+        let (mut appearance, next) = self.interaction.inner.borrow_mut().appearance.sample(
             appearance,
             context.theme.motion.fast,
             std::time::Instant::now(),
@@ -593,10 +600,28 @@ impl View for Button {
             context.request_redraw_in_at(bounds.expanded(16.0), next);
         }
 
-        let shadow = if visual_state == ControlVisualState::Pressed {
+        if self.omochi_enabled
+            && self.interaction.omochi.is_animating()
+            && appearance.background.alpha < 64
+        {
+            appearance.background = context.theme.colors.surface_muted;
+        }
+
+        let shadow = if let Some(shadow) = self.shadow {
+            shadow
+        } else if matches!(self.style, ButtonStyle::Ghost) {
             ShadowStyle::None
+        } else if visual_state == ControlVisualState::Pressed {
+            context.theme.button.pressed_shadow
         } else {
-            self.shadow
+            context.theme.button.shadow
+        };
+        let omochi_shadow = if matches!(self.style, ButtonStyle::Ghost) {
+            ShadowStyle::None
+        } else if let Some(shadow) = self.shadow {
+            shadow
+        } else {
+            context.theme.button.omochi_shadow
         };
 
         let radius = self.radius.unwrap_or_else(|| {
@@ -607,13 +632,19 @@ impl View for Button {
         });
 
         let interaction = self.interaction.inner.borrow();
-        if interaction.focused && interaction.focus_visible {
+        if interaction.focused && interaction.focus_visible && self.focus_ring_visible {
             let ring_width = context.theme.button.focus_ring_width;
             Rectangle::new()
-                .color(RectangleColor::Custom(context.theme.button.focus_ring))
-                .radius(radius)
+                .color(RectangleColor::Custom(Color::TRANSPARENT))
+                .radius(CornerRadius::Custom(
+                    radius.resolve(&context.theme.radius, bounds.size.width, bounds.size.height)
+                        + ring_width,
+                ))
                 .shadow(ShadowStyle::None)
-                .border(BorderStyle::None)
+                .border(BorderStyle::custom(
+                    context.theme.button.focus_ring,
+                    ring_width,
+                ))
                 .paint(
                     Rect::new(
                         bounds.origin.x - ring_width,
@@ -626,35 +657,18 @@ impl View for Button {
         }
         drop(interaction);
 
-        let motion = self.omochi_motion(context.theme, bounds);
-        let sample = self
-            .interaction
-            .inner
-            .borrow_mut()
-            .surface
-            .sample(motion, std::time::Instant::now());
-        if let Some(next) = sample.next_redraw_at {
-            context.request_redraw_in_at(bounds.expanded(motion.material.max_pull + 6.0), next);
-        }
-        if sample.press_depth > 0.001 || sample.pull.x.hypot(sample.pull.y) > 0.001 {
-            if shadow != ShadowStyle::None {
-                Rectangle::new()
-                    .color(RectangleColor::Custom(Color::TRANSPARENT))
-                    .radius(radius)
-                    .shadow(shadow)
-                    .paint(bounds, context);
-            }
-            context.display_list.push(DrawCommand::DrawContour {
-                points: button_contour(
-                    bounds,
-                    radius.resolve(&context.theme.radius, bounds.size.width, bounds.size.height),
-                    sample,
-                    motion.material,
-                ),
-                fill: appearance.background,
-                stroke: appearance.border,
-                stroke_width: context.theme.button.stroke_width,
-            });
+        if self.omochi_enabled && self.interaction.omochi.is_animating() {
+            let resolved_radius =
+                radius.resolve(&context.theme.radius, bounds.size.width, bounds.size.height);
+            self.interaction.omochi.paint_styled(
+                bounds,
+                resolved_radius,
+                appearance.background,
+                appearance.border,
+                context.theme.button.stroke_width,
+                omochi_shadow,
+                context,
+            );
         } else {
             Rectangle::new()
                 .color(RectangleColor::Custom(appearance.background))
@@ -808,16 +822,6 @@ impl View for Button {
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
-        let radius = self
-            .radius
-            .unwrap_or_else(|| {
-                context
-                    .inherited_corner_radius()
-                    .map(CornerRadius::Custom)
-                    .unwrap_or(context.theme.button.radius)
-            })
-            .resolve(&context.theme.radius, bounds.size.width, bounds.size.height);
-        let hit = |p| bounds.contains_rounded(radius, p);
         let enabled_changed = self.interaction.set_enabled(self.enabled);
 
         if enabled_changed {
@@ -825,59 +829,77 @@ impl View for Button {
         }
 
         if !self.enabled {
+            if self.interaction.omochi.is_animating() {
+                self.interaction.omochi.reset();
+            }
             return EventResult::Ignored;
         }
 
-        let motion = self.omochi_motion(context.theme(), bounds);
-        let local = |point: crate::geometry::Point| {
-            crate::geometry::Point::new(point.x - bounds.origin.x, point.y - bounds.origin.y)
-        };
-        if motion.enabled {
-            let now = std::time::Instant::now();
-            let mut inner = self.interaction.inner.borrow_mut();
+        if self.omochi_enabled {
             match event {
-                ViewEvent::PointerPressed {
-                    position,
-                    button: PointerButton::Primary,
-                } if hit(*position) => {
-                    inner.surface.begin(local(*position), now);
-                    inner.keyboard_pressure = false;
-                }
-                ViewEvent::PointerMoved { position } => {
-                    inner.surface.move_to(local(*position), now)
-                }
-                ViewEvent::PointerReleased {
-                    button: PointerButton::Primary,
+                ViewEvent::KeyPressed {
+                    key: Key::Enter | Key::Space,
                     ..
-                }
-                | ViewEvent::FocusChanged { focused: false } => {
-                    inner.surface.end(motion, now);
-                    inner.keyboard_pressure = false;
+                } if self.interaction.is_focused()
+                    && !self.interaction.inner.borrow().keyboard_pressure =>
+                {
+                    self.interaction.omochi.begin(Point::new(0.0, 0.0));
+                    self.interaction.inner.borrow_mut().keyboard_pressure = true;
                 }
                 ViewEvent::KeyReleased {
                     key: Key::Enter | Key::Space,
                     ..
-                } if inner.keyboard_pressure => {
-                    inner.surface.end(motion, now);
-                    inner.keyboard_pressure = false;
-                    context.request_redraw_in(bounds.expanded(motion.material.max_pull + 6.0));
+                } if self.interaction.inner.borrow().keyboard_pressure => {
+                    self.interaction.omochi.end();
+                    self.interaction.inner.borrow_mut().keyboard_pressure = false;
+                }
+                ViewEvent::PointerPressed {
+                    position,
+                    button: PointerButton::Primary,
+                } if bounds.contains(*position) => self
+                    .interaction
+                    .omochi
+                    .begin(Self::local_point(bounds, *position)),
+                ViewEvent::PointerMoved { position } if self.interaction.omochi.is_active() => self
+                    .interaction
+                    .omochi
+                    .moved(Self::local_point(bounds, *position)),
+                ViewEvent::PointerReleased {
+                    button: PointerButton::Primary,
+                    ..
+                }
+                | ViewEvent::PointerLeft
+                | ViewEvent::FocusChanged { focused: false }
+                    if self.interaction.omochi.is_active() =>
+                {
+                    self.interaction.omochi.end();
                 }
                 _ => {}
             }
+            if self.interaction.omochi.is_animating() {
+                context.request_redraw_in(bounds.expanded(24.0));
+            }
         }
+
         match event {
+            ViewEvent::FocusVisibilityChanged { visible } => {
+                let mut inner = self.interaction.inner.borrow_mut();
+                let changed = inner.focus_visible != *visible;
+                inner.focus_visible = *visible;
+                drop(inner);
+                if changed {
+                    context.request_redraw_in(bounds.expanded(16.0));
+                }
+                EventResult::Ignored
+            }
             ViewEvent::KeyboardFocusRequested { bounds: target } => {
                 let focused = target.is_some_and(|target| target == bounds);
                 let mut inner = self.interaction.inner.borrow_mut();
-                let changed = inner.focused != focused
-                    || inner.focus_visible != (focused && context.focus_visible());
+                let changed = inner.focused != focused;
                 inner.focused = focused;
-                inner.focus_visible = focused && context.focus_visible();
                 if !focused {
                     inner.armed = false;
                     inner.pressed = false;
-                    inner.surface.end(motion, std::time::Instant::now());
-                    inner.keyboard_pressure = false;
                 }
                 drop(inner);
                 if changed {
@@ -891,19 +913,6 @@ impl View for Button {
                 ..
             } if self.interaction.inner.borrow().focused => {
                 self.interaction.inner.borrow_mut().clicked = true;
-                if motion.enabled {
-                    let mut inner = self.interaction.inner.borrow_mut();
-                    if !inner.surface.is_active() {
-                        inner.surface.begin(
-                            crate::geometry::Point::new(
-                                bounds.size.width * 0.5,
-                                bounds.size.height * 0.5,
-                            ),
-                            std::time::Instant::now(),
-                        );
-                        inner.keyboard_pressure = true;
-                    }
-                }
                 if let Some(callback) = self.on_click.as_ref() {
                     (callback.borrow_mut())();
                 }
@@ -914,7 +923,7 @@ impl View for Button {
             ViewEvent::PointerMoved { position } => {
                 let mut inner = self.interaction.inner.borrow_mut();
 
-                let hovered = hit(*position);
+                let hovered = bounds.contains(*position);
 
                 let pressed = inner.armed && hovered;
 
@@ -942,14 +951,13 @@ impl View for Button {
                 position,
                 button: PointerButton::Primary,
             } => {
-                if !hit(*position) {
+                if !bounds.contains(*position) {
                     return EventResult::Ignored;
                 }
 
                 let mut inner = self.interaction.inner.borrow_mut();
 
                 inner.hovered = true;
-                inner.focus_visible = false;
                 inner.armed = true;
                 inner.pressed = true;
 
@@ -964,7 +972,7 @@ impl View for Button {
                 position,
                 button: PointerButton::Primary,
             } => {
-                let inside = hit(*position);
+                let inside = bounds.contains(*position);
 
                 let (was_armed, clicked, changed) = {
                     let mut inner = self.interaction.inner.borrow_mut();
@@ -1175,6 +1183,190 @@ fn fit_symbol_label(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::draw_command::DisplayList;
+    use crate::typography::{TextMeasurer, Typography};
+
+    #[test]
+    fn semantic_sizes_follow_layout_tokens() {
+        let theme = Theme::LIGHT;
+
+        assert_eq!(
+            ButtonSize::Small.height(&theme),
+            theme.controls.small_height
+        );
+        assert_eq!(
+            ButtonSize::Medium.height(&theme),
+            theme.controls.height
+        );
+        assert_eq!(
+            ButtonSize::Large.height(&theme),
+            theme.controls.large_height
+        );
+        assert_eq!(
+            ButtonSize::Small.icon_size(&theme),
+            theme.layout.compact_icon_size
+        );
+        assert_eq!(
+            ButtonSize::Medium.icon_size(&theme),
+            theme.layout.control_icon_size
+        );
+        assert_eq!(ButtonSize::Small.height(&theme), 24.0);
+        assert_eq!(ButtonSize::Medium.height(&theme), 30.0);
+        assert_eq!(ButtonSize::Large.height(&theme), 32.0);
+        assert_eq!(
+            ButtonSize::Large.icon_size(&theme),
+            theme.layout.stepper_icon_size
+        );
+    }
+
+    #[test]
+    fn public_buttons_default_to_small() {
+        assert_eq!(ButtonSize::default(), ButtonSize::Small);
+        assert_eq!(Button::new("Default").size, ButtonSize::Small);
+        assert_eq!(
+            Button::with_interaction_state("Retained", ButtonInteractionState::new()).size,
+            ButtonSize::Small
+        );
+    }
+
+    #[test]
+    fn retained_button_paints_omochi_contour_after_click_is_consumed() {
+        let interaction = ButtonInteractionState::new();
+        let button = Button::with_interaction_state("Continue", interaction.clone());
+        let bounds = Rect::new(40.0, 30.0, 104.0, 28.0);
+        let mut text_measurer = TextMeasurer::new();
+        let mut event_context =
+            EventContext::new(&Theme::LIGHT, &Typography::DEFAULT, &mut text_measurer);
+
+        assert_eq!(
+            button.handle_event(
+                bounds,
+                &ViewEvent::PointerPressed {
+                    position: Point::new(130.0, 44.0),
+                    button: PointerButton::Primary,
+                },
+                &mut event_context,
+            ),
+            EventResult::Consumed
+        );
+        assert_eq!(
+            button.handle_event(
+                bounds,
+                &ViewEvent::PointerMoved {
+                    position: Point::new(142.0, 44.0),
+                },
+                &mut event_context,
+            ),
+            EventResult::Consumed
+        );
+        assert_eq!(
+            button.handle_event(
+                bounds,
+                &ViewEvent::PointerReleased {
+                    position: Point::new(142.0, 44.0),
+                    button: PointerButton::Primary,
+                },
+                &mut event_context,
+            ),
+            EventResult::Consumed
+        );
+        assert!(interaction.take_clicked());
+
+        let rebuilt = Button::with_interaction_state("Continue", interaction);
+        let mut display_list = DisplayList::new();
+        let mut paint_context = PaintContext::new(
+            &mut display_list,
+            &Theme::LIGHT,
+            &Typography::DEFAULT,
+            &mut text_measurer,
+        );
+        rebuilt.paint(bounds, &mut paint_context);
+
+        let polygon_colors = display_list
+            .commands()
+            .iter()
+            .filter_map(|command| match command {
+                DrawCommand::FillPolygon { color, .. } => Some(*color),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            polygon_colors.len() > 2,
+            "deformed button must retain shadow, border, and fill layers"
+        );
+        assert!(polygon_colors.contains(&Theme::LIGHT.button.standard.hovered.border));
+        assert_eq!(
+            polygon_colors.last(),
+            Some(&Theme::LIGHT.button.standard.hovered.background)
+        );
+    }
+
+    #[test]
+    fn focus_ring_is_visible_only_for_keyboard_modality() {
+        let interaction = ButtonInteractionState::new();
+        let button = Button::with_interaction_state("Continue", interaction);
+        let bounds = Rect::new(40.0, 30.0, 104.0, 30.0);
+        let mut text_measurer = TextMeasurer::new();
+        let mut event_context =
+            EventContext::new(&Theme::LIGHT, &Typography::DEFAULT, &mut text_measurer);
+
+        button.handle_event(
+            bounds,
+            &ViewEvent::FocusVisibilityChanged { visible: false },
+            &mut event_context,
+        );
+        button.handle_event(
+            bounds,
+            &ViewEvent::KeyboardFocusRequested {
+                bounds: Some(bounds),
+            },
+            &mut event_context,
+        );
+        drop(event_context);
+        let mut pointer_list = DisplayList::new();
+        let mut pointer_context = PaintContext::new(
+            &mut pointer_list,
+            &Theme::LIGHT,
+            &Typography::DEFAULT,
+            &mut text_measurer,
+        );
+        button.paint(bounds, &mut pointer_context);
+        let pointer_strokes = pointer_list
+            .commands()
+            .iter()
+            .filter(|command| matches!(command, DrawCommand::StrokeRoundedRect { .. } | DrawCommand::StrokeInsideRoundedRect { .. }))
+            .count();
+
+        {
+            let mut event_context =
+                EventContext::new(&Theme::LIGHT, &Typography::DEFAULT, &mut text_measurer);
+            button.handle_event(
+                bounds,
+                &ViewEvent::FocusVisibilityChanged { visible: true },
+                &mut event_context,
+            );
+        }
+        let mut keyboard_list = DisplayList::new();
+        let mut keyboard_context = PaintContext::new(
+            &mut keyboard_list,
+            &Theme::LIGHT,
+            &Typography::DEFAULT,
+            &mut text_measurer,
+        );
+        button.paint(bounds, &mut keyboard_context);
+        let keyboard_strokes = keyboard_list
+            .commands()
+            .iter()
+            .filter(|command| matches!(command, DrawCommand::StrokeRoundedRect { .. } | DrawCommand::StrokeInsideRoundedRect { .. }))
+            .count();
+
+        assert_eq!(keyboard_strokes, pointer_strokes + 1);
+    }
+}
+
+#[cfg(test)]
+mod compatibility_tests {
+    use super::*;
 
     struct ContentProbe(Rc<RefCell<Option<Rect>>>);
     impl View for ContentProbe {
@@ -1240,7 +1432,7 @@ mod tests {
             },
         );
         assert_eq!(natural, Size::new(42.0, 18.0));
-        let (list, _) = render(&Button::new("Apply").content_padding(false), &theme, bounds);
+        let (list, _) = render(&Button::new("Apply").size(ButtonSize::Medium).content_padding(false), &theme, bounds);
         assert!(list.commands().iter().any(|command| matches!(command,
             DrawCommand::DrawText { command } if command.bounds.origin.x == bounds.origin.x + theme.button.horizontal_padding)));
     }
@@ -1302,113 +1494,7 @@ mod tests {
             theme.layout.stepper_icon_size
         );
     }
-    #[test]
-    fn material_surface_preserves_text_hit_area_and_immediate_actions() {
-        use crate::{draw_command::DisplayList, geometry::Point, typography::TextMeasurer};
-        use std::{
-            cell::Cell,
-            time::{Duration, Instant},
-        };
-        let calls = Rc::new(Cell::new(0));
-        let callback = Rc::clone(&calls);
-        let button = Button::new("Apply").on_click(move || callback.set(callback.get() + 1));
-        let theme = Theme::LIGHT;
-        let bounds = Rect::new(0.0, 0.0, 96.0, 30.0);
-        let mut measurer = TextMeasurer::new();
-        let mut rest = DisplayList::new();
-        let mut nodes = Vec::new();
-        button.paint(
-            bounds,
-            &mut PaintContext::new(&mut rest, &theme, &theme.typography, &mut measurer)
-                .with_accessibility_nodes(&mut nodes),
-        );
-        {
-            let mut context = EventContext::new(&theme, &theme.typography, &mut measurer);
-            button.handle_event(
-                bounds,
-                &ViewEvent::PointerPressed {
-                    position: Point::new(48.0, 15.0),
-                    button: PointerButton::Primary,
-                },
-                &mut context,
-            );
-            // Advance a held press without sleeping or depending on host timing.
-            button.interaction.inner.borrow_mut().surface.begin(
-                Point::new(48.0, 15.0),
-                Instant::now() - Duration::from_millis(300),
-            );
-        }
-        let mut pressed = DisplayList::new();
-        button.paint(
-            bounds,
-            &mut PaintContext::new(&mut pressed, &theme, &theme.typography, &mut measurer),
-        );
-        let text = |list: &DisplayList| {
-            list.commands()
-                .iter()
-                .find_map(|command| {
-                    if let DrawCommand::DrawText { command } = command {
-                        Some((command.bounds, command.font_size))
-                    } else {
-                        None
-                    }
-                })
-                .unwrap()
-        };
-        assert_eq!(text(&rest), text(&pressed));
-        assert_eq!(text(&rest).1, 13.0);
-        assert_eq!(nodes[0].bounds, bounds);
-        let points = pressed
-            .commands()
-            .iter()
-            .find_map(|command| {
-                if let DrawCommand::DrawContour { points, .. } = command {
-                    Some(points)
-                } else {
-                    None
-                }
-            })
-            .unwrap();
-        let position = Point::new(48.0, 29.99);
-        assert!(points.iter().map(|p| p.y).fold(f32::NEG_INFINITY, f32::max) < position.y);
-        let mut context = EventContext::new(&theme, &theme.typography, &mut measurer);
-        button.handle_event(
-            bounds,
-            &ViewEvent::PointerReleased {
-                position,
-                button: PointerButton::Primary,
-            },
-            &mut context,
-        );
-        assert_eq!(calls.get(), 1);
-        assert!(!button.interaction.inner.borrow().surface.is_active());
-        button.handle_event(
-            bounds,
-            &ViewEvent::KeyboardFocusRequested {
-                bounds: Some(bounds),
-            },
-            &mut context,
-        );
-        button.handle_event(
-            bounds,
-            &ViewEvent::KeyPressed {
-                key: Key::Space,
-                modifiers: Default::default(),
-            },
-            &mut context,
-        );
-        assert_eq!(calls.get(), 2);
-        assert!(button.interaction.inner.borrow().surface.is_active());
-        button.handle_event(
-            bounds,
-            &ViewEvent::KeyReleased {
-                key: Key::Space,
-                modifiers: Default::default(),
-            },
-            &mut context,
-        );
-        assert!(!button.interaction.inner.borrow().surface.is_active());
-    }
+
     fn render(
         button: &Button,
         theme: &Theme,
@@ -1563,7 +1649,7 @@ mod tests {
     }
     #[test]
     fn plain_and_custom_content_buttons_keep_existing_layout_contract() {
-        let plain = Button::new("Apply");
+        let plain = Button::new("Apply").size(ButtonSize::Medium);
         assert!(plain.leading_symbol.is_none());
         let custom = Button::new("Apply")
             .leading_symbol(SymbolName::Pencil)

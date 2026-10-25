@@ -1,0 +1,71 @@
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BurgersParameters {
+    pub e1: f32,
+    pub e2: f32,
+    pub eta1: f32,
+    pub eta2: f32,
+}
+
+pub const DEFAULT_BURGERS: BurgersParameters = BurgersParameters {
+    e1: 3.10,
+    e2: 0.92,
+    eta1: 14.0,
+    eta2: 0.46,
+};
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OmochiMaterial {
+    pub drag_gain: f32,
+    pub max_pull: f32,
+    pub press_depth: f32,
+    pub press_radius: f32,
+    pub drag_radius: f32,
+    pub reference_creep_time: f32,
+    pub flow_recovery_time: f32,
+    pub spring_recovery_time: f32,
+    pub tan_delta: f32,
+    pub drag_follow: f32,
+    pub center_lock: f32,
+    pub neck_ratio: f32,
+    pub neck_width_ratio: f32,
+    pub neck_backshift_ratio: f32,
+    pub tip_stretch: f32,
+    pub tip_long_radius: f32,
+    pub tip_cross_radius: f32,
+    pub viscous_follow_time: f32,
+    pub fast_viscous_follow_time: f32,
+    pub fast_speed: f32,
+    pub max_speed: f32,
+    pub press_release_start: f32,
+    pub press_release_end: f32,
+    pub velocity_pull_scale: f32,
+    pub velocity_idle_decay: f32,
+}
+
+pub const DEFAULT_MATERIAL: OmochiMaterial = OmochiMaterial {
+    drag_gain: 0.34,
+    max_pull: 46.0,
+    press_depth: 9.5,
+    press_radius: 92.0,
+    drag_radius: 118.0,
+    reference_creep_time: 0.68,
+    flow_recovery_time: 0.94,
+    spring_recovery_time: 0.032,
+    tan_delta: 0.46,
+    drag_follow: 0.34,
+    center_lock: 1.0,
+    neck_ratio: 0.052,
+    neck_width_ratio: 0.30,
+    neck_backshift_ratio: 0.24,
+    tip_stretch: 0.30,
+    tip_long_radius: 34.0,
+    tip_cross_radius: 58.0,
+    viscous_follow_time: 0.050,
+    fast_viscous_follow_time: 0.115,
+    fast_speed: 1100.0,
+    max_speed: 3000.0,
+    press_release_start: 1.5,
+    press_release_end: 12.0,
+    velocity_pull_scale: 0.014,
+    velocity_idle_decay: 0.055,
+};

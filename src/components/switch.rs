@@ -1,20 +1,20 @@
+use super::omochi_shape::{OmochiPreset, OmochiShape};
 use super::{
     Button, ButtonInteractionState, ButtonStyle, HStack, Padding, Rectangle, RectangleColor, Text,
     ZStackAlignment,
 };
 use crate::accessibility::AccessibilityRole;
-use crate::animation::{Transition, interpolate};
-use crate::draw_command::DrawCommand;
+use crate::animation::{Animation, Transition, interpolate};
 use crate::event::{EventContext, EventResult, ViewEvent};
-use crate::geometry::{Rect, Size};
+use crate::geometry::{Point, Rect, Size};
 use crate::layout::{StackAlignment, StackGap, ViewExt};
-use crate::omochi::moving::SwitchThumb;
 use crate::platform::PointerButton;
 use crate::state::Binding;
-use crate::theme::{Color, CornerRadius, ShadowStyle, Theme};
+use crate::theme::{Color, CornerRadius, Motion, ShadowStyle, Theme};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 #[derive(Clone, Copy)]
@@ -23,6 +23,7 @@ struct SwitchMetrics {
     track_height: f32,
     knob_width: f32,
     knob_height: f32,
+    pressed_knob_width: f32,
     knob_inset: f32,
     drag_threshold: f32,
     hit_padding: f32,
@@ -33,19 +34,30 @@ impl SwitchMetrics {
         let layout = theme.layout;
         let maximum_width = (layout.switch_track_width - layout.switch_knob_inset * 2.0).max(1.0);
         let maximum_height = (layout.switch_track_height - layout.switch_knob_inset * 2.0).max(1.0);
-        let thumb = layout.control_thumb_size(false);
-        let knob_height = thumb.height.min(maximum_height);
-        let knob_width = thumb.width.min(maximum_width);
+        let knob_height = layout.switch_knob_height.min(maximum_height);
+        let knob_width = layout.switch_knob_width.min(maximum_width);
+        let pressed_knob_width = layout
+            .switch_pressed_knob_width
+            .max(knob_width)
+            .min(maximum_width);
         Self {
             track_width: layout.switch_track_width,
             track_height: layout.switch_track_height,
             knob_width,
             knob_height,
+            pressed_knob_width,
             knob_inset: layout.switch_knob_inset,
             drag_threshold: layout.switch_drag_threshold,
             hit_padding: layout.switch_hit_padding,
         }
     }
+}
+
+#[derive(Clone, Copy)]
+struct SwitchPositionAnimation {
+    from: f32,
+    to: f32,
+    started_at: Instant,
 }
 
 #[derive(Default)]
@@ -60,6 +72,7 @@ struct SwitchDragInner {
     drag_offset_x: f32,
 
     drag_position: Option<f32>,
+    settle_animation: Option<SwitchPositionAnimation>,
 }
 
 #[derive(Clone, Default)]
@@ -67,16 +80,41 @@ struct SwitchDragState {
     inner: Rc<RefCell<SwitchDragInner>>,
 }
 
-/// Shared switch interaction and omochi state, retained across view reconstruction.
-#[derive(Clone, Default)]
-pub struct SwitchInteractionState {
-    interaction: ButtonInteractionState,
-    drag: SwitchDragState,
-    thumb: Rc<RefCell<SwitchThumb>>,
+#[derive(Clone, Copy)]
+struct KnobWidthAnimation {
+    from: f32,
+    to: f32,
+    started_at: Instant,
 }
+
+#[derive(Default)]
+struct KnobWidthAnimationState {
+    pressed: bool,
+    animation: Option<KnobWidthAnimation>,
+}
+
+#[derive(Clone)]
+pub struct SwitchInteractionState {
+    button: ButtonInteractionState,
+    knob_width_animation: Arc<Mutex<KnobWidthAnimationState>>,
+    drag: SwitchDragState,
+    thumb_shape: OmochiShape,
+}
+
 impl SwitchInteractionState {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            button: ButtonInteractionState::new(),
+            knob_width_animation: Arc::new(Mutex::new(KnobWidthAnimationState::default())),
+            drag: SwitchDragState::default(),
+            thumb_shape: OmochiShape::velocity(OmochiPreset::Thumb),
+        }
+    }
+}
+
+impl Default for SwitchInteractionState {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -84,9 +122,7 @@ pub struct Switch {
     checked: Binding<bool>,
     label: Option<String>,
     enabled: bool,
-    interaction: ButtonInteractionState,
-    thumb: Rc<RefCell<SwitchThumb>>,
-    drag: SwitchDragState,
+    interaction_state: SwitchInteractionState,
 }
 
 impl Switch {
@@ -94,14 +130,15 @@ impl Switch {
         Self::with_interaction(checked, SwitchInteractionState::new())
     }
 
-    pub fn with_interaction(checked: Binding<bool>, state: SwitchInteractionState) -> Self {
+    pub fn with_interaction(
+        checked: Binding<bool>,
+        interaction_state: SwitchInteractionState,
+    ) -> Self {
         Self {
             checked,
             label: None,
             enabled: true,
-            interaction: state.interaction,
-            drag: state.drag,
-            thumb: state.thumb,
+            interaction_state,
         }
     }
 
@@ -120,7 +157,7 @@ impl Switch {
     }
 
     pub fn interaction(&self) -> &ButtonInteractionState {
-        &self.interaction
+        &self.interaction_state.button
     }
 
     fn button(&self, theme: &Theme) -> Button {
@@ -148,15 +185,17 @@ impl Switch {
                 checked: self.checked.get(),
                 transition: self.checked.transition(),
                 enabled: self.enabled,
-                interaction: self.interaction.clone(),
-                thumb: self.thumb.clone(),
-                drag: self.drag.clone(),
+                interaction: self.interaction_state.button.clone(),
+                knob_width_animation: self.interaction_state.knob_width_animation.clone(),
+                drag: self.interaction_state.drag.clone(),
+                checked_binding: self.checked.clone(),
+                thumb_shape: self.interaction_state.thumb_shape.clone(),
             }
             .frame(metrics.track_width, metrics.track_height)
             .flex_shrink(0.0),
         );
 
-        Button::with_interaction(self.interaction.clone())
+        Button::with_interaction(self.interaction_state.button.clone())
             .content_padding(false)
             .style(ButtonStyle::Custom {
                 background: theme.switch.interaction_background,
@@ -190,8 +229,8 @@ impl Switch {
             ViewEvent::KeyPressed {
                 key: crate::platform::Key::Enter | crate::platform::Key::Space,
                 ..
-            } if self.interaction.is_focused() => {
-                self.checked.set(!self.checked.get());
+            } if self.interaction_state.button.is_focused() => {
+                self.start_toggle();
                 context.request_redraw_in(bounds.expanded(16.0));
                 EventResult::Consumed
             }
@@ -200,20 +239,13 @@ impl Switch {
                 position,
                 button: PointerButton::Primary,
             } => {
-                if !bounds.contains_rounded(
-                    context.theme.button.radius.resolve(
-                        &context.theme.radius,
-                        bounds.size.width,
-                        bounds.size.height,
-                    ),
-                    *position,
-                ) {
+                if !bounds.contains(*position) {
                     return EventResult::Ignored;
                 }
 
                 let checked_position = bool_position(self.checked.get());
 
-                let mut drag = self.drag.inner.borrow_mut();
+                let mut drag = self.interaction_state.drag.inner.borrow_mut();
 
                 let mark_bounds = drag.mark_bounds;
 
@@ -248,6 +280,9 @@ impl Switch {
                 drag.press_x = position.x;
                 drag.drag_offset_x = drag_offset_x;
                 drag.drag_position = Some(checked_position);
+                drag.settle_animation = None;
+                drop(drag);
+                self.update_thumb_shape_for_drag(checked_position, *position);
 
                 context.request_redraw_in(bounds.expanded(16.0));
 
@@ -255,14 +290,14 @@ impl Switch {
             }
 
             ViewEvent::PointerMoved { position } => {
-                let tracking = self.drag.inner.borrow().tracking;
+                let tracking = self.interaction_state.drag.inner.borrow().tracking;
 
                 if !tracking {
                     return EventResult::Ignored;
                 }
 
-                {
-                    let mut drag = self.drag.inner.borrow_mut();
+                let drag_position = {
+                    let mut drag = self.interaction_state.drag.inner.borrow_mut();
 
                     if !drag.dragging {
                         let moved = (position.x - drag.press_x).abs();
@@ -282,6 +317,11 @@ impl Switch {
                             metrics,
                         ));
                     }
+                    drag.dragging.then_some(drag.drag_position).flatten()
+                };
+
+                if let Some(drag_position) = drag_position {
+                    self.update_thumb_shape_for_drag(drag_position, *position);
                 }
 
                 context.request_redraw_in(bounds.expanded(16.0));
@@ -294,7 +334,7 @@ impl Switch {
                 button: PointerButton::Primary,
             } => {
                 let release = {
-                    let mut drag = self.drag.inner.borrow_mut();
+                    let mut drag = self.interaction_state.drag.inner.borrow_mut();
 
                     if !drag.tracking {
                         None
@@ -324,25 +364,25 @@ impl Switch {
                         drag.drag_offset_x = 0.0;
                         drag.drag_position = None;
 
-                        Some((was_dragging, final_position >= 0.5))
+                        Some((was_dragging, final_position))
                     }
                 };
 
-                let Some((was_dragging, drag_checked)) = release else {
+                let Some((was_dragging, final_position)) = release else {
                     return EventResult::Ignored;
                 };
 
                 if was_dragging {
-                    self.checked.set_if_changed(drag_checked);
-                } else if bounds.contains_rounded(
-                    context.theme.button.radius.resolve(
-                        &context.theme.radius,
-                        bounds.size.width,
-                        bounds.size.height,
-                    ),
-                    *position,
-                ) {
-                    self.checked.set(!self.checked.get());
+                    self.update_thumb_shape_for_drag(final_position, *position);
+                }
+                if self.interaction_state.thumb_shape.is_active() {
+                    self.interaction_state.thumb_shape.end();
+                }
+
+                if was_dragging {
+                    self.start_settle(final_position, final_position >= 0.5);
+                } else if bounds.contains(*position) {
+                    self.start_toggle();
                 }
 
                 context.request_redraw_in(bounds.expanded(16.0));
@@ -351,7 +391,7 @@ impl Switch {
             }
 
             ViewEvent::PointerLeft => {
-                if self.drag.inner.borrow().tracking {
+                if self.interaction_state.drag.inner.borrow().tracking {
                     EventResult::Consumed
                 } else {
                     EventResult::Ignored
@@ -360,7 +400,7 @@ impl Switch {
 
             ViewEvent::FocusChanged { focused: false } => {
                 let _final_position = {
-                    let mut drag = self.drag.inner.borrow_mut();
+                    let mut drag = self.interaction_state.drag.inner.borrow_mut();
 
                     if !drag.tracking {
                         return EventResult::Ignored;
@@ -370,14 +410,26 @@ impl Switch {
                         .drag_position
                         .unwrap_or_else(|| bool_position(self.checked.get()));
 
+                    let target = if position >= 0.5 { 1.0 } else { 0.0 };
+
                     drag.tracking = false;
                     drag.drag_candidate = false;
                     drag.dragging = false;
                     drag.drag_position = None;
                     drag.drag_offset_x = 0.0;
 
+                    drag.settle_animation = Some(SwitchPositionAnimation {
+                        from: position,
+                        to: target,
+                        started_at: Instant::now(),
+                    });
+
+                    self.checked.set_without_notification(target >= 0.5);
+
                     position
                 };
+
+                self.interaction_state.thumb_shape.end();
 
                 context.request_redraw_in(bounds.expanded(16.0));
 
@@ -389,14 +441,50 @@ impl Switch {
     }
 }
 
+impl Switch {
+    fn start_toggle(&self) {
+        let from = bool_position(self.checked.get());
+        self.start_settle(from, from < 0.5);
+    }
+
+    fn update_thumb_shape_for_drag(&self, progress: f32, position: Point) {
+        let shape = &self.interaction_state.thumb_shape;
+        let at_wall = progress <= f32::EPSILON || progress >= 1.0 - f32::EPSILON;
+        if at_wall {
+            if shape.is_active() {
+                shape.end();
+            }
+        } else if shape.is_active() {
+            shape.moved(position);
+        } else {
+            // Begin at the first unconstrained position. Pointer travel while
+            // pinned to either end must never become a velocity impulse.
+            shape.begin(position);
+        }
+    }
+
+    fn start_settle(&self, from: f32, target: bool) {
+        self.checked.set_without_notification(target);
+        self.interaction_state
+            .drag
+            .inner
+            .borrow_mut()
+            .settle_animation = Some(SwitchPositionAnimation {
+            from,
+            to: bool_position(target),
+            started_at: Instant::now(),
+        });
+    }
+}
+
 impl View for Switch {
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
         self.button(context.theme).measure(constraints, context)
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
-        if !self.enabled {
-            *self.drag.inner.borrow_mut() = SwitchDragInner::default();
+        if !self.enabled && self.interaction_state.thumb_shape.is_animating() {
+            self.interaction_state.thumb_shape.reset();
         }
         self.button(context.theme).paint(bounds, context);
     }
@@ -425,8 +513,10 @@ struct SwitchMark {
     transition: Option<Transition<bool>>,
     enabled: bool,
     interaction: ButtonInteractionState,
-    thumb: Rc<RefCell<SwitchThumb>>,
+    knob_width_animation: Arc<Mutex<KnobWidthAnimationState>>,
     drag: SwitchDragState,
+    checked_binding: Binding<bool>,
+    thumb_shape: OmochiShape,
 }
 
 impl View for SwitchMark {
@@ -443,60 +533,32 @@ impl View for SwitchMark {
         let pressed = self.interaction.is_pressed() || dragging;
 
         let now = Instant::now();
+        let motion = context.theme.motion.toggle;
         let metrics = SwitchMetrics::from_theme(context.theme);
-        let mut motion = context.theme.motion.omochi;
-        motion.enabled &= self.enabled;
-        let progress = self
-            .drag
-            .inner
-            .borrow()
-            .drag_position
-            .unwrap_or_else(|| bool_position(self.checked));
-        let left = metrics.knob_inset + metrics.knob_width * 0.5;
-        let travel = (bounds.size.width - metrics.knob_inset * 2.0 - metrics.knob_width).max(0.0);
-        let target = left + travel * progress;
-        let mut thumb = self.thumb.borrow_mut();
-        if let Some(transition) = self
-            .transition
-            .filter(|t| t.to == self.checked && t.from != t.to)
-        {
-            // A default-constructed switch can resume a bound-value transition as well.
-            if now.saturating_duration_since(transition.started_at)
-                < context.theme.motion.toggle.duration
-            {
-                thumb.initialize(
-                    left + travel * bool_position(transition.from),
-                    transition.started_at,
-                );
-            }
+
+        let (position, position_redraw) = self.visual_position(now, motion);
+
+        let (knob_width, width_redraw) = self.animated_knob_width(now, motion, pressed, metrics);
+
+        if let Some(next_redraw) = position_redraw.into_iter().chain(width_redraw).min() {
+            context.request_redraw_in_at(bounds.expanded(16.0), next_redraw);
         }
-        let next = thumb.sample(
-            target,
-            pressed,
-            dragging,
-            metrics.knob_height / 18.0,
-            motion,
-            now,
-        );
-        if let Some(next) = next {
-            context.request_redraw_in_at(bounds.expanded(16.0), next);
-        }
-        let position = if travel > 0.0 {
-            ((thumb.center - left) / travel).clamp(0.0, 1.0)
-        } else {
-            progress
-        };
+
         let track_color = self.track_color(context.theme, hovered, pressed, position);
+
         Rectangle::new()
             .color(RectangleColor::Custom(track_color))
             .radius(CornerRadius::Full)
             .paint(bounds, context);
-        let knob_bounds = Rect::new(
-            bounds.origin.x + thumb.center - metrics.knob_width * 0.5,
-            bounds.origin.y + (bounds.size.height - metrics.knob_height) * 0.5,
-            metrics.knob_width,
-            metrics.knob_height,
-        );
+
+        let knob_left = bounds.origin.x + metrics.knob_inset;
+
+        let knob_right = bounds.origin.x + bounds.size.width - metrics.knob_inset - knob_width;
+
+        let knob_x = interpolate(knob_left, knob_right, position);
+        let knob_y = bounds.origin.y + (bounds.size.height - metrics.knob_height) / 2.0;
+
+        let knob_bounds = Rect::new(knob_x, knob_y, knob_width, metrics.knob_height);
 
         let knob_color = if self.enabled {
             context.theme.switch.knob
@@ -510,35 +572,27 @@ impl View for SwitchMark {
             ShadowStyle::None
         };
 
-        if knob_shadow != ShadowStyle::None {
-            Rectangle::new()
-                .color(RectangleColor::Custom(Color::TRANSPARENT))
-                .radius(CornerRadius::Full)
-                .shadow(knob_shadow)
-                .paint(knob_bounds, context);
-        }
-        if thumb.stretch < 0.001 && thumb.press < 0.001 {
+        if self.thumb_shape.is_animating() {
+            self.thumb_shape.paint_styled(
+                knob_bounds,
+                knob_bounds.size.height / 2.0,
+                knob_color,
+                context.theme.switch.knob_border,
+                context.theme.switch.stroke_width,
+                knob_shadow,
+                context,
+            );
+        } else {
             Rectangle::new()
                 .color(RectangleColor::Custom(knob_color))
                 .radius(CornerRadius::Full)
+                .border(super::BorderStyle::custom(
+                    context.theme.switch.knob_border,
+                    context.theme.switch.stroke_width,
+                ))
+                .shadow(knob_shadow)
                 .paint(knob_bounds, context);
-            return;
         }
-        let points = thumb
-            .contour(
-                bounds.size.height * 0.5,
-                metrics.knob_width,
-                metrics.knob_height,
-            )
-            .into_iter()
-            .map(|p| crate::geometry::Point::new(p.x + bounds.origin.x, p.y + bounds.origin.y))
-            .collect();
-        context.display_list.push(DrawCommand::DrawContour {
-            points,
-            fill: knob_color,
-            stroke: Color::TRANSPARENT,
-            stroke_width: 0.0,
-        });
     }
 }
 
@@ -568,6 +622,122 @@ impl SwitchMark {
             with_opacity(color, theme.switch.disabled_opacity)
         }
     }
+
+    fn visual_position(&self, now: Instant, motion: Motion) -> (f32, Option<Instant>) {
+        let mut completed_target = None;
+
+        let animation_result = {
+            let mut drag = self.drag.inner.borrow_mut();
+
+            if let Some(position) = drag.drag_position {
+                return (position, None);
+            }
+
+            if let Some(animation) = drag.settle_animation {
+                let sample = Animation::new(animation.started_at, motion.duration)
+                    .easing(motion.easing)
+                    .sample(now);
+
+                let position = interpolate(animation.from, animation.to, sample.progress);
+
+                let next_redraw = sample.next_redraw_at;
+
+                if next_redraw.is_none() {
+                    drag.settle_animation = None;
+                    completed_target = Some(animation.to >= 0.5);
+                }
+
+                Some((position, next_redraw))
+            } else {
+                None
+            }
+        };
+
+        if let Some(target) = completed_target {
+            self.checked_binding.set_without_notification(target);
+            self.checked_binding.commit();
+        }
+
+        if let Some(result) = animation_result {
+            return result;
+        }
+
+        self.animation_position(now, motion)
+    }
+
+    fn animation_position(&self, now: Instant, motion: Motion) -> (f32, Option<Instant>) {
+        let target = bool_position(self.checked);
+
+        let Some(transition) = self.transition else {
+            return (target, None);
+        };
+
+        if transition.to != self.checked || transition.from == transition.to {
+            return (target, None);
+        }
+
+        let sample = Animation::new(transition.started_at, motion.duration)
+            .easing(motion.easing)
+            .sample(now);
+
+        let position = interpolate(
+            bool_position(transition.from),
+            bool_position(transition.to),
+            sample.progress,
+        );
+
+        (position, sample.next_redraw_at)
+    }
+
+    fn animated_knob_width(
+        &self,
+        now: Instant,
+        motion: Motion,
+        pressed: bool,
+        metrics: SwitchMetrics,
+    ) -> (f32, Option<Instant>) {
+        let mut state = self
+            .knob_width_animation
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        let current_width = match state.animation {
+            Some(animation) => {
+                let sample = Animation::new(animation.started_at, motion.duration)
+                    .easing(motion.easing)
+                    .sample(now);
+
+                interpolate(animation.from, animation.to, sample.progress)
+            }
+            None => knob_width_for_pressed(state.pressed, metrics),
+        };
+
+        if state.pressed != pressed {
+            state.pressed = pressed;
+            state.animation = Some(KnobWidthAnimation {
+                from: current_width,
+                to: knob_width_for_pressed(pressed, metrics),
+                started_at: now,
+            });
+        }
+
+        let Some(animation) = state.animation else {
+            return (knob_width_for_pressed(pressed, metrics), None);
+        };
+
+        let sample = Animation::new(animation.started_at, motion.duration)
+            .easing(motion.easing)
+            .sample(now);
+
+        let width = interpolate(animation.from, animation.to, sample.progress);
+        let next_redraw = sample.next_redraw_at;
+
+        if next_redraw.is_none() {
+            state.animation = None;
+        }
+
+        (width, next_redraw)
+    }
 }
 
 fn with_opacity(color: Color, opacity: f32) -> Color {
@@ -582,6 +752,14 @@ fn with_opacity(color: Color, opacity: f32) -> Color {
 
 fn bool_position(value: bool) -> f32 {
     if value { 1.0 } else { 0.0 }
+}
+
+fn knob_width_for_pressed(pressed: bool, metrics: SwitchMetrics) -> f32 {
+    if pressed {
+        metrics.pressed_knob_width
+    } else {
+        metrics.knob_width
+    }
 }
 
 fn knob_center_x(bounds: Rect, knob_width: f32, progress: f32, metrics: SwitchMetrics) -> f32 {
@@ -609,7 +787,7 @@ fn drag_progress_from_pointer(
     drag_offset_x: f32,
     metrics: SwitchMetrics,
 ) -> f32 {
-    let knob_width = metrics.knob_width;
+    let knob_width = metrics.pressed_knob_width;
 
     let left = bounds.origin.x + metrics.knob_inset + knob_width / 2.0;
 
@@ -626,58 +804,10 @@ fn drag_progress_from_pointer(
 
 #[cfg(test)]
 mod tests {
-    use super::SwitchMetrics;
+    use super::{Switch, SwitchInteractionState, SwitchMetrics};
+    use crate::geometry::Point;
+    use crate::state::State;
     use crate::theme::Theme;
-
-    #[test]
-    fn dragging_commits_on_release_and_painting_never_changes_the_bound_value() {
-        use super::*;
-        use crate::{
-            draw_command::DisplayList, platform::PointerButton, prelude::*,
-            typography::TextMeasurer,
-        };
-        let value = State::new(false);
-        let state = SwitchInteractionState::new();
-        let switch = Switch::with_interaction(value.binding(), state.clone());
-        let theme = Theme::LIGHT;
-        let mut text = TextMeasurer::new();
-        let mut list = DisplayList::new();
-        let bounds = Rect::new(0.0, 0.0, 80.0, 32.0);
-        switch.paint(
-            bounds,
-            &mut PaintContext::new(&mut list, &theme, &theme.typography, &mut text),
-        );
-        let mark = state.drag.inner.borrow().mark_bounds.unwrap();
-        let start = Point::new(mark.origin.x + 8.0, mark.origin.y + mark.size.height * 0.5);
-        let end = Point::new(mark.origin.x + mark.size.width - 3.0, start.y);
-        let mut context = EventContext::new(&theme, &theme.typography, &mut text);
-        for event in [
-            ViewEvent::PointerPressed {
-                position: start,
-                button: PointerButton::Primary,
-            },
-            ViewEvent::PointerMoved { position: end },
-            ViewEvent::PointerReleased {
-                position: end,
-                button: PointerButton::Primary,
-            },
-        ] {
-            switch.handle_event(bounds, &event, &mut context);
-        }
-        assert!(
-            value.get(),
-            "release must commit before any animation frames"
-        );
-        let rebuilt = Switch::with_interaction(value.binding(), state.clone());
-        for _ in 0..4 {
-            rebuilt.paint(
-                bounds,
-                &mut PaintContext::new(&mut list, &theme, &theme.typography, &mut text),
-            );
-            assert!(value.get());
-        }
-        assert!(!state.drag.inner.borrow().tracking);
-    }
 
     #[test]
     fn default_thumb_is_slightly_wider_than_tall() {
@@ -686,15 +816,29 @@ mod tests {
     }
 
     #[test]
-    fn thumb_width_is_derived_from_theme_height_and_aspect_ratio() {
+    fn thumb_uses_switch_specific_geometry_tokens() {
         let mut theme = Theme::LIGHT;
-        theme.layout.control_thumb_height = 16.0;
-        theme.layout.control_thumb_aspect_ratio = 1.25;
-        theme.layout.control_pressed_thumb_aspect_ratio = 1.5;
+        theme.layout.switch_knob_height = 16.0;
+        theme.layout.switch_knob_width = 20.0;
+        theme.layout.switch_pressed_knob_width = 24.0;
 
         let metrics = SwitchMetrics::from_theme(&theme);
         assert_eq!(metrics.knob_height, 16.0);
         assert_eq!(metrics.knob_width, 20.0);
-        assert!(metrics.knob_width <= metrics.track_width - metrics.knob_inset * 2.0);
+        assert_eq!(metrics.pressed_knob_width, 24.0);
+    }
+
+    #[test]
+    fn end_stop_releases_velocity_without_snapping_the_thumb() {
+        let checked = State::new(false);
+        let interaction = SwitchInteractionState::new();
+        let switch = Switch::with_interaction(checked.binding(), interaction.clone());
+        interaction.thumb_shape.begin(Point::new(10.0, 0.0));
+        interaction.thumb_shape.moved(Point::new(20.0, 0.0));
+
+        switch.update_thumb_shape_for_drag(1.0, Point::new(80.0, 0.0));
+
+        assert!(!interaction.thumb_shape.is_active());
+        assert!(interaction.thumb_shape.is_animating());
     }
 }

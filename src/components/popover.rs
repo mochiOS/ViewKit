@@ -78,6 +78,7 @@ impl<Content: View> View for Popover<Content> {
         Rectangle::new()
             .color(RectangleColor::Custom(context.theme.popover.background))
             .radius(context.theme.popover.radius)
+            .shadow(context.theme.popover.shadow)
             .border(BorderStyle::custom(
                 context.theme.popover.border,
                 context.theme.popover.stroke_width,

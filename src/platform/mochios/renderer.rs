@@ -161,6 +161,18 @@ pub(super) fn render_display_list(
                     pixmap.fill_rect(rect, &paint, transform, clip_masks.get(clip_depth));
                 }
             }
+            DrawCommand::FillPolygon { points, color } => {
+                let points = crate::contour::clean(points);
+                if points.len() < 3 { continue; }
+                let mut builder = PathBuilder::new();
+                builder.move_to(points[0].x, points[0].y);
+                for point in &points[1..] { builder.line_to(point.x, point.y); }
+                builder.close();
+                if let Some(path) = builder.finish() {
+                    pixmap.fill_path(&path, &solid_paint(*color), FillRule::Winding,
+                        transform, clip_masks.get(clip_depth));
+                }
+            }
             DrawCommand::DrawContour {
                 points,
                 fill,

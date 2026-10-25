@@ -99,9 +99,8 @@ impl<Sidebar, Detail> NavigationSplitView<Sidebar, Detail> {
     }
 
     fn resolved_insets(&self, theme: &Theme) -> EdgeInsets {
-        self.sidebar_insets.unwrap_or_else(|| {
-            EdgeInsets::symmetric(theme.spacing.medium, theme.spacing.large)
-        })
+        self.sidebar_insets
+            .unwrap_or_else(|| EdgeInsets::symmetric(theme.spacing.medium, theme.spacing.large))
     }
 
     fn resolved_divider_width(&self, theme: &Theme) -> f32 {
@@ -115,8 +114,7 @@ impl<Sidebar, Detail> NavigationSplitView<Sidebar, Detail> {
     fn resolved_sidebar_width(&self, available_width: f32, theme: &Theme) -> f32 {
         let available_width = sanitize(available_width);
         let divider = self.resolved_divider_width(theme).min(available_width);
-        let room_before_detail =
-            (available_width - divider - self.minimum_detail_width).max(0.0);
+        let room_before_detail = (available_width - divider - self.minimum_detail_width).max(0.0);
         match self.sidebar_width {
             SidebarWidth::Fixed(width) => width.min((available_width - divider).max(0.0)),
             SidebarWidth::Flexible {
@@ -129,7 +127,11 @@ impl<Sidebar, Detail> NavigationSplitView<Sidebar, Detail> {
                 let ideal = ideal
                     .unwrap_or(theme.layout.navigation_sidebar_width)
                     .clamp(minimum, maximum);
-                ideal.min(room_before_detail.max(minimum).min(available_width - divider))
+                ideal.min(
+                    room_before_detail
+                        .max(minimum)
+                        .min(available_width - divider),
+                )
             }
         }
     }

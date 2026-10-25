@@ -266,7 +266,7 @@ mod tests {
         assert!(display_list.commands().iter().any(|command| matches!(
             command,
             DrawCommand::DrawContour { points, .. }
-                if points[0] == Point::new(240.0,48.0) && points[1] == Point::new(250.0,48.0)
+                if points[0] == Point::new(240.0,48.0) && points[1] == Point::new(240.0 + Theme::LIGHT.radius.medium,48.0)
         )));
         let corner_index = display_list
             .commands()
@@ -274,7 +274,7 @@ mod tests {
             .position(|command| matches!(
                 command,
                 DrawCommand::DrawContour { points, .. }
-                    if points[0] == Point::new(240.0,48.0) && points[1] == Point::new(250.0,48.0)
+                    if points[0] == Point::new(240.0,48.0) && points[1] == Point::new(240.0 + Theme::LIGHT.radius.medium,48.0)
             ))
             .expect("inner corner");
         let detail_index = display_list

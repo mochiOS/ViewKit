@@ -2,6 +2,7 @@
 //! 座標は操作面内の論理px。描画・操作範囲・文字配置とは独立して保持します。
 use crate::geometry::{Point, Rect};
 use std::time::{Duration, Instant};
+#[path = "moving.rs"]
 pub(crate) mod moving;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -535,4 +536,5 @@ pub fn button_contour(
 }
 
 #[cfg(test)]
+#[path = "tests.rs"]
 mod tests;

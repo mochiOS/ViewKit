@@ -1,5 +1,6 @@
 use super::renderer::valid_scale_factor;
 use super::*;
+use crate::geometry::Point;
 use crate::gpu_clip::{ClipRegion, ClipShape, ClipVertex, clip_polygon, premultiplied_color};
 use cosmic_text::{CacheKey, SwashContent, SwashImage};
 
@@ -217,6 +218,9 @@ impl GpuSceneRenderer {
                 }
                 DrawCommand::FillEllipse { rect, color } => {
                     self.ellipse(*rect, *color, viewport);
+                }
+                DrawCommand::FillPolygon { points, color } => {
+                    self.polygon(points, *color, viewport);
                 }
                 DrawCommand::StrokeRect { rect, color, width } => {
                     self.stroke_rect(*rect, *width, *color, viewport);
@@ -528,6 +532,66 @@ impl GpuSceneRenderer {
             viewport,
             true,
         );
+    }
+
+    fn polygon(&mut self, points: &[Point], color: Color, viewport: Viewport) {
+        if points.len() < 3 {
+            return;
+        }
+
+        let inner = offset_polygon(points, -0.5);
+        let outer = offset_polygon(points, 0.5);
+        let triangles = triangulate_for_fill(points, &inner);
+
+        let white = AtlasRect {
+            x: 0,
+            y: 0,
+            width: 1,
+            height: 1,
+        };
+
+        let uv = self.uv_center(white);
+
+        for triangle in triangles {
+            self.push_triangle(
+                [
+                    (triangle[0].x, triangle[0].y),
+                    (triangle[1].x, triangle[1].y),
+                    (triangle[2].x, triangle[2].y),
+                ],
+                [uv; 3],
+                color,
+                viewport,
+            );
+        }
+
+        let clear = transparent(color);
+
+        for index in 0..inner.len() {
+            let next = (index + 1) % inner.len();
+
+            self.push_triangle_colors(
+                [
+                    (inner[index].x, inner[index].y),
+                    (outer[index].x, outer[index].y),
+                    (outer[next].x, outer[next].y),
+                ],
+                [uv; 3],
+                [color, clear, clear],
+                viewport,
+            );
+
+            self.push_triangle_colors(
+                [
+                    (inner[index].x, inner[index].y),
+                    (outer[next].x, outer[next].y),
+                    (inner[next].x, inner[next].y),
+                ],
+                [uv; 3],
+                [color, clear, color],
+                viewport,
+            );
+        }
     }
 
     fn fan(
@@ -1508,4 +1572,339 @@ fn ellipse_points(rect: Rect) -> Vec<(f32, f32)> {
             (center_x + angle.cos() * rx, center_y + angle.sin() * ry)
         })
         .collect()
+}
+
+
+fn triangulate_polygon(points: &[Point]) -> Vec<[Point; 3]> {
+    const EPSILON: f32 = 0.00001;
+
+    if points.len() < 3 {
+        return Vec::new();
+    }
+
+    let mut points = remove_duplicate_points(points, EPSILON);
+
+    if points.len() < 3 {
+        return Vec::new();
+    }
+
+    remove_collinear_points(&mut points, EPSILON);
+
+    if points.len() < 3 {
+        return Vec::new();
+    }
+
+    let counter_clockwise = polygon_signed_area(&points) > 0.0;
+    let mut indices: Vec<usize> = (0..points.len()).collect();
+    let mut triangles = Vec::with_capacity(points.len().saturating_sub(2));
+
+    while indices.len() > 3 {
+        let mut clipped = false;
+
+        for index in 0..indices.len() {
+            let previous = indices[(index + indices.len() - 1) % indices.len()];
+            let current = indices[index];
+            let next = indices[(index + 1) % indices.len()];
+
+            let a = points[previous];
+            let b = points[current];
+            let c = points[next];
+
+            let cross = cross_product(a, b, c);
+
+            if cross.abs() <= EPSILON {
+                indices.remove(index);
+                clipped = true;
+                break;
+            }
+
+            if counter_clockwise {
+                if cross < 0.0 {
+                    continue;
+                }
+            } else if cross > 0.0 {
+                continue;
+            }
+
+            let contains_point = indices.iter().copied().any(|candidate| {
+                if candidate == previous || candidate == current || candidate == next {
+                    return false;
+                }
+
+                point_strictly_in_triangle(points[candidate], a, b, c, EPSILON)
+            });
+
+            if contains_point {
+                continue;
+            }
+
+            triangles.push([a, b, c]);
+            indices.remove(index);
+            clipped = true;
+            break;
+        }
+
+        if !clipped {
+            break;
+        }
+    }
+
+    if indices.len() == 3 {
+        triangles.push([points[indices[0]], points[indices[1]], points[indices[2]]]);
+    }
+
+    triangles
+}
+
+fn normalized_polygon(points: &[Point]) -> Vec<Point> {
+    const EPSILON: f32 = 0.00001;
+    let mut normalized = remove_duplicate_points(points, EPSILON);
+    remove_collinear_points(&mut normalized, EPSILON);
+    normalized
+}
+
+fn complete_triangulation(points: &[Point]) -> Option<Vec<[Point; 3]>> {
+    let normalized = normalized_polygon(points);
+    if normalized.len() < 3
+        || polygon_signed_area(&normalized).abs() <= 0.00001
+        || !is_simple_polygon(&normalized)
+    {
+        return None;
+    }
+    let triangles = triangulate_polygon(&normalized);
+    (triangles.len() == normalized.len() - 2).then_some(triangles)
+}
+
+fn is_simple_polygon(points: &[Point]) -> bool {
+    let count = points.len();
+    for first in 0..count {
+        let first_next = (first + 1) % count;
+        for second in (first + 1)..count {
+            let second_next = (second + 1) % count;
+            if first == second
+                || first_next == second
+                || second_next == first
+                || first == 0 && second_next == 0
+            {
+                continue;
+            }
+            if segments_intersect(
+                points[first],
+                points[first_next],
+                points[second],
+                points[second_next],
+            ) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn segments_intersect(a: Point, b: Point, c: Point, d: Point) -> bool {
+    const EPSILON: f32 = 0.00001;
+    let ab_c = cross_product(a, b, c);
+    let ab_d = cross_product(a, b, d);
+    let cd_a = cross_product(c, d, a);
+    let cd_b = cross_product(c, d, b);
+    ab_c * ab_d < -EPSILON && cd_a * cd_b < -EPSILON
+}
+
+fn triangulate_for_fill(points: &[Point], inset: &[Point]) -> Vec<[Point; 3]> {
+    complete_triangulation(inset)
+        .or_else(|| complete_triangulation(points))
+        .unwrap_or_else(|| center_fan(points))
+}
+
+fn center_fan(points: &[Point]) -> Vec<[Point; 3]> {
+    let points = normalized_polygon(points);
+    if points.len() < 3 {
+        return Vec::new();
+    }
+    let center = points.iter().fold(Point::new(0.0, 0.0), |sum, point| {
+        Point::new(sum.x + point.x, sum.y + point.y)
+    });
+    let center = Point::new(
+        center.x / points.len() as f32,
+        center.y / points.len() as f32,
+    );
+    (0..points.len())
+        .map(|index| [center, points[index], points[(index + 1) % points.len()]])
+        .collect()
+}
+
+fn remove_duplicate_points(points: &[Point], epsilon: f32) -> Vec<Point> {
+    let epsilon_squared = epsilon * epsilon;
+    let mut output = Vec::with_capacity(points.len());
+
+    for &point in points {
+        let duplicate = output.last().is_some_and(|previous: &Point| {
+            let dx = point.x - previous.x;
+            let dy = point.y - previous.y;
+
+            dx * dx + dy * dy <= epsilon_squared
+        });
+
+        if !duplicate {
+            output.push(point);
+        }
+    }
+
+    if output.len() > 1 {
+        let first = output[0];
+        let last = output[output.len() - 1];
+        let dx = first.x - last.x;
+        let dy = first.y - last.y;
+
+        if dx * dx + dy * dy <= epsilon_squared {
+            output.pop();
+        }
+    }
+
+    output
+}
+
+fn remove_collinear_points(points: &mut Vec<Point>, epsilon: f32) {
+    loop {
+        if points.len() <= 3 {
+            return;
+        }
+
+        let mut removed = false;
+
+        for index in 0..points.len() {
+            let previous = points[(index + points.len() - 1) % points.len()];
+            let current = points[index];
+            let next = points[(index + 1) % points.len()];
+
+            if cross_product(previous, current, next).abs() <= epsilon {
+                points.remove(index);
+                removed = true;
+                break;
+            }
+        }
+
+        if !removed {
+            return;
+        }
+    }
+}
+
+fn point_strictly_in_triangle(point: Point, a: Point, b: Point, c: Point, epsilon: f32) -> bool {
+    let first = cross_product(a, b, point);
+    let second = cross_product(b, c, point);
+    let third = cross_product(c, a, point);
+
+    (first > epsilon && second > epsilon && third > epsilon)
+        || (first < -epsilon && second < -epsilon && third < -epsilon)
+}
+
+fn polygon_signed_area(points: &[Point]) -> f32 {
+    let mut area = 0.0;
+
+    for index in 0..points.len() {
+        let current = points[index];
+        let next = points[(index + 1) % points.len()];
+
+        area += current.x * next.y - next.x * current.y;
+    }
+
+    area * 0.5
+}
+
+fn cross_product(a: Point, b: Point, c: Point) -> f32 {
+    (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+}
+
+fn offset_polygon(points: &[Point], distance: f32) -> Vec<Point> {
+    if points.len() < 3 {
+        return points.to_vec();
+    }
+
+    let orientation = if polygon_signed_area(points) >= 0.0 {
+        1.0
+    } else {
+        -1.0
+    };
+
+    let count = points.len();
+    let mut output = Vec::with_capacity(count);
+
+    for index in 0..count {
+        let previous = points[(index + count - 1) % count];
+        let current = points[index];
+        let next = points[(index + 1) % count];
+
+        let previous_normal = edge_outward_normal(previous, current, orientation);
+        let next_normal = edge_outward_normal(current, next, orientation);
+
+        let mut normal = Point::new(
+            previous_normal.x + next_normal.x,
+            previous_normal.y + next_normal.y,
+        );
+
+        let length = normal.x.hypot(normal.y);
+
+        if length < 0.0001 {
+            normal = next_normal;
+        } else {
+            normal.x /= length;
+            normal.y /= length;
+        }
+
+        let alignment = (normal.x * next_normal.x + normal.y * next_normal.y)
+            .abs()
+            .max(0.5);
+
+        let scale = distance / alignment;
+
+        output.push(Point::new(
+            current.x + normal.x * scale,
+            current.y + normal.y * scale,
+        ));
+    }
+
+    output
+}
+
+fn edge_outward_normal(start: Point, end: Point, orientation: f32) -> Point {
+    let dx = end.x - start.x;
+    let dy = end.y - start.y;
+    let length = dx.hypot(dy);
+
+    if length < 0.0001 {
+        return Point::new(0.0, 0.0);
+    }
+
+    Point::new(dy / length * orientation, -dx / length * orientation)
+}
+
+#[cfg(test)]
+mod polygon_tests {
+    use super::*;
+    use crate::omochi::rounded_rect_points;
+
+    #[test]
+    fn dense_rounded_contour_is_fully_triangulated() {
+        let points = rounded_rect_points(80.0, 28.0, 8.0, 10);
+        let normalized_count = normalized_polygon(&points).len();
+        let triangles = complete_triangulation(&points).expect("rounded contour");
+        assert_eq!(triangles.len(), normalized_count - 2);
+    }
+
+    #[test]
+    fn invalid_inset_falls_back_to_the_original_contour() {
+        let points = rounded_rect_points(80.0, 28.0, 8.0, 10);
+        let invalid_inset = [
+            Point::new(0.0, 0.0),
+            Point::new(10.0, 10.0),
+            Point::new(0.0, 10.0),
+            Point::new(10.0, 0.0),
+        ];
+        let triangles = triangulate_for_fill(&points, &invalid_inset);
+        assert_eq!(
+            triangles.len(),
+            normalized_polygon(&points).len().saturating_sub(2)
+        );
+    }
 }

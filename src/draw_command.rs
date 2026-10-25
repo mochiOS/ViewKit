@@ -36,6 +36,11 @@ pub enum DrawCommand {
         color: Color,
     },
 
+    FillPolygon {
+        points: Vec<Point>,
+        color: Color,
+    },
+
     StrokeEllipse {
         rect: Rect,
         color: Color,
@@ -156,6 +161,12 @@ impl PaintTransform {
 
     fn command(self, command: &mut DrawCommand) {
         match command {
+            DrawCommand::FillPolygon { points, color } => {
+                for point in points {
+                    *point = self.point(*point);
+                }
+                *color = self.color(*color);
+            }
             DrawCommand::DrawContour {
                 points,
                 fill,

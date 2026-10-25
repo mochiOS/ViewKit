@@ -1,0 +1,723 @@
+use viewkit::prelude::*;
+
+struct ComponentsGallery {
+    theme_mode: State<usize>,
+    gallery_page: State<usize>,
+    omochi_button: ButtonInteractionState,
+    omochi_icon: IconButtonInteractionState,
+    omochi_switch: SwitchInteractionState,
+    omochi_slider: SliderInteractionState,
+    omochi_range: RangeSliderInteractionState,
+    omochi_segment: SegmentedControlInteractionState,
+    omochi_tabs: TabsInteractionState,
+    checked: State<bool>,
+    switched: State<bool>,
+    radio: State<usize>,
+    segment: State<usize>,
+    tab: State<usize>,
+    slider: State<f32>,
+    range_lower: State<f32>,
+    range_upper: State<f32>,
+    stepper: State<i32>,
+    field: State<String>,
+    editor: State<String>,
+    picker: State<String>,
+    dialog_open: State<bool>,
+    popover_open: State<bool>,
+    status: State<String>,
+    image: ImageData,
+    svg: SvgData,
+}
+
+impl ComponentsGallery {
+    fn section(title: &str, subtitle: &str, content: impl View + 'static) -> StackChild {
+        VStack::new()
+            .alignment(StackAlignment::Stretch)
+            .gap(StackGap::Small)
+            .child(
+                VStack::new()
+                    .alignment(StackAlignment::Start)
+                    .gap(StackGap::ExtraSmall)
+                    .child(Text::body_emphasized(title))
+                    .child(Text::caption(subtitle).tone(TextTone::Secondary)),
+            )
+            .child(content)
+            .layout()
+    }
+
+    fn sidebar_item(&self, index: usize, label: &'static str) -> SidebarItem {
+        let selection = self.gallery_page.clone();
+        SidebarItem::new(label)
+            .selected(self.gallery_page.get() == index)
+            .on_select(move || selection.set(index))
+    }
+
+    fn gallery_sidebar(&self) -> VStack {
+        VStack::new()
+            .alignment(StackAlignment::Stretch)
+            .gap(StackGap::Medium)
+            .child(
+                VStack::new()
+                    .alignment(StackAlignment::Start)
+                    .gap(StackGap::ExtraSmall)
+                    .child(Text::body_emphasized("Components"))
+                    .child(Text::caption("ViewKit Library").tone(TextTone::Secondary)),
+            )
+            .child(
+                SidebarSection::new("INTERACTIONS")
+                    .item(self.sidebar_item(0, "Omochi & Actions"))
+                    .item(self.sidebar_item(1, "Inputs & Selection")),
+            )
+            .child(
+                SidebarSection::new("FOUNDATIONS")
+                    .item(self.sidebar_item(2, "Navigation"))
+                    .item(self.sidebar_item(3, "Type & Feedback"))
+                    .item(self.sidebar_item(4, "Surfaces & Layout")),
+            )
+            .child(SidebarSection::new("SYSTEM").item(self.sidebar_item(5, "Overlays & Menus")))
+    }
+
+    fn gallery_detail(&self) -> StackChild {
+        let (title, subtitle, content) = match self.gallery_page.get().min(5) {
+            0 => (
+                "Omochi & Actions",
+                "Direct manipulation, action hierarchy, and retained viscoelastic feedback.",
+                VStack::new()
+                    .alignment(StackAlignment::Stretch)
+                    .gap(StackGap::ExtraLarge)
+                    .child(self.omochi_lab())
+                    .child(self.buttons())
+                    .layout(),
+            ),
+            1 => (
+                "Inputs & Selection",
+                "Editable values, validation, keyboard focus, and selection controls.",
+                VStack::new()
+                    .alignment(StackAlignment::Stretch)
+                    .gap(StackGap::ExtraLarge)
+                    .child(self.inputs())
+                    .child(self.selection())
+                    .layout(),
+            ),
+            2 => (
+                "Navigation",
+                "Tabs, sidebars, lists, toolbars, and split-view behavior.",
+                self.navigation(),
+            ),
+            3 => (
+                "Type & Feedback",
+                "Semantic typography, status, progress, messages, and transient help.",
+                VStack::new()
+                    .alignment(StackAlignment::Stretch)
+                    .gap(StackGap::ExtraLarge)
+                    .child(self.typography())
+                    .child(self.feedback())
+                    .layout(),
+            ),
+            4 => (
+                "Surfaces & Layout",
+                "Application containers, media, forms, settings, and adaptive layout.",
+                VStack::new()
+                    .alignment(StackAlignment::Stretch)
+                    .gap(StackGap::ExtraLarge)
+                    .child(self.surfaces())
+                    .child(self.application_patterns())
+                    .layout(),
+            ),
+            _ => (
+                "Overlays & Menus",
+                "Menus, contextual actions, popovers, and modal presentation.",
+                self.overlays(),
+            ),
+        };
+
+        VStack::new()
+            .alignment(StackAlignment::Stretch)
+            .gap(StackGap::ExtraLarge)
+            .child(
+                VStack::new()
+                    .alignment(StackAlignment::Start)
+                    .gap(StackGap::ExtraSmall)
+                    .child(Text::styled(title, TextRole::TitleMedium))
+                    .child(Text::body(subtitle).tone(TextTone::Secondary)),
+            )
+            .child(content)
+            .layout()
+    }
+
+    fn omochi_lab(&self) -> StackChild {
+        let status = self.status.clone();
+        Self::section(
+            "omochi Interaction Lab",
+            "Press, pull, reverse direction, and release. Values follow immediately; only the contour carries viscosity.",
+            Card::new().content(
+                VStack::new()
+                    .alignment(StackAlignment::Stretch)
+                    .gap(StackGap::Large)
+                    .child(
+                        HStack::new()
+                            .alignment(StackAlignment::Center)
+                            .gap(StackGap::Large)
+                            .child(
+                                IconButton::with_interaction(
+                                    SymbolName::Plus,
+                                    self.omochi_icon.clone(),
+                                )
+                                .tone(IconButtonTone::Accent)
+                                .accessibility_label("Add")
+                                .on_click(move || {
+                                    status.set("Retained omochi action completed".into())
+                                }),
+                            )
+                            .child(
+                                Switch::with_interaction(
+                                    self.switched.binding(),
+                                    self.omochi_switch.clone(),
+                                )
+                                .label("Elastic switch"),
+                            )
+                            .child(
+                                SegmentedControl::with_interaction(
+                                    self.segment.binding(),
+                                    self.omochi_segment.clone(),
+                                )
+                                .item(0, "Canvas")
+                                .item(1, "Layers")
+                                .item(2, "Inspect"),
+                            ),
+                    )
+                    .child(
+                        Slider::with_interaction(self.slider.binding(), self.omochi_slider.clone())
+                            .range(0.0..=100.0)
+                            .step(1.0)
+                            .label(format!("Position  {:.0}", self.slider.get())),
+                    )
+                    .child(
+                        RangeSlider::with_interaction(
+                            self.range_lower.binding(),
+                            self.range_upper.binding(),
+                            self.omochi_range.clone(),
+                        )
+                        .range(0.0..=100.0)
+                        .step(1.0)
+                        .label(format!(
+                            "Selection  {:.0}–{:.0}",
+                            self.range_lower.get(),
+                            self.range_upper.get()
+                        )),
+                    )
+                    .child(
+                        Tabs::with_interaction(self.tab.binding(), self.omochi_tabs.clone())
+                            .item(0, "Overview")
+                            .item(1, "Motion")
+                            .item(2, "Metrics"),
+                    ),
+            ),
+        )
+    }
+
+    fn buttons(&self) -> StackChild {
+        let status = self.status.clone();
+        Self::section(
+            "Buttons & Actions",
+            "Semantic hierarchy, sizes, disabled state, icons, and omochi feedback.",
+            VStack::new()
+                .alignment(StackAlignment::Start)
+                .gap(StackGap::Small)
+                .child(
+                    HStack::new()
+                        .gap(StackGap::Small)
+                        .alignment(StackAlignment::Center)
+                        .child(Button::new("Cancel"))
+                        .child(
+                            Button::with_interaction_state("Continue", self.omochi_button.clone())
+                                .style(ButtonStyle::Primary)
+                                .on_click(move || status.set("Primary action completed".into())),
+                        )
+                        .child(Button::new("Help").style(ButtonStyle::Ghost))
+                        .child(Button::new("Delete").style(ButtonStyle::Danger))
+                        .child(Button::new("Disabled").enabled(false)),
+                )
+                .child(
+                    HStack::new()
+                        .gap(StackGap::Small)
+                        .alignment(StackAlignment::Center)
+                        .child(Button::new("Small").size(ButtonSize::Small))
+                        .child(Button::new("Medium").size(ButtonSize::Medium))
+                        .child(Button::new("Large").size(ButtonSize::Large))
+                        .child(IconButton::new(SymbolName::Plus).accessibility_label("Add item"))
+                        .child(
+                            IconButton::new(SymbolName::ArrowUp)
+                                .tone(IconButtonTone::Accent)
+                                .accessibility_label("Send"),
+                        ),
+                ),
+        )
+    }
+
+    fn inputs(&self) -> StackChild {
+        let picker = self.picker.clone();
+        Self::section(
+            "Inputs & Forms",
+            "Editable, invalid, secure, multiline, picker, and stepper states.",
+            VStack::new()
+                .alignment(StackAlignment::Stretch)
+                .gap(StackGap::Medium)
+                .child(
+                    HStack::new()
+                        .gap(StackGap::Medium)
+                        .child(
+                            TextField::new(self.field.binding())
+                                .placeholder("Editable text")
+                                .leading_symbol(SymbolName::Search)
+                                .layout()
+                                .flex_grow(1.0),
+                        )
+                        .child(
+                            TextField::new(State::new(String::new()).binding())
+                                .placeholder("Invalid")
+                                .invalid(true),
+                        )
+                        .child(
+                            TextField::new(State::new("secret".into()).binding())
+                                .secure(true)
+                                .enabled(false),
+                        ),
+                )
+                .child(
+                    TextEditor::new(self.editor.binding())
+                        .placeholder("Write multiple lines…")
+                        .line_wrap(true)
+                        .bordered(true)
+                        .height(112.0),
+                )
+                .child(
+                    HStack::new()
+                        .gap(StackGap::Medium)
+                        .alignment(StackAlignment::Center)
+                        .child(
+                            Picker::new(self.picker.get())
+                                .option("Tokyo", {
+                                    let picker = picker.clone();
+                                    move || picker.set("Tokyo".into())
+                                })
+                                .option("Kyoto", move || picker.set("Kyoto".into()))
+                                .disabled_option("Unavailable"),
+                        )
+                        .child(Stepper::new(self.stepper.binding()).range(0, 10))
+                        .child(Text::body(format!("Value: {}", self.stepper.get()))),
+                ),
+        )
+    }
+
+    fn selection(&self) -> StackChild {
+        Self::section(
+            "Selection Controls",
+            "Native state, keyboard focus, and value-following omochi thumbs.",
+            VStack::new()
+                .alignment(StackAlignment::Stretch)
+                .gap(StackGap::Medium)
+                .child(
+                    HStack::new()
+                        .gap(StackGap::Large)
+                        .alignment(StackAlignment::Center)
+                        .child(Checkbox::new(self.checked.binding()).label("Checkbox"))
+                        .child(Switch::new(self.switched.binding()).label("Switch"))
+                        .child(RadioButton::new(self.radio.binding(), 0).label("Compact"))
+                        .child(RadioButton::new(self.radio.binding(), 1).label("Comfortable")),
+                )
+                .child(
+                    SegmentedControl::new(self.segment.binding())
+                        .item(0, "List")
+                        .item(1, "Grid")
+                        .disabled_item(2, "Columns")
+                        .accessibility_label("Layout")
+                        .frame(320.0, 34.0),
+                )
+                .child(
+                    Slider::new(self.slider.binding())
+                        .range(0.0..=100.0)
+                        .step(1.0)
+                        .label(format!("Slider: {:.0}", self.slider.get())),
+                )
+                .child(
+                    RangeSlider::new(self.range_lower.binding(), self.range_upper.binding())
+                        .range(0.0..=100.0)
+                        .step(1.0)
+                        .label(format!(
+                            "Range: {:.0}–{:.0}",
+                            self.range_lower.get(),
+                            self.range_upper.get()
+                        )),
+                ),
+        )
+    }
+
+    fn navigation(&self) -> StackChild {
+        Self::section(
+            "Navigation",
+            "Tabs, sidebar/list selection, toolbars, and compact split layouts.",
+            VStack::new()
+                .alignment(StackAlignment::Stretch)
+                .gap(StackGap::Medium)
+                .child(
+                    Tabs::new(self.tab.binding())
+                        .item(0, "General")
+                        .item(1, "Details")
+                        .disabled_item(2, "History"),
+                )
+                .child(Toolbar::new(
+                    HStack::new()
+                        .alignment(StackAlignment::Center)
+                        .child(Text::body_emphasized("Toolbar"))
+                        .child(Spacer::new())
+                        .child(
+                            IconButton::new(SymbolName::More).accessibility_label("More actions"),
+                        ),
+                ))
+                .child(
+                    NavigationSplitView::new(
+                        Sidebar::new(
+                            SidebarSection::new("Library")
+                                .item(SidebarItem::new("Overview").selected(true))
+                                .item(SidebarItem::new("Favorites")),
+                        ),
+                        ContentArea::new(Text::body("Resizable detail region")),
+                    )
+                    .height(180.0),
+                ),
+        )
+    }
+
+    fn typography(&self) -> StackChild {
+        Self::section(
+            "Text & Typography",
+            "Semantic roles and tones from the shared typography tokens.",
+            VStack::new()
+                .alignment(StackAlignment::Start)
+                .gap(StackGap::ExtraSmall)
+                .child(Text::styled("Display", TextRole::DisplayMedium))
+                .child(Text::styled("Title large", TextRole::TitleLarge))
+                .child(Text::body("Body text balances density and readability."))
+                .child(Text::label("Label"))
+                .child(Text::caption("Caption and metadata"))
+                .child(Text::body("Secondary text").tone(TextTone::Secondary)),
+        )
+    }
+
+    fn feedback(&self) -> StackChild {
+        Self::section(
+            "Feedback & Status",
+            "Badges, progress, message direction, tooltip, and current live state.",
+            VStack::new()
+                .alignment(StackAlignment::Stretch)
+                .gap(StackGap::Medium)
+                .child(
+                    HStack::new()
+                        .gap(StackGap::Small)
+                        .child(Badge::new("Neutral"))
+                        .child(Badge::new("Accent").tone(BadgeTone::Accent))
+                        .child(Badge::new("Success").tone(BadgeTone::Success))
+                        .child(Badge::new("Warning").tone(BadgeTone::Warning))
+                        .child(Badge::new("Error").tone(BadgeTone::Error)),
+                )
+                .child(ProgressBar::new(self.slider.get() / 100.0))
+                .child(MessageBubble::new("Received message"))
+                .child(MessageBubble::new("Sent message").direction(MessageDirection::Sent))
+                .child(Tooltip::new("Hover targets use concise help"))
+                .child(Text::metadata(format!("Status: {}", self.status.get()))),
+        )
+    }
+
+    fn surfaces(&self) -> StackChild {
+        Self::section(
+            "Surfaces, Layout & Media",
+            "Token-backed containers, layout primitives, imagery, symbols, and drop targets.",
+            VStack::new()
+                .alignment(StackAlignment::Stretch)
+                .gap(StackGap::Medium)
+                .child(
+                    AdaptiveGrid::new(150.0, 88.0)
+                        .spacing(12.0, 12.0)
+                        .child(Surface::new(SurfaceKind::Pane).content(Text::body("Pane surface")))
+                        .child(
+                            Card::new().content(
+                                HStack::new()
+                                    .gap(StackGap::Small)
+                                    .child(Avatar::new("OM"))
+                                    .child(Text::body("Card")),
+                            ),
+                        )
+                        .child(
+                            Background::new()
+                                .background(
+                                    Rectangle::new()
+                                        .color(RectangleColor::SubtleSurface)
+                                        .radius(CornerRadius::Medium),
+                                )
+                                .content(Text::body("Background")),
+                        )
+                        .child(
+                            ZStack::new()
+                                .alignment(ZStackAlignment::Center)
+                                .child(Ellipse::new().color(EllipseColor::Accent).frame(44.0, 44.0))
+                                .child(Icon::new(SymbolName::Checkmark).size(18.0)),
+                        ),
+                )
+                .child(
+                    HStack::new()
+                        .gap(StackGap::Large)
+                        .child(
+                            Image::new(self.image.clone())
+                                .content_mode(ImageContentMode::Fill)
+                                .radius(CornerRadius::Medium)
+                                .accessibility_label("Sample image")
+                                .frame(120.0, 72.0),
+                        )
+                        .child(
+                            Svg::new(self.svg.clone())
+                                .accessibility_label("Sample vector")
+                                .frame(72.0, 72.0),
+                        )
+                        .child(ApplicationPlaceholder::new("ViewKit").frame(72.0, 72.0))
+                        .child(FileDropTarget::new(
+                            Card::new().content(Text::body("Drop a file here")),
+                            {
+                                let status = self.status.clone();
+                                move |path| status.set(format!("Dropped {}", path.display()))
+                            },
+                        )),
+                ),
+        )
+    }
+
+    fn application_patterns(&self) -> StackChild {
+        let grouped_rows = Group::new()
+            .child(ListRow::new("Default row").subtitle("Secondary information"))
+            .child(
+                ListRow::new("Selected row")
+                    .selected(true)
+                    .status_marker(true),
+            );
+        Self::section(
+            "Application Layouts",
+            "List, form, settings, padding, grouping, and full application navigation primitives.",
+            VStack::new()
+                .alignment(StackAlignment::Stretch)
+                .gap(StackGap::Large)
+                .child(List::new().row(grouped_rows))
+                .child(
+                    Form::new(
+                        FormSections::new().section(
+                            Padding::all(12.0).content(
+                                HStack::new()
+                                    .gap(StackGap::Medium)
+                                    .child(Text::body("Form content"))
+                                    .child(Spacer::new())
+                                    .child(Button::new("Action")),
+                            ),
+                        ),
+                    )
+                    .height(64.0),
+                )
+                .child(
+                    SettingsPage::new(
+                        "Settings",
+                        SettingsSection::new("Appearance")
+                            .row(
+                                SettingsRow::new(
+                                    "Automatic updates",
+                                    Switch::new(self.switched.binding()),
+                                )
+                                .description("Uses the same Switch shown above."),
+                            )
+                            .row(SettingsRow::new("Density", Picker::new("Comfortable"))),
+                    )
+                    .height(220.0),
+                )
+                .child(
+                    NavigationLayout::new(
+                        Text::body_emphasized("Navigation toolbar"),
+                        SidebarSection::new("Places")
+                            .item(SidebarItem::new("Home").selected(true))
+                            .item(SidebarItem::new("Documents")),
+                        ContentArea::new(Text::body("NavigationLayout detail surface")),
+                    )
+                    .height(240.0),
+                ),
+        )
+    }
+
+    fn overlays(&self) -> StackChild {
+        let open_dialog = self.dialog_open.clone();
+        let open_popover = self.popover_open.clone();
+        let status = self.status.clone();
+        Self::section(
+            "Overlays & Menus",
+            "Picker-backed platform menus, context menus, popovers, and modal dialogs.",
+            VStack::new()
+                .alignment(StackAlignment::Start)
+                .gap(StackGap::Medium)
+                .child(
+                    HStack::new()
+                        .gap(StackGap::Small)
+                        .child(Button::new("Show dialog").on_click(move || open_dialog.set(true)))
+                        .child(
+                            Button::new("Toggle popover")
+                                .on_click(move || open_popover.set(!open_popover.get())),
+                        )
+                        .child(ContextMenu::new(
+                            Button::new("Right-click me"),
+                            Menu::new()
+                                .item(MenuItem::new("Copy").shortcut("⌘C"))
+                                .separator()
+                                .item(
+                                    MenuItem::new("Delete")
+                                        .danger(true)
+                                        .on_select(move || status.set("Delete selected".into())),
+                                ),
+                        )),
+                )
+                .child(
+                    Menu::new()
+                        .item(MenuItem::new("New document").shortcut("⌘N"))
+                        .item(MenuItem::new("Open…").shortcut("⌘O"))
+                        .separator()
+                        .item(MenuItem::new("Unavailable").enabled(false)),
+                ),
+        )
+    }
+
+    fn page(&self) -> Box<dyn View + 'static> {
+        let detail = self.gallery_detail();
+        let gallery = NavigationSplitView::new(
+            self.gallery_sidebar(),
+            ContentArea::new(Scroll::vertical(detail)).maximum_width(760.0),
+        )
+        .flexible_sidebar(188.0, 216.0, 248.0)
+        .minimum_detail_width(560.0);
+
+        let gallery: Box<dyn View + 'static> = if self.popover_open.get() {
+            let close = self.popover_open.clone();
+            let popover = Popover::new().content(
+                VStack::new()
+                    .gap(StackGap::Small)
+                    .child(Text::body_emphasized("Popover"))
+                    .child(Text::body("Escape or the button dismisses this surface."))
+                    .child(Button::new("Close").on_click(move || close.set(false))),
+            );
+            Box::new(Overlay::new().content(gallery).overlay(popover))
+        } else {
+            Box::new(gallery)
+        };
+
+        let page = VStack::new()
+            .alignment(StackAlignment::Stretch)
+            .gap(StackGap::None)
+            .child(Toolbar::new(
+                HStack::new()
+                    .alignment(StackAlignment::Center)
+                    .gap(StackGap::Medium)
+                    .child(Text::body_emphasized("ViewKit"))
+                    .child(Text::metadata("Components"))
+                    .child(Spacer::new())
+                    .child(
+                        SegmentedControl::new(self.theme_mode.binding())
+                            .item(0, "System")
+                            .item(1, "Light")
+                            .item(2, "Dark")
+                            .accessibility_label("Appearance"),
+                    ),
+            ))
+            .child(Divider::new())
+            .child(gallery.layout().flex_grow(1.0));
+        if self.dialog_open.get() {
+            let close = self.dialog_open.clone();
+            Box::new(
+                Overlay::new().content(page).overlay(
+                    Dialog::new()
+                        .accessibility_label("Gallery dialog")
+                        .on_dismiss({
+                            let close = close.clone();
+                            move || close.set(false)
+                        })
+                        .content(
+                            VStack::new()
+                                .alignment(StackAlignment::Stretch)
+                                .gap(StackGap::Medium)
+                                .child(Text::styled("Dialog", TextRole::TitleMedium))
+                                .child(Text::body("A real ViewKit dialog using shared tokens."))
+                                .child(Spacer::new())
+                                .child(
+                                    HStack::new().child(Spacer::new()).child(
+                                        Button::new("Done").on_click(move || close.set(false)),
+                                    ),
+                                ),
+                        )
+                        .frame(420.0, 220.0),
+                ),
+            )
+        } else {
+            Box::new(page)
+        }
+    }
+}
+
+impl App for ComponentsGallery {
+    type Body = Box<dyn View + 'static>;
+
+    fn new() -> Self {
+        Self {
+            theme_mode: State::new(0),
+            gallery_page: State::new(0),
+            omochi_button: ButtonInteractionState::new(),
+            omochi_icon: IconButtonInteractionState::new(),
+            omochi_switch: SwitchInteractionState::new(),
+            omochi_slider: SliderInteractionState::new(),
+            omochi_range: RangeSliderInteractionState::new(),
+            omochi_segment: SegmentedControlInteractionState::new(),
+            omochi_tabs: TabsInteractionState::new(),
+            checked: State::new(true),
+            switched: State::new(true),
+            radio: State::new(0),
+            segment: State::new(0),
+            tab: State::new(0),
+            slider: State::new(62.0),
+            range_lower: State::new(24.0),
+            range_upper: State::new(76.0),
+            stepper: State::new(3),
+            field: State::new(String::new()),
+            editor: State::new("ViewKit keeps interaction and appearance in sync.".into()),
+            picker: State::new("Tokyo".into()),
+            dialog_open: State::new(false),
+            popover_open: State::new(false),
+            status: State::new("Ready".into()),
+            image: ImageData::decode(include_bytes!("resources/test.png"))
+                .expect("gallery image must decode"),
+            svg: SvgData::decode(include_bytes!("resources/test.svg"))
+                .expect("gallery SVG must decode"),
+        }
+    }
+
+    fn window(&self) -> WindowOptions {
+        WindowOptions::new("ViewKit Component Gallery")
+            .size(1120.0, 820.0)
+            .resizable(true)
+    }
+
+    fn theme(&self) -> Option<Theme> {
+        match self.theme_mode.get() {
+            1 => Some(Theme::LIGHT),
+            2 => Some(Theme::DARK),
+            _ => None,
+        }
+    }
+
+    fn body(&self, _context: &ViewContext) -> Self::Body {
+        self.page()
+    }
+}
+
+fn main() -> Result<(), ViewKitError> {
+    run::<ComponentsGallery>()
+}

@@ -1,14 +1,42 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::event::{EventContext, EventResult, ViewEvent};
+use crate::geometry::{Point, Rect, Size};
 use crate::layout::ViewExt;
-use crate::theme::{ShadowStyle, Theme};
+use crate::platform::PointerButton;
+use crate::theme::{Color, ControlAppearance, ControlVisualState, ShadowStyle, Theme};
+use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
+use super::omochi_shape::{OmochiPreset, OmochiShape};
 use super::{
     Button, ButtonInteractionState, ButtonSize, ButtonStyle, Icon, SymbolName, ZStackAlignment,
 };
 
 type Callback = Rc<RefCell<Box<dyn FnMut()>>>;
+
+/// Retained interaction state for icon buttons whose action rebuilds the view
+/// tree. Reusing this value lets the omochi release contour finish naturally.
+#[derive(Clone)]
+pub struct IconButtonInteractionState {
+    button: ButtonInteractionState,
+    surface: OmochiShape,
+}
+
+impl IconButtonInteractionState {
+    pub fn new() -> Self {
+        Self {
+            button: ButtonInteractionState::new(),
+            surface: OmochiShape::displacement(OmochiPreset::CompactControl),
+        }
+    }
+}
+
+impl Default for IconButtonInteractionState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum IconButtonTone {
@@ -22,19 +50,26 @@ pub struct IconButton {
     tone: IconButtonTone,
     size: Option<ButtonSize>,
     enabled: bool,
-    interaction: ButtonInteractionState,
+    interaction_state: IconButtonInteractionState,
     on_click: Option<Callback>,
     accessibility_label: Option<String>,
 }
 
 impl IconButton {
     pub fn new(icon: SymbolName) -> Self {
+        Self::with_interaction(icon, IconButtonInteractionState::new())
+    }
+
+    pub fn with_interaction(
+        icon: SymbolName,
+        interaction_state: IconButtonInteractionState,
+    ) -> Self {
         Self {
             icon,
             tone: IconButtonTone::Plain,
             size: None,
             enabled: true,
-            interaction: ButtonInteractionState::new(),
+            interaction_state,
             on_click: None,
             accessibility_label: None,
         }
@@ -56,7 +91,7 @@ impl IconButton {
     }
 
     pub fn interaction(&self) -> &ButtonInteractionState {
-        &self.interaction
+        &self.interaction_state.button
     }
 
     pub fn on_click(mut self, callback: impl FnMut() + 'static) -> Self {
@@ -69,32 +104,76 @@ impl IconButton {
         self
     }
 
-    pub(crate) fn button(&self, theme: &Theme) -> Button {
-        let (style, icon_color, default_size) = match self.tone {
-            IconButtonTone::Plain => {
-                let icon_color = if self.enabled {
-                    theme.button.ghost.rest.foreground
-                } else {
-                    theme.colors.text_disabled
-                };
+    fn resolved_size(&self) -> ButtonSize {
+        self.size.unwrap_or(match self.tone {
+            IconButtonTone::Plain => ButtonSize::Small,
+            IconButtonTone::Accent => ButtonSize::Medium,
+        })
+    }
 
-                (ButtonStyle::Ghost, icon_color, ButtonSize::Small)
-            }
-            IconButtonTone::Accent => {
-                let icon_color = theme.button.accent.rest.foreground;
-                (ButtonStyle::Accent, icon_color, ButtonSize::Medium)
-            }
+    fn visual_state(&self) -> ControlVisualState {
+        if !self.enabled {
+            ControlVisualState::Disabled
+        } else if self.interaction_state.button.is_pressed() {
+            ControlVisualState::Pressed
+        } else if self.interaction_state.button.is_hovered() {
+            ControlVisualState::Hovered
+        } else if self.interaction_state.button.is_focused() {
+            ControlVisualState::Focused
+        } else {
+            ControlVisualState::Rest
+        }
+    }
+
+    fn appearance(&self, theme: &Theme) -> ControlAppearance {
+        let state = self.visual_state();
+        let palette = match self.tone {
+            IconButtonTone::Plain => theme.button.ghost,
+            IconButtonTone::Accent => theme.button.accent,
         };
-        let size = self.size.unwrap_or(default_size);
+        let mut appearance = palette.resolve(state);
+
+        if self.tone == IconButtonTone::Plain
+            && self.enabled
+            && self.interaction_state.surface.is_animating()
+        {
+            appearance.background = theme.colors.surface_muted;
+            appearance.border = Color::TRANSPARENT;
+        }
+
+        if state == ControlVisualState::Disabled {
+            appearance.background =
+                color_with_opacity(appearance.background, theme.button.disabled_opacity);
+            appearance.border =
+                color_with_opacity(appearance.border, theme.button.disabled_opacity);
+            appearance.foreground = match self.tone {
+                IconButtonTone::Plain => theme.colors.text_disabled,
+                IconButtonTone::Accent => {
+                    color_with_opacity(appearance.foreground, theme.button.disabled_opacity)
+                }
+            };
+        }
+
+        appearance
+    }
+
+    fn button(&self, theme: &Theme, icon_color: Color) -> Button {
+        let size = self.resolved_size();
         let control_size = size.height(theme);
         let icon_size = self.size.map_or_else(
             || self.icon.control_size(theme.layout),
             |size| size.icon_size(theme),
         );
 
-        let mut button = Button::with_interaction(self.interaction.clone())
+        let mut button = Button::with_interaction(self.interaction_state.button.clone())
             .content_padding(false)
-            .style(style)
+            .style(ButtonStyle::Custom {
+                background: Color::TRANSPARENT,
+                hovered_background: Color::TRANSPARENT,
+                border: Color::TRANSPARENT,
+                hovered_border: Color::TRANSPARENT,
+                foreground: icon_color,
+            })
             .size(size)
             .radius(theme.button.radius)
             .shadow(ShadowStyle::None)
@@ -117,28 +196,107 @@ impl IconButton {
 
         button
     }
+
+    fn local_point(bounds: Rect, point: Point) -> Point {
+        Point::new(
+            point.x - bounds.origin.x - bounds.size.width / 2.0,
+            point.y - bounds.origin.y - bounds.size.height / 2.0,
+        )
+    }
 }
 
-impl crate::view::View for IconButton {
-    fn measure(
-        &self,
-        constraints: crate::view::Constraints,
-        context: &mut crate::view::MeasureContext<'_>,
-    ) -> crate::geometry::Size {
-        self.button(context.theme).measure(constraints, context)
+impl View for IconButton {
+    fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
+        let appearance = self.appearance(context.theme);
+
+        self.button(context.theme, appearance.foreground)
+            .measure(constraints, context)
     }
 
-    fn paint(&self, bounds: crate::geometry::Rect, context: &mut crate::view::PaintContext<'_>) {
-        self.button(context.theme).paint(bounds, context);
+    fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
+        if bounds.size.width <= 0.0 || bounds.size.height <= 0.0 {
+            return;
+        }
+
+        if !self.enabled && self.interaction_state.surface.is_animating() {
+            self.interaction_state.surface.reset();
+        }
+
+        let appearance = self.appearance(context.theme);
+        let radius = context.theme.button.radius.resolve(
+            &context.theme.radius,
+            bounds.size.width,
+            bounds.size.height,
+        );
+        self.interaction_state
+            .surface
+            .paint(bounds, radius, appearance.background, context);
+
+        self.button(context.theme, appearance.foreground)
+            .paint(bounds, context);
     }
 
     fn handle_event(
         &self,
-        bounds: crate::geometry::Rect,
-        event: &crate::event::ViewEvent,
-        context: &mut crate::event::EventContext<'_>,
-    ) -> crate::event::EventResult {
-        self.button(context.theme)
-            .handle_event(bounds, event, context)
+        bounds: Rect,
+        event: &ViewEvent,
+        context: &mut EventContext<'_>,
+    ) -> EventResult {
+        if !self.enabled {
+            if self.interaction_state.surface.is_animating() {
+                self.interaction_state.surface.reset();
+            }
+
+            return self
+                .button(context.theme, self.appearance(context.theme).foreground)
+                .handle_event(bounds, event, context);
+        }
+
+        match event {
+            ViewEvent::PointerPressed {
+                position,
+                button: PointerButton::Primary,
+            } if bounds.contains(*position) => {
+                self.interaction_state
+                    .surface
+                    .begin(Self::local_point(bounds, *position));
+            }
+            ViewEvent::PointerMoved { position } if self.interaction_state.surface.is_active() => {
+                self.interaction_state
+                    .surface
+                    .moved(Self::local_point(bounds, *position));
+            }
+            ViewEvent::PointerReleased {
+                button: PointerButton::Primary,
+                ..
+            } if self.interaction_state.surface.is_active() => {
+                self.interaction_state.surface.end();
+            }
+            ViewEvent::PointerLeft if self.interaction_state.surface.is_active() => {
+                self.interaction_state.surface.end();
+            }
+            _ => {}
+        }
+
+        let appearance = self.appearance(context.theme);
+        let result = self
+            .button(context.theme, appearance.foreground)
+            .handle_event(bounds, event, context);
+
+        if self.interaction_state.surface.is_animating() {
+            context.request_redraw_in(bounds.expanded(24.0));
+        }
+
+        result
     }
+}
+
+fn color_with_opacity(color: Color, opacity: f32) -> Color {
+    let opacity = if opacity.is_finite() {
+        opacity.clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
+
+    color.with_alpha((color.alpha as f32 * opacity).round() as u8)
 }

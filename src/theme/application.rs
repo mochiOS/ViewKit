@@ -78,24 +78,18 @@ impl ShellTokens {
         dock_item_hover: Color::rgba(255, 255, 255, 225),
         running_indicator: Color::rgba(45, 45, 45, 210),
         inactive_window_shadow: ShadowSet::single(Shadow::new(
-            Color::rgba(0, 0, 0, 8),
+            Color::rgba(0, 0, 0, 6),
             0.0,
-            2.0,
-            5.0,
             1.0,
+            3.0,
+            0.0,
         )),
         active_window_shadow: ShadowSet::double(
-            Shadow::new(Color::rgba(0, 0, 0, 20), 0.0, 2.0, 5.0, 0.0),
-            Shadow::new(Color::rgba(0, 0, 0, 28), 0.0, 5.0, 14.0, 0.0),
+            Shadow::new(Color::rgba(0, 0, 0, 14), 0.0, 1.0, 4.0, 0.0),
+            Shadow::new(Color::rgba(0, 0, 0, 18), 0.0, 4.0, 10.0, 0.0),
         ),
-        panel_shadow: ShadowSet::single(Shadow::new(
-            Color::rgba(0, 0, 0, 44),
-            0.0,
-            12.0,
-            32.0,
-            0.0,
-        )),
-        dock_shadow: ShadowSet::single(Shadow::new(Color::rgba(0, 0, 0, 18), 0.0, 4.0, 12.0, 0.0)),
+        panel_shadow: ShadowSet::single(Shadow::new(Color::rgba(0, 0, 0, 28), 0.0, 8.0, 20.0, 0.0)),
+        dock_shadow: ShadowSet::single(Shadow::new(Color::rgba(0, 0, 0, 12), 0.0, 2.0, 8.0, 0.0)),
     };
 
     pub const DARK: Self = Self {

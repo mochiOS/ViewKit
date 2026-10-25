@@ -5,17 +5,14 @@ use std::ops::RangeInclusive;
 use std::rc::Rc;
 
 use crate::accessibility::{AccessibilityNode, AccessibilityRole};
-use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
-use crate::geometry::{Point, Rect, Size};
-use crate::omochi::moving::PressResponse;
-use crate::omochi::{Material, OmochiSurface, button_contour};
+use crate::geometry::{Rect, Size};
 use crate::platform::PointerButton;
 use crate::state::Binding;
 use crate::theme::{Color, CornerRadius, ShadowStyle};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
-use std::time::Instant;
 
+use super::omochi_shape::{OmochiPreset, OmochiShape};
 use super::{Rectangle, RectangleColor, Text};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -23,6 +20,7 @@ struct SliderInteractionInner {
     hovered: bool,
     dragging: bool,
     focused: bool,
+    focus_visible: bool,
     enabled: bool,
     drag_offset_x: f32,
 }
@@ -36,26 +34,21 @@ struct SliderMetrics {
     track_height: f32,
     hit_padding: f32,
 }
-#[derive(Default)]
-struct SliderSurface {
-    surface: OmochiSurface,
-    press: PressResponse,
-}
 #[derive(Clone)]
 pub struct SliderInteractionState {
-    surface: Rc<RefCell<SliderSurface>>,
     inner: Rc<RefCell<SliderInteractionInner>>,
+    thumb_shape: OmochiShape,
 }
 
 impl Default for SliderInteractionState {
     fn default() -> Self {
         Self {
-            surface: Rc::new(RefCell::new(SliderSurface::default())),
             inner: Rc::new(RefCell::new(SliderInteractionInner {
                 enabled: true,
 
                 ..SliderInteractionInner::default()
             })),
+            thumb_shape: OmochiShape::velocity(OmochiPreset::Thumb),
         }
     }
 }
@@ -78,13 +71,15 @@ impl SliderInteractionState {
     }
 
     pub fn reset(&self) {
-        *self.surface.borrow_mut() = SliderSurface::default();
         let mut inner = self.inner.borrow_mut();
 
         inner.hovered = false;
         inner.dragging = false;
         inner.focused = false;
+        inner.focus_visible = false;
         inner.drag_offset_x = 0.0;
+        drop(inner);
+        self.thumb_shape.reset();
     }
 
     fn set_enabled(&self, enabled: bool) -> bool {
@@ -95,10 +90,10 @@ impl SliderInteractionState {
         inner.enabled = enabled;
 
         if !enabled {
-            *self.surface.borrow_mut() = SliderSurface::default();
             inner.hovered = false;
             inner.dragging = false;
             inner.focused = false;
+            inner.focus_visible = false;
             inner.drag_offset_x = 0.0;
         }
 
@@ -135,8 +130,8 @@ impl Slider {
 
     pub fn with_interaction(value: Binding<f32>, interaction: SliderInteractionState) -> Self {
         Self {
-            value,
             style: SliderStyle::Standard,
+            value,
 
             minimum: 0.0,
             maximum: 1.0,
@@ -348,6 +343,34 @@ impl Slider {
 
         true
     }
+
+    fn thumb_is_at_wall(&self) -> bool {
+        let value = self.current_value();
+        values_equal(value, self.minimum) || values_equal(value, self.maximum)
+    }
+
+    fn update_thumb_shape_for_drag(&self, position: crate::geometry::Point) {
+        if self.thumb_is_at_wall() {
+            if self.interaction.thumb_shape.is_active() {
+                // Stop accepting pointer velocity at the end stop, but let the
+                // existing strain relax instead of snapping to the base shape.
+                self.interaction.thumb_shape.end();
+            }
+        } else if self.interaction.thumb_shape.is_active() {
+            self.interaction.thumb_shape.moved(position);
+        } else {
+            // Re-entering the movable range starts a fresh velocity sample so
+            // pointer travel accumulated against an end stop cannot become pull.
+            self.interaction.thumb_shape.begin(position);
+        }
+    }
+
+    fn end_thumb_shape_drag(&self, position: crate::geometry::Point) {
+        self.update_thumb_shape_for_drag(position);
+        if self.interaction.thumb_shape.is_active() {
+            self.interaction.thumb_shape.end();
+        }
+    }
 }
 
 impl View for Slider {
@@ -355,6 +378,7 @@ impl View for Slider {
         if self.style == SliderStyle::VerticalLevel {
             return constraints.constrain(Size::new(60.0, 130.0));
         }
+
         let label_height = context.typography.label.line_height;
         let label_spacing = context.theme.spacing.extra_small;
         let slider_height = context.theme.layout.range_control_height;
@@ -372,11 +396,15 @@ impl View for Slider {
             self.paint_level(bounds, context);
             return;
         }
+
         if bounds.size.width <= 0.0 || bounds.size.height <= 0.0 {
             return;
         }
 
         self.interaction.set_enabled(self.enabled);
+        if !self.enabled && self.interaction.thumb_shape.is_animating() {
+            self.interaction.thumb_shape.reset();
+        }
 
         let mut accessibility = AccessibilityNode::new(AccessibilityRole::Slider, bounds);
         accessibility.label = self.label.clone();
@@ -469,28 +497,18 @@ impl View for Slider {
 
         let knob_center_x = track_bounds.origin.x + track_bounds.size.width * progress;
 
-        let now = Instant::now();
-        let mut motion = context.theme.motion.omochi;
-        motion.enabled &= self.enabled;
-        motion.material = Material::SLIDER.for_height(thumb.height * 30.0 / 20.0);
-        let mut material_state = self.interaction.surface.borrow_mut();
-        let mut sample = material_state.surface.sample(motion, now);
-        sample.anchor = Point::new(thumb.width * 0.5, thumb.height * 0.5);
-        let (pressure, press_redraw) = material_state.press.sample(dragging, motion.enabled, now);
-        let press_scale = 1.0 + pressure * 0.20;
+        let visible_thumb = if dragging {
+            context.theme.layout.control_thumb_size(true)
+        } else {
+            thumb
+        };
+
         let knob_bounds = Rect::new(
-            knob_center_x - thumb.width * 0.5,
-            slider_bounds.origin.y + (slider_bounds.size.height - thumb.height) * 0.5,
-            thumb.width,
-            thumb.height,
+            knob_center_x - visible_thumb.width / 2.0,
+            slider_bounds.origin.y + (slider_bounds.size.height - visible_thumb.height) / 2.0,
+            visible_thumb.width,
+            visible_thumb.height,
         );
-        if let Some(next) = sample.next_redraw_at.into_iter().chain(press_redraw).min() {
-            context.request_redraw_in_at(
-                bounds.expanded(motion.material.max_pull + thumb.width * 0.2 + 6.0),
-                next,
-            );
-        }
-        drop(material_state);
 
         let knob_color = if !self.enabled {
             context.theme.slider.disabled_knob
@@ -500,7 +518,7 @@ impl View for Slider {
             context.theme.slider.knob
         };
 
-        let knob_shadow = ShadowStyle::None;
+        let knob_shadow = context.theme.slider.knob_shadow;
         let knob_radius = context.theme.slider.knob_radius.resolve(
             &context.theme.radius,
             knob_bounds.size.width,
@@ -508,7 +526,11 @@ impl View for Slider {
         );
 
         let interaction = self.interaction.inner.borrow();
-        if interaction.focused && interaction.hovered {
+        if interaction.focused
+            && interaction.focus_visible
+            && interaction.hovered
+            && !interaction.dragging
+        {
             Rectangle::new()
                 .color(RectangleColor::Custom(context.theme.slider.focus_ring))
                 .radius(CornerRadius::Custom(
@@ -522,27 +544,20 @@ impl View for Slider {
         }
         drop(interaction);
 
-        if pressure > 0.001 || sample.pull.x.hypot(sample.pull.y) > 0.001 {
-            let center = Point::new(knob_center_x, knob_bounds.origin.y + thumb.height * 0.5);
-            let points = button_contour(knob_bounds, knob_radius, sample, motion.material)
-                .into_iter()
-                .map(|p| {
-                    Point::new(
-                        center.x + (p.x - center.x) * press_scale,
-                        center.y + (p.y - center.y) * press_scale,
-                    )
-                })
-                .collect();
-            context.display_list.push(DrawCommand::DrawContour {
-                points,
-                fill: knob_color,
-                stroke: if hovered {
+        if self.interaction.thumb_shape.is_animating() {
+            self.interaction.thumb_shape.paint_styled(
+                knob_bounds,
+                knob_radius,
+                knob_color,
+                if hovered {
                     context.theme.slider.hovered_knob_border
                 } else {
                     context.theme.slider.knob_border
                 },
-                stroke_width: context.theme.slider.stroke_width,
-            });
+                context.theme.slider.stroke_width,
+                knob_shadow,
+                context,
+            );
         } else {
             Rectangle::new()
                 .color(RectangleColor::Custom(knob_color))
@@ -569,6 +584,7 @@ impl View for Slider {
         if self.style == SliderStyle::VerticalLevel {
             return self.handle_level_event(bounds, event, context);
         }
+
         let enabled_changed = self.interaction.set_enabled(self.enabled);
 
         if enabled_changed {
@@ -595,31 +611,17 @@ impl View for Slider {
             metrics.hit_padding,
         );
 
-        let mut motion = context.theme().motion.omochi;
-        motion.material = Material::SLIDER.for_height(thumb.height * 30.0 / 20.0);
-        let now = Instant::now();
-        if motion.enabled {
-            let mut state = self.interaction.surface.borrow_mut();
-            match event {
-                ViewEvent::PointerPressed {
-                    position,
-                    button: PointerButton::Primary,
-                } if hit_bounds.contains(*position) => {
-                    state
-                        .surface
-                        .begin_velocity(*position, Point::new(-1.0, -0.12), now)
-                }
-                ViewEvent::PointerMoved { position } => state.surface.move_to(*position, now),
-                ViewEvent::PointerReleased {
-                    button: PointerButton::Primary,
-                    ..
-                }
-                | ViewEvent::FocusChanged { focused: false } => state.surface.end(motion, now),
-                _ => {}
-            }
-        }
-
         match event {
+            ViewEvent::FocusVisibilityChanged { visible } => {
+                let mut inner = self.interaction.inner.borrow_mut();
+                let changed = inner.focus_visible != *visible;
+                inner.focus_visible = *visible;
+                drop(inner);
+                if changed {
+                    context.request_redraw_in(bounds.expanded(16.0));
+                }
+                EventResult::Ignored
+            }
             ViewEvent::KeyboardFocusRequested { bounds: target } => {
                 let focused = target.is_some_and(|target| target == bounds);
                 let mut inner = self.interaction.inner.borrow_mut();
@@ -659,12 +661,15 @@ impl View for Slider {
                 };
 
                 let value_changed = if dragging {
-                    self.update_from_pointer(bounds, position.x, drag_offset_x, metrics)
+                    let value_changed =
+                        self.update_from_pointer(bounds, position.x, drag_offset_x, metrics);
+                    self.update_thumb_shape_for_drag(*position);
+                    value_changed
                 } else {
                     false
                 };
 
-                if state_changed || value_changed {
+                if state_changed || value_changed || dragging {
                     context.request_redraw_in(bounds.expanded(16.0));
                 }
 
@@ -692,12 +697,7 @@ impl View for Slider {
                     metrics.track_height,
                 );
 
-                let radius = context.theme.slider.knob_radius.resolve(
-                    &context.theme.radius,
-                    knob_bounds.size.width,
-                    knob_bounds.size.height,
-                );
-                let pressed_inside_knob = knob_bounds.contains_rounded(radius, *position);
+                let pressed_inside_knob = knob_bounds.contains(*position);
 
                 let drag_offset_x = if pressed_inside_knob {
                     position.x
@@ -723,6 +723,7 @@ impl View for Slider {
                 if !pressed_inside_knob {
                     self.update_from_pointer(bounds, position.x, 0.0, metrics);
                 }
+                self.update_thumb_shape_for_drag(*position);
 
                 context.request_redraw_in(bounds.expanded(16.0));
 
@@ -752,7 +753,7 @@ impl View for Slider {
                 }
 
                 self.update_from_pointer(bounds, position.x, drag_offset_x, metrics);
-
+                self.end_thumb_shape_drag(*position);
                 self.value.commit();
 
                 context.request_redraw_in(bounds.expanded(16.0));
@@ -792,6 +793,7 @@ impl View for Slider {
                 };
 
                 if was_dragging {
+                    self.interaction.thumb_shape.end();
                     self.value.commit();
                 }
 
@@ -802,6 +804,112 @@ impl View for Slider {
 
             _ => EventResult::Ignored,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::draw_command::{DisplayList, DrawCommand};
+    use crate::geometry::Point;
+    use crate::state::State;
+    use crate::theme::Theme;
+    use crate::typography::{TextMeasurer, Typography};
+
+    #[test]
+    fn drag_updates_value_immediately_and_retains_thumb_physics() {
+        let value = State::new(0.25_f32);
+        let interaction = SliderInteractionState::new();
+        let slider = Slider::with_interaction(value.binding(), interaction.clone());
+        let bounds = Rect::new(24.0, 40.0, 200.0, 28.0);
+        let mut text_measurer = TextMeasurer::new();
+        let mut event_context =
+            EventContext::new(&Theme::LIGHT, &Typography::DEFAULT, &mut text_measurer);
+
+        let press = Point::new(75.0, 54.0);
+        assert_eq!(
+            slider.handle_event(
+                bounds,
+                &ViewEvent::PointerPressed {
+                    position: press,
+                    button: PointerButton::Primary,
+                },
+                &mut event_context,
+            ),
+            EventResult::Consumed
+        );
+        assert_eq!(
+            slider.handle_event(
+                bounds,
+                &ViewEvent::PointerMoved {
+                    position: Point::new(170.0, 54.0),
+                },
+                &mut event_context,
+            ),
+            EventResult::Consumed
+        );
+        assert!(value.get() > 0.65, "logical value must not lag the pointer");
+
+        let rebuilt = Slider::with_interaction(value.binding(), interaction);
+        let mut display_list = DisplayList::new();
+        let mut paint_context = PaintContext::new(
+            &mut display_list,
+            &Theme::LIGHT,
+            &Typography::DEFAULT,
+            &mut text_measurer,
+        );
+        rebuilt.paint(bounds, &mut paint_context);
+
+        assert!(
+            display_list
+                .commands()
+                .iter()
+                .any(|command| matches!(command, DrawCommand::FillPolygon { .. }))
+        );
+    }
+
+    #[test]
+    fn end_stop_discards_pointer_velocity_until_thumb_moves_inward() {
+        let value = State::new(0.5_f32);
+        let interaction = SliderInteractionState::new();
+        let slider = Slider::with_interaction(value.binding(), interaction.clone());
+        let bounds = Rect::new(24.0, 40.0, 200.0, 28.0);
+        let mut text_measurer = TextMeasurer::new();
+        let mut context =
+            EventContext::new(&Theme::LIGHT, &Typography::DEFAULT, &mut text_measurer);
+
+        let center = Point::new(124.0, 54.0);
+        slider.handle_event(
+            bounds,
+            &ViewEvent::PointerPressed {
+                position: center,
+                button: PointerButton::Primary,
+            },
+            &mut context,
+        );
+        slider.handle_event(
+            bounds,
+            &ViewEvent::PointerMoved {
+                position: Point::new(400.0, 54.0),
+            },
+            &mut context,
+        );
+        assert_eq!(value.get(), 1.0);
+        assert!(!interaction.thumb_shape.is_active());
+        assert!(
+            interaction.thumb_shape.is_animating(),
+            "strain should recover at the wall instead of snapping"
+        );
+
+        slider.handle_event(
+            bounds,
+            &ViewEvent::PointerMoved {
+                position: Point::new(180.0, 54.0),
+            },
+            &mut context,
+        );
+        assert!(value.get() < 1.0);
+        assert!(interaction.thumb_shape.is_active());
     }
 }
 

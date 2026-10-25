@@ -38,6 +38,7 @@ impl View for Tooltip {
         Rectangle::new()
             .color(RectangleColor::Custom(context.theme.tooltip.background))
             .radius(context.theme.tooltip.radius)
+            .shadow(context.theme.tooltip.shadow)
             .border(BorderStyle::custom(
                 context.theme.tooltip.border,
                 context.theme.tooltip.stroke_width,

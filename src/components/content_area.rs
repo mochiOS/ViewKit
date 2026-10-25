@@ -11,7 +11,10 @@ pub struct ContentArea<Content> {
 
 impl<Content> ContentArea<Content> {
     pub fn new(content: Content) -> Self {
-        Self { content, maximum_width: None }
+        Self {
+            content,
+            maximum_width: None,
+        }
     }
 
     pub fn maximum_width(mut self, width: f32) -> Self {

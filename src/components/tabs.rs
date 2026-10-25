@@ -1,13 +1,19 @@
 use crate::accessibility::{AccessibilityNode, AccessibilityRole};
+use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
-use crate::geometry::{Rect, Size};
+use crate::geometry::{Point, Rect, Size};
 use crate::layout::{StackAlignment, StackGap, ViewExt};
-use crate::platform::Key;
+use crate::platform::{Key, PointerButton};
 use crate::state::Binding;
-use crate::theme::{Color, ShadowStyle, Theme};
+use crate::theme::{Color, CornerRadius, ShadowStyle, Theme};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
+use std::time::{Duration, Instant};
 
-use super::{Button, ButtonInteractionState, ButtonStyle, HStack, Padding, Text, ZStackAlignment};
+use super::omochi_shape::{MagneticSelectionMotion, OmochiPreset, OmochiShape};
+use super::{
+    Button, ButtonInteractionState, ButtonStyle, HStack, Rectangle, RectangleColor, Text,
+    ZStackAlignment,
+};
 
 struct TabItem {
     value: usize,
@@ -16,20 +22,52 @@ struct TabItem {
     interaction: ButtonInteractionState,
 }
 
+const INDICATOR_DEFORMATION_ALLOWANCE: f32 = 34.0;
+
+#[derive(Clone)]
+pub struct TabsInteractionState {
+    indicator_shape: OmochiShape,
+    selection_motion: MagneticSelectionMotion,
+}
+
+impl TabsInteractionState {
+    pub fn new() -> Self {
+        Self {
+            indicator_shape: OmochiShape::displacement(OmochiPreset::SelectionIndicator),
+            selection_motion: MagneticSelectionMotion::default(),
+        }
+    }
+}
+
+impl Default for TabsInteractionState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct Tabs {
     selection: Binding<usize>,
     items: Vec<TabItem>,
     enabled: bool,
     accessibility_label: Option<String>,
+    interaction_state: TabsInteractionState,
 }
 
 impl Tabs {
     pub fn new(selection: Binding<usize>) -> Self {
+        Self::with_interaction(selection, TabsInteractionState::new())
+    }
+
+    pub fn with_interaction(
+        selection: Binding<usize>,
+        interaction_state: TabsInteractionState,
+    ) -> Self {
         Self {
             selection,
             items: Vec::new(),
             enabled: true,
             accessibility_label: None,
+            interaction_state,
         }
     }
 
@@ -66,8 +104,6 @@ impl Tabs {
     fn item_button(&self, item: &TabItem, theme: &Theme) -> Button {
         let selected = self.selection.get() == item.value;
         let enabled = self.enabled && item.enabled;
-        let selection = self.selection.clone();
-        let value = item.value;
 
         let foreground = if !enabled {
             theme.tabs.disabled_foreground
@@ -77,18 +113,14 @@ impl Tabs {
             theme.tabs.foreground
         };
 
-        let background = if selected {
-            theme.tabs.selected_background
-        } else {
-            theme.tabs.background
-        };
+        let background = theme.tabs.background;
 
         Button::with_interaction(item.interaction.clone())
             .content_padding(false)
             .style(ButtonStyle::Custom {
                 background,
                 hovered_background: if selected {
-                    theme.tabs.selected_background
+                    theme.tabs.background
                 } else {
                     theme.tabs.hovered_background
                 },
@@ -98,32 +130,93 @@ impl Tabs {
             })
             .radius(theme.tabs.radius)
             .shadow(ShadowStyle::None)
+            .focus_ring(false)
             .alignment(ZStackAlignment::Center)
             .enabled(enabled)
             .accessibility_role(AccessibilityRole::Tab)
             .accessibility_label(item.label.clone())
             .accessibility_selected(selected)
             .content(
-                Padding::symmetric(theme.tabs.horizontal_padding, theme.tabs.vertical_padding)
-                    .content(
-                        Text::label(item.label.clone())
-                            .accessibility_hidden(true)
-                            .color(foreground),
-                    ),
+                Text::label(item.label.clone())
+                    .accessibility_hidden(true)
+                    .font_size(13.0)
+                    .weight(if selected { 600 } else { 500 })
+                    .alignment(crate::typography::TextAlignment::Center)
+                    .color(foreground)
+                    .height(16.0),
             )
-            .on_click(move || {
-                selection.set_if_changed(value);
-            })
     }
 
     fn stack(&self, theme: &Theme) -> HStack {
         HStack::new()
             .alignment(StackAlignment::Center)
-            .gap(StackGap::Small)
+            .gap(StackGap::None)
             .children(self.items.iter().map(|item| {
-                self.item_button(item, theme)
-                    .frame(theme.layout.tab_width, theme.layout.compact_control_height)
+                self.item_button(item, theme).frame(
+                    theme.layout.tab_width,
+                    theme.tabs.height - theme.tabs.tongue_depth,
+                )
             }))
+    }
+
+    fn selected_index(&self, value: usize) -> Option<usize> {
+        self.items.iter().position(|item| item.value == value)
+    }
+
+    fn tab_centers(&self, bounds: Rect, theme: &Theme) -> Vec<f32> {
+        self.items
+            .iter()
+            .enumerate()
+            .map(|(index, _)| bounds.origin.x + theme.layout.tab_width * (index as f32 + 0.5))
+            .collect()
+    }
+
+    fn indicator_points(&self, theme: &Theme) -> Vec<Point> {
+        let half_width = (theme.layout.tab_width - theme.tabs.indicator_inset * 2.0) / 2.0;
+        let half_height =
+            (theme.tabs.height - theme.tabs.tongue_depth - theme.tabs.indicator_inset) / 2.0;
+        let radius = theme
+            .tabs
+            .radius
+            .resolve(&theme.radius, half_width * 2.0, half_height * 2.0);
+        let left = -half_width;
+        let right = half_width;
+        let top = -half_height;
+        let bottom = half_height;
+        let mut points = vec![Point::new(left, bottom), Point::new(left, top + radius)];
+        for index in 1..=12 {
+            let angle = (180.0 + 90.0 * index as f32 / 12.0).to_radians();
+            points.push(Point::new(
+                left + radius + angle.cos() * radius,
+                top + radius + angle.sin() * radius,
+            ));
+        }
+        points.push(Point::new(right - radius, top));
+        for index in 1..=12 {
+            let angle = (-90.0 + 90.0 * index as f32 / 12.0).to_radians();
+            points.push(Point::new(
+                right - radius + angle.cos() * radius,
+                top + radius + angle.sin() * radius,
+            ));
+        }
+        let tongue_half = theme.tabs.tongue_width / 2.0;
+        points.extend([
+            Point::new(right, bottom),
+            Point::new(tongue_half, bottom),
+            Point::new(tongue_half, bottom + theme.tabs.tongue_depth),
+            Point::new(-tongue_half, bottom + theme.tabs.tongue_depth),
+            Point::new(-tongue_half, bottom),
+        ]);
+        points
+    }
+
+    fn indicator_clip_bounds(bounds: Rect) -> Rect {
+        Rect::new(
+            bounds.origin.x,
+            bounds.origin.y - INDICATOR_DEFORMATION_ALLOWANCE,
+            bounds.size.width,
+            bounds.size.height + INDICATOR_DEFORMATION_ALLOWANCE * 2.0,
+        )
     }
 
     fn keyboard_target(&self, event: &ViewEvent) -> Option<usize> {
@@ -168,7 +261,10 @@ impl Tabs {
 
 impl View for Tabs {
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
-        self.stack(context.theme).measure(constraints, context)
+        constraints.constrain(Size::new(
+            context.theme.layout.tab_width * self.items.len() as f32,
+            context.theme.tabs.height,
+        ))
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
@@ -176,7 +272,120 @@ impl View for Tabs {
         node.label = self.accessibility_label.clone();
         node.enabled = self.enabled;
         context.record_accessibility(node);
-        self.stack(context.theme).paint(bounds, context);
+        if !self.enabled && self.interaction_state.indicator_shape.is_animating() {
+            self.interaction_state.indicator_shape.reset();
+        }
+        let strip_height = (context.theme.tabs.height - context.theme.tabs.tongue_depth)
+            .min(bounds.size.height)
+            .max(0.0);
+        let strip_bounds = Rect::new(
+            bounds.origin.x,
+            bounds.origin.y,
+            (context.theme.layout.tab_width * self.items.len() as f32).min(bounds.size.width),
+            strip_height,
+        );
+        Rectangle::new()
+            .color(RectangleColor::Custom(context.theme.tabs.strip_background))
+            .radius(CornerRadius::Custom(14.0))
+            .paint(strip_bounds, context);
+        context.display_list.push(DrawCommand::FillRect {
+            rect: Rect::new(
+                strip_bounds.origin.x,
+                strip_bounds.origin.y + strip_height / 2.0,
+                strip_bounds.size.width,
+                strip_height / 2.0,
+            ),
+            color: context.theme.tabs.strip_background,
+        });
+        context.display_list.push(DrawCommand::FillRect {
+            rect: Rect::new(
+                strip_bounds.origin.x,
+                strip_bounds.origin.y + strip_height,
+                strip_bounds.size.width,
+                (bounds.size.height - strip_height).max(0.0),
+            ),
+            color: context.theme.tabs.content_background,
+        });
+        if self
+            .items
+            .iter()
+            .any(|item| item.interaction.is_focus_visible())
+        {
+            Rectangle::new()
+                .color(RectangleColor::Custom(Color::TRANSPARENT))
+                .radius(CornerRadius::Custom(14.0))
+                .border(super::BorderStyle::custom(
+                    context.theme.button.focus_ring,
+                    context.theme.button.focus_ring_width,
+                ))
+                .paint(strip_bounds, context);
+        }
+        if let Some(selected_index) = self.selected_index(self.selection.get()) {
+            let width = context.theme.layout.tab_width;
+            let centers = self.tab_centers(bounds, context.theme);
+            let fallback_center = centers[selected_index];
+            let sample = self
+                .interaction_state
+                .selection_motion
+                .sample_for_motion(fallback_center, context.theme.motion.omochi.enabled);
+            let previous_direction = self.interaction_state.selection_motion.surface_direction();
+            let indicator_half_width = (width - context.theme.tabs.indicator_inset * 2.0) / 2.0;
+
+            if sample.direction != 0.0 && sample.pull_distance > 0.0 {
+                if previous_direction != 0.0 && previous_direction != sample.direction {
+                    self.interaction_state.indicator_shape.end();
+                }
+                if previous_direction != sample.direction
+                    || !self.interaction_state.indicator_shape.is_active()
+                {
+                    let edge = sample.direction * indicator_half_width;
+                    self.interaction_state
+                        .indicator_shape
+                        .begin(Point::new(edge, 0.0));
+                    self.interaction_state
+                        .selection_motion
+                        .set_surface_direction(sample.direction);
+                }
+                let edge = sample.direction * indicator_half_width;
+                self.interaction_state.indicator_shape.moved(Point::new(
+                    edge + sample.direction * sample.pull_distance,
+                    0.0,
+                ));
+            }
+            if sample.completed {
+                self.interaction_state.indicator_shape.end();
+                self.interaction_state
+                    .selection_motion
+                    .set_surface_direction(0.0);
+                self.selection.commit();
+            }
+            if sample.animating || self.interaction_state.indicator_shape.is_animating() {
+                context.request_redraw_in_at(
+                    Self::indicator_clip_bounds(bounds),
+                    Instant::now() + Duration::from_millis(8),
+                );
+            }
+            let inset = context.theme.tabs.indicator_inset;
+            let indicator_height = strip_height - inset;
+            let center = Point::new(
+                sample.center,
+                bounds.origin.y + inset + indicator_height / 2.0,
+            );
+            let indicator_points = self.indicator_points(context.theme);
+            let indicator_clip = Self::indicator_clip_bounds(bounds);
+            context.display_list.push(DrawCommand::PushClip {
+                rect: indicator_clip,
+            });
+            self.interaction_state.indicator_shape.paint_points(
+                &indicator_points,
+                center,
+                context.theme.tabs.selected_background,
+                indicator_clip,
+                context,
+            );
+            context.display_list.push(DrawCommand::PopClip);
+        }
+        self.stack(context.theme).paint(strip_bounds, context);
     }
 
     fn handle_event(
@@ -186,15 +395,261 @@ impl View for Tabs {
         context: &mut EventContext<'_>,
     ) -> EventResult {
         let stack = self.stack(context.theme);
+        let strip_height = (context.theme().tabs.height - context.theme().tabs.tongue_depth)
+            .min(bounds.size.height)
+            .max(0.0);
+        let strip_bounds = Rect::new(
+            bounds.origin.x,
+            bounds.origin.y,
+            bounds.size.width,
+            strip_height,
+        );
+        let child_bounds = stack.child_bounds_for_event(strip_bounds, context);
+        let centers = self.tab_centers(bounds, context.theme());
+        let selected_index = self.selected_index(self.selection.get()).unwrap_or(0);
+        let current_center = centers
+            .get(selected_index)
+            .copied()
+            .unwrap_or(bounds.origin.x);
+
+        match event {
+            ViewEvent::PointerPressed {
+                position,
+                button: PointerButton::Primary,
+            } if self.enabled && bounds.contains(*position) && !centers.is_empty() => {
+                self.interaction_state.selection_motion.begin_drag(
+                    position.x,
+                    current_center,
+                    &centers,
+                );
+                context.request_redraw_in(Self::indicator_clip_bounds(bounds));
+                return EventResult::Consumed;
+            }
+            ViewEvent::PointerMoved { position }
+                if self.interaction_state.selection_motion.is_dragging() =>
+            {
+                self.interaction_state
+                    .selection_motion
+                    .move_drag(position.x, &centers);
+                context.request_redraw_in(Self::indicator_clip_bounds(bounds));
+                return EventResult::Consumed;
+            }
+            ViewEvent::PointerReleased {
+                position,
+                button: PointerButton::Primary,
+            } if self.interaction_state.selection_motion.is_dragging() => {
+                let mut index = self
+                    .interaction_state
+                    .selection_motion
+                    .end_drag(position.x, &centers);
+                if !self.items.get(index).is_some_and(|item| item.enabled) {
+                    index = self
+                        .items
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, item)| item.enabled)
+                        .min_by(|(lhs, _), (rhs, _)| {
+                            (centers[*lhs] - position.x)
+                                .abs()
+                                .total_cmp(&(centers[*rhs] - position.x).abs())
+                        })
+                        .map(|(index, _)| index)
+                        .unwrap_or(selected_index);
+                    self.interaction_state
+                        .selection_motion
+                        .select(current_center, centers[index]);
+                }
+                self.selection
+                    .set_without_notification(self.items[index].value);
+                if let Some(target_bounds) = child_bounds.get(index).copied() {
+                    context.request_keyboard_focus(target_bounds);
+                }
+                context.request_redraw_in(Self::indicator_clip_bounds(bounds));
+                return EventResult::Consumed;
+            }
+            ViewEvent::FocusChanged { focused: false }
+                if self.interaction_state.selection_motion.is_dragging() =>
+            {
+                self.interaction_state
+                    .selection_motion
+                    .cancel(current_center);
+                self.interaction_state.indicator_shape.end();
+            }
+            _ => {}
+        }
+
         if let Some(index) = self.keyboard_target(event) {
-            let child_bounds = stack.child_bounds_for_event(bounds, context);
             if let Some(target_bounds) = child_bounds.get(index).copied() {
-                self.selection.set_if_changed(self.items[index].value);
+                self.selection
+                    .set_without_notification(self.items[index].value);
+                self.interaction_state
+                    .selection_motion
+                    .select(current_center, centers[index]);
                 context.request_keyboard_focus(target_bounds);
-                context.request_redraw_in(bounds.expanded(16.0));
+                context.request_redraw_in(Self::indicator_clip_bounds(bounds));
                 return EventResult::Consumed;
             }
         }
-        stack.handle_event(bounds, event, context)
+        stack.handle_event(strip_bounds, event, context)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::draw_command::DisplayList;
+    use crate::geometry::Point;
+    use crate::state::State;
+    use crate::theme::Theme;
+    use crate::typography::{TextMeasurer, Typography};
+
+    #[test]
+    fn indicator_contour_matches_the_omochi_tab_geometry() {
+        let selection = State::new(0_usize);
+        let tabs = Tabs::new(selection.binding()).item(0, "Home");
+        let points = tabs.indicator_points(&Theme::LIGHT);
+        let minimum_x = points
+            .iter()
+            .map(|point| point.x)
+            .fold(f32::INFINITY, f32::min);
+        let maximum_x = points
+            .iter()
+            .map(|point| point.x)
+            .fold(f32::NEG_INFINITY, f32::max);
+        let minimum_y = points
+            .iter()
+            .map(|point| point.y)
+            .fold(f32::INFINITY, f32::min);
+        let maximum_y = points
+            .iter()
+            .map(|point| point.y)
+            .fold(f32::NEG_INFINITY, f32::max);
+
+        assert_eq!(minimum_x, -46.0);
+        assert_eq!(maximum_x, 46.0);
+        assert_eq!(minimum_y, -17.5);
+        assert_eq!(maximum_y, 23.5);
+        assert!(points.contains(&Point::new(-34.0, 23.5)));
+        assert!(points.contains(&Point::new(34.0, 23.5)));
+    }
+
+    #[test]
+    fn indicator_clip_preserves_vertical_omochi_deformation() {
+        let bounds = Rect::new(20.0, 30.0, 300.0, 45.0);
+        let clip = Tabs::indicator_clip_bounds(bounds);
+
+        assert_eq!(clip.origin.x, bounds.origin.x);
+        assert_eq!(clip.size.width, bounds.size.width);
+        assert_eq!(clip.origin.y, bounds.origin.y - 34.0);
+        assert_eq!(clip.size.height, bounds.size.height + 68.0);
+    }
+
+    #[test]
+    fn labels_are_centered_in_the_tab_strip() {
+        let selection = State::new(0_usize);
+        let tabs = Tabs::new(selection.binding()).item(0, "Overview");
+        let theme = Theme::LIGHT;
+        let bounds = Rect::new(20.0, 30.0, theme.layout.tab_width, theme.tabs.height);
+        let mut display_list = DisplayList::new();
+        let mut text_measurer = TextMeasurer::new();
+        let mut paint_context = PaintContext::new(
+            &mut display_list,
+            &theme,
+            &Typography::DEFAULT,
+            &mut text_measurer,
+        );
+        tabs.paint(bounds, &mut paint_context);
+
+        let command = display_list
+            .commands()
+            .iter()
+            .find_map(|command| match command {
+                DrawCommand::DrawText { command } if command.text == "Overview" => Some(command),
+                _ => None,
+            });
+        let command = command.expect("tab label should be painted");
+        assert_eq!(command.alignment, crate::typography::TextAlignment::Center);
+        assert_eq!(command.bounds.origin.x, bounds.origin.x);
+        assert_eq!(command.bounds.size.width, theme.layout.tab_width);
+        assert_eq!(command.bounds.size.height, 16.0);
+        assert_eq!(
+            command.bounds.origin.y,
+            bounds.origin.y
+                + (theme.tabs.height - theme.tabs.tongue_depth - command.bounds.size.height) / 2.0
+        );
+    }
+
+    #[test]
+    fn magnetic_drag_defers_selection_until_release() {
+        let selection = State::new(0_usize);
+        let interaction = TabsInteractionState::new();
+        let tabs = Tabs::with_interaction(selection.binding(), interaction.clone())
+            .item(0, "Overview")
+            .item(1, "Activity")
+            .item(2, "Settings");
+        let theme = Theme::LIGHT;
+        let bounds = Rect::new(30.0, 24.0, theme.layout.tab_width * 3.0, theme.tabs.height);
+        let first = Point::new(
+            bounds.origin.x + theme.layout.tab_width * 0.5,
+            bounds.origin.y + (theme.tabs.height - theme.tabs.tongue_depth) / 2.0,
+        );
+        let second = Point::new(
+            bounds.origin.x + theme.layout.tab_width * 1.5,
+            bounds.origin.y + (theme.tabs.height - theme.tabs.tongue_depth) / 2.0,
+        );
+        let mut text_measurer = TextMeasurer::new();
+        let mut event_context = EventContext::new(&theme, &Typography::DEFAULT, &mut text_measurer);
+
+        assert_eq!(
+            tabs.handle_event(
+                bounds,
+                &ViewEvent::PointerPressed {
+                    position: first,
+                    button: PointerButton::Primary,
+                },
+                &mut event_context,
+            ),
+            EventResult::Consumed
+        );
+        assert_eq!(
+            tabs.handle_event(
+                bounds,
+                &ViewEvent::PointerMoved { position: second },
+                &mut event_context,
+            ),
+            EventResult::Consumed
+        );
+        assert_eq!(selection.get(), 0);
+        assert_eq!(
+            tabs.handle_event(
+                bounds,
+                &ViewEvent::PointerReleased {
+                    position: second,
+                    button: PointerButton::Primary,
+                },
+                &mut event_context,
+            ),
+            EventResult::Consumed
+        );
+        assert_eq!(selection.get(), 1);
+
+        let rebuilt = Tabs::with_interaction(selection.binding(), interaction.clone())
+            .item(0, "Overview")
+            .item(1, "Activity")
+            .item(2, "Settings");
+        let mut display_list = DisplayList::new();
+        let mut paint_context = PaintContext::new(
+            &mut display_list,
+            &theme,
+            &Typography::DEFAULT,
+            &mut text_measurer,
+        );
+        rebuilt.paint(bounds, &mut paint_context);
+
+        assert!(interaction.indicator_shape.is_animating());
+        assert!(display_list.commands().iter().any(|command| matches!(
+            command,
+            DrawCommand::FillPolygon { points, .. } if !points.is_empty()
+        )));
     }
 }

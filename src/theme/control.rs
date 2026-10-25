@@ -50,45 +50,53 @@ pub struct ButtonTokens {
     pub focus_ring: Color,
     pub focus_ring_width: f32,
     pub disabled_opacity: f32,
+    pub shadow: ShadowStyle,
+    pub pressed_shadow: ShadowStyle,
+    pub omochi_shadow: ShadowStyle,
 }
 
 impl ButtonTokens {
     pub const fn from_colors(colors: ColorTokens, dark: bool) -> Self {
         let transparent = Color::TRANSPARENT;
-        let primary_rest = if dark {
-            Color::from_rgb_hex(0x3970DD)
+        // Primary actions use the application accent so they remain immediately
+        // identifiable without adding extra weight or decoration.
+        let primary_rest = colors.accent;
+        let primary_hover = colors.accent_hovered;
+        let primary_pressed = colors.accent_pressed;
+        let primary_foreground = Color::WHITE;
+        let standard_rest = if dark {
+            colors.elevated_surface
         } else {
-            Color::from_rgb_hex(0x3970DD)
+            colors.surface
         };
-        let primary_hover = if dark {
-            Color::from_rgb_hex(0xffffff)
+        let standard_hover = if dark {
+            colors.border
         } else {
-            Color::from_rgb_hex(0x303236)
+            colors.surface_muted
         };
-        let primary_pressed = if dark {
-            Color::from_rgb_hex(0xd9dce1)
+        let standard_pressed = if dark {
+            colors.border_strong
         } else {
-            Color::BLACK
+            colors.border
         };
-        let primary_foreground = if dark { Color::BLACK } else { Color::WHITE };
         let ghost_hover = colors.text_primary.with_alpha(if dark { 24 } else { 14 });
         let ghost_pressed = colors.text_primary.with_alpha(if dark { 40 } else { 28 });
 
         Self {
             standard: ButtonPalette {
                 rest: ControlAppearance {
-                    background: colors.surface,
+                    background: standard_rest,
                     border: colors.border,
                     foreground: colors.text_primary,
                 },
                 hovered: ControlAppearance {
-                    background: colors.surface_subtle,
-                    border: colors.border_strong,
+                    background: standard_hover,
+                    border: colors.border,
                     foreground: colors.text_primary,
                 },
                 pressed: ControlAppearance {
-                    background: colors.surface_muted,
-                    border: colors.border_strong,
+                    background: standard_pressed,
+                    border: colors.border,
                     foreground: colors.text_primary,
                 },
             },
@@ -121,19 +129,60 @@ impl ButtonTokens {
                     foreground: colors.text_primary,
                 },
             },
-            danger: solid_palette(
-                colors.destructive,
-                colors.destructive_hovered,
-                colors.destructive,
-                Color::WHITE,
-            ),
+            danger: ButtonPalette {
+                rest: ControlAppearance {
+                    background: standard_rest,
+                    border: colors.border,
+                    foreground: colors.destructive,
+                },
+                hovered: ControlAppearance {
+                    background: standard_hover,
+                    border: colors.border,
+                    foreground: colors.destructive,
+                },
+                pressed: ControlAppearance {
+                    background: standard_pressed,
+                    border: colors.border,
+                    foreground: colors.destructive,
+                },
+            },
             horizontal_padding: super::ControlMetrics::HORIZONTAL_PADDING,
             height: super::ControlMetrics::DEFAULT.height,
             radius: super::ControlMetrics::RADIUS,
             stroke_width: FigmaTokens::SHAPE.stroke_default,
-            focus_ring: colors.border_strong,
-            focus_ring_width: 3.0,
+            focus_ring: colors.focus_ring,
+            focus_ring_width: 2.0,
             disabled_opacity: 0.42,
+            shadow: ShadowStyle::Custom(ShadowSet::single(Shadow::new(
+                Color::rgba(0, 0, 0, if dark { 22 } else { 14 }),
+                0.0,
+                1.0,
+                1.0,
+                0.0,
+            ))),
+            pressed_shadow: ShadowStyle::Custom(ShadowSet::single(Shadow::new(
+                Color::rgba(0, 0, 0, if dark { 16 } else { 10 }),
+                0.0,
+                0.5,
+                0.0,
+                0.0,
+            ))),
+            omochi_shadow: ShadowStyle::Custom(ShadowSet::double(
+                Shadow::new(
+                    Color::rgba(0, 0, 0, if dark { 24 } else { 16 }),
+                    0.0,
+                    1.0,
+                    1.5,
+                    0.0,
+                ),
+                Shadow::new(
+                    Color::rgba(0, 0, 0, if dark { 12 } else { 7 }),
+                    0.0,
+                    1.5,
+                    3.0,
+                    0.0,
+                ),
+            )),
         }
     }
 }
@@ -169,7 +218,7 @@ impl TextFieldTokens {
         Self {
             background: colors.surface,
             disabled_background: colors.surface_subtle,
-            border: colors.border_strong,
+            border: colors.border,
             hovered_border: colors.text_secondary,
             focused_border: colors.accent,
             invalid_border: colors.destructive,
@@ -184,7 +233,7 @@ impl TextFieldTokens {
             min_width: 100.0,
             radius: CornerRadius::Small,
             stroke_width: FigmaTokens::SHAPE.stroke_default,
-            focus_ring_width: 3.0,
+            focus_ring_width: 2.0,
             selection_radius: 3.0,
             caret_width: 2.0,
         }
@@ -229,6 +278,7 @@ pub struct DialogTokens {
     pub padding: f32,
     pub radius: CornerRadius,
     pub stroke_width: f32,
+    pub shadow: ShadowStyle,
 }
 
 impl DialogTokens {
@@ -239,6 +289,7 @@ impl DialogTokens {
             padding: FigmaTokens::SPACING.space_16,
             radius: CornerRadius::Large,
             stroke_width: FigmaTokens::SHAPE.stroke_default,
+            shadow: ShadowStyle::Window,
         }
     }
 }
@@ -294,7 +345,9 @@ pub struct SwitchTokens {
     pub on_pressed: Color,
     pub knob: Color,
     pub disabled_knob: Color,
+    pub knob_border: Color,
     pub knob_shadow: ShadowStyle,
+    pub stroke_width: f32,
     pub disabled_opacity: f32,
     pub content_padding: f32,
 }
@@ -313,10 +366,12 @@ impl SwitchTokens {
             on_pressed: colors.accent_pressed,
             knob: Color::WHITE,
             disabled_knob: Color::rgba(255, 255, 255, 170),
+            knob_border: colors.border_strong,
             knob_shadow: ShadowStyle::Custom(ShadowSet::double(
-                Shadow::new(Color::rgba(0, 0, 0, 28), 0.0, 1.0, 2.0, 0.0),
-                Shadow::new(Color::rgba(0, 0, 0, 14), 0.0, 2.0, 4.0, 0.0),
+                Shadow::new(Color::rgba(0, 0, 0, 18), 0.0, 1.0, 1.5, 0.0),
+                Shadow::new(Color::rgba(0, 0, 0, 8), 0.0, 1.5, 3.0, 0.0),
             )),
+            stroke_width: FigmaTokens::SHAPE.stroke_default,
             disabled_opacity: 0.45,
             content_padding: FigmaTokens::SPACING.space_4,
         }
@@ -338,6 +393,7 @@ pub struct SliderTokens {
     pub disabled_knob: Color,
     pub knob_border: Color,
     pub hovered_knob_border: Color,
+    pub knob_shadow: ShadowStyle,
     pub knob_radius: CornerRadius,
     pub focus_ring: Color,
     pub disabled_opacity: f32,
@@ -356,20 +412,24 @@ impl SliderTokens {
             level_fill: Color::WHITE,
             label: colors.text_primary,
             disabled_label: colors.text_disabled,
-            track: colors.surface_muted,
+            track: colors.border,
             fill: colors.accent,
             hovered_fill: colors.accent_hovered,
             pressed_fill: colors.accent_pressed,
-            knob: colors.elevated_surface,
-            hovered_knob: colors.surface,
-            disabled_knob: colors.surface_subtle,
+            knob: Color::WHITE,
+            hovered_knob: Color::WHITE,
+            disabled_knob: Color::rgba(255, 255, 255, 170),
             knob_border: colors.border,
             hovered_knob_border: colors.border_strong,
+            knob_shadow: ShadowStyle::Custom(ShadowSet::double(
+                Shadow::new(Color::rgba(0, 0, 0, 16), 0.0, 1.0, 1.5, 0.0),
+                Shadow::new(Color::rgba(0, 0, 0, 7), 0.0, 1.5, 3.0, 0.0),
+            )),
             knob_radius: CornerRadius::ExtraLarge,
-            focus_ring: colors.border_strong,
+            focus_ring: colors.focus_ring,
             disabled_opacity: 0.45,
             stroke_width: FigmaTokens::SHAPE.stroke_default,
-            focus_ring_width: 3.0,
+            focus_ring_width: 2.0,
         }
     }
 }
@@ -380,19 +440,58 @@ pub struct SegmentedControlTokens {
     pub border: Color,
     pub indicator_background: Color,
     pub indicator_border: Color,
+    pub foreground: Color,
+    pub selected_foreground: Color,
+    pub disabled_foreground: Color,
+    pub focus_ring: Color,
     pub radius: CornerRadius,
     pub stroke_width: f32,
+    pub focus_ring_width: f32,
+    pub indicator_shadow: ShadowStyle,
 }
 
 impl SegmentedControlTokens {
     pub const fn from_colors(colors: ColorTokens) -> Self {
+        let dark = colors.background.red < 80;
         Self {
-            background: colors.surface_subtle,
-            border: colors.border,
-            indicator_background: colors.surface,
-            indicator_border: colors.border,
-            radius: CornerRadius::ExtraLarge,
+            background: if dark {
+                colors.surface_muted
+            } else {
+                Color::rgb(232, 234, 237)
+            },
+            border: if dark {
+                colors.border.with_alpha(150)
+            } else {
+                Color::rgba(23, 24, 26, 15)
+            },
+            indicator_background: if dark { colors.surface } else { Color::WHITE },
+            indicator_border: if dark {
+                colors.border.with_alpha(190)
+            } else {
+                Color::rgba(23, 24, 26, 20)
+            },
+            foreground: if dark {
+                colors.text_secondary
+            } else {
+                Color::rgb(98, 102, 108)
+            },
+            selected_foreground: if dark {
+                colors.text_primary
+            } else {
+                Color::rgb(23, 24, 26)
+            },
+            disabled_foreground: colors.text_disabled,
+            focus_ring: colors.focus_ring.with_alpha(158),
+            radius: CornerRadius::Full,
             stroke_width: FigmaTokens::SHAPE.stroke_default,
+            focus_ring_width: 3.0,
+            indicator_shadow: ShadowStyle::Custom(ShadowSet::single(Shadow::new(
+                Color::rgba(0, 0, 0, if dark { 24 } else { 14 }),
+                0.0,
+                1.0,
+                3.0,
+                0.0,
+            ))),
         }
     }
 }
@@ -404,6 +503,7 @@ pub struct PopoverTokens {
     pub padding: f32,
     pub radius: CornerRadius,
     pub stroke_width: f32,
+    pub shadow: ShadowStyle,
 }
 
 impl PopoverTokens {
@@ -414,6 +514,7 @@ impl PopoverTokens {
             padding: FigmaTokens::SPACING.space_8,
             radius: CornerRadius::Medium,
             stroke_width: FigmaTokens::SHAPE.stroke_default,
+            shadow: ShadowStyle::Floating,
         }
     }
 }
@@ -435,7 +536,7 @@ pub struct PickerTokens {
 impl PickerTokens {
     pub const fn from_colors(colors: ColorTokens) -> Self {
         Self {
-            background: colors.surface,
+            background: colors.elevated_surface,
             hovered_background: colors.surface_subtle,
             border: colors.border,
             hovered_border: colors.border_strong,
@@ -468,11 +569,14 @@ pub struct MenuTokens {
     pub item_radius: CornerRadius,
     pub surface_radius: CornerRadius,
     pub surface_stroke_width: f32,
+    pub surface_shadow: ShadowStyle,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TabsTokens {
     pub background: Color,
+    pub strip_background: Color,
+    pub content_background: Color,
     pub hovered_background: Color,
     pub selected_background: Color,
     pub foreground: Color,
@@ -481,20 +585,51 @@ pub struct TabsTokens {
     pub horizontal_padding: f32,
     pub vertical_padding: f32,
     pub radius: CornerRadius,
+    pub height: f32,
+    pub indicator_inset: f32,
+    pub tongue_depth: f32,
+    pub tongue_width: f32,
 }
 
 impl TabsTokens {
     pub const fn from_colors(colors: ColorTokens) -> Self {
+        let dark = colors.background.red < 80;
         Self {
             background: Color::TRANSPARENT,
-            hovered_background: colors.surface_subtle,
-            selected_background: colors.accent_soft,
-            foreground: colors.text_secondary,
-            selected_foreground: colors.accent,
+            strip_background: if dark {
+                colors.surface_muted
+            } else {
+                Color::rgb(232, 234, 237)
+            },
+            content_background: if dark {
+                colors.background
+            } else {
+                Color::WHITE
+            },
+            hovered_background: Color::TRANSPARENT,
+            selected_background: if dark {
+                colors.elevated_surface
+            } else {
+                Color::WHITE
+            },
+            foreground: if dark {
+                colors.text_secondary
+            } else {
+                Color::rgb(98, 102, 108)
+            },
+            selected_foreground: if dark {
+                colors.text_primary
+            } else {
+                Color::rgb(23, 24, 26)
+            },
             disabled_foreground: colors.text_disabled,
             horizontal_padding: FigmaTokens::SPACING.space_8,
             vertical_padding: FigmaTokens::SPACING.space_2,
-            radius: CornerRadius::Small,
+            radius: CornerRadius::Custom(15.0),
+            height: 45.0,
+            indicator_inset: 4.0,
+            tongue_depth: 6.0,
+            tongue_width: 68.0,
         }
     }
 }
@@ -543,6 +678,7 @@ pub struct TooltipTokens {
     pub minimum_height: f32,
     pub radius: CornerRadius,
     pub stroke_width: f32,
+    pub shadow: ShadowStyle,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -579,10 +715,10 @@ impl BadgeTokens {
             neutral_foreground: colors.text_secondary,
             accent_background: colors.accent_soft,
             accent_foreground: colors.accent,
-            success_background: colors.success,
-            warning_background: colors.warning,
-            error_background: colors.destructive,
-            semantic_foreground: Color::WHITE,
+            success_background: colors.success_soft,
+            warning_background: colors.warning_soft,
+            error_background: colors.destructive_soft,
+            semantic_foreground: colors.text_primary,
             horizontal_padding: FigmaTokens::SPACING.space_8,
             vertical_padding: FigmaTokens::SPACING.space_2,
             radius: CornerRadius::Small,
@@ -619,7 +755,7 @@ impl CardTokens {
             padding: FigmaTokens::SPACING.space_16,
             compact_padding: FigmaTokens::SPACING.space_8,
             radius: CornerRadius::Card,
-            shadow: ShadowStyle::Card,
+            shadow: ShadowStyle::None,
             stroke_width: FigmaTokens::SHAPE.stroke_default,
         }
     }
@@ -687,6 +823,7 @@ impl TooltipTokens {
             minimum_height: 24.0,
             radius: CornerRadius::Small,
             stroke_width: FigmaTokens::SHAPE.stroke_default,
+            shadow: ShadowStyle::Card,
         }
     }
 }
@@ -727,6 +864,7 @@ impl MenuTokens {
             item_radius: CornerRadius::Small,
             surface_radius: CornerRadius::Medium,
             surface_stroke_width: FigmaTokens::SHAPE.stroke_default,
+            surface_shadow: ShadowStyle::Floating,
         }
     }
 }
@@ -753,5 +891,103 @@ const fn solid_palette(
             border: pressed,
             foreground,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn primary_buttons_use_the_accent_with_readable_contrast() {
+        let light = ButtonTokens::from_colors(super::super::theme::Theme::LIGHT.colors, false);
+        let dark = ButtonTokens::from_colors(super::super::theme::Theme::DARK.colors, true);
+
+        assert_eq!(
+            light.primary.rest.background,
+            super::super::theme::Theme::LIGHT.colors.accent
+        );
+        assert_eq!(light.primary.rest.foreground, Color::WHITE);
+        assert_eq!(
+            dark.primary.rest.background,
+            super::super::theme::Theme::DARK.colors.accent
+        );
+        assert_eq!(dark.primary.rest.foreground, Color::WHITE);
+    }
+
+    #[test]
+    fn control_focus_ring_uses_the_semantic_focus_color() {
+        let colors = super::super::theme::Theme::LIGHT.colors;
+        assert_eq!(
+            ButtonTokens::from_colors(colors, false).focus_ring,
+            colors.focus_ring
+        );
+    }
+
+    #[test]
+    fn slider_thumb_stays_white_in_both_appearances() {
+        for theme in [
+            super::super::theme::Theme::LIGHT,
+            super::super::theme::Theme::DARK,
+        ] {
+            let slider = SliderTokens::from_colors(theme.colors);
+            assert_eq!(slider.knob, Color::WHITE);
+            assert_eq!(slider.hovered_knob, Color::WHITE);
+        }
+    }
+
+    #[test]
+    fn switch_thumb_stays_white_in_both_appearances() {
+        for theme in [
+            super::super::theme::Theme::LIGHT,
+            super::super::theme::Theme::DARK,
+        ] {
+            let switch = SwitchTokens::from_colors(theme.colors);
+            assert_eq!(switch.knob, Color::WHITE);
+        }
+    }
+
+    #[test]
+    fn segmented_indicator_shadow_stays_compact() {
+        for theme in [
+            super::super::theme::Theme::LIGHT,
+            super::super::theme::Theme::DARK,
+        ] {
+            let segmented = SegmentedControlTokens::from_colors(theme.colors);
+            let ShadowStyle::Custom(shadows) = segmented.indicator_shadow else {
+                panic!("segmented indicator should use its compact shadow recipe");
+            };
+            let shadow = shadows.layers[0].expect("indicator shadow should have one layer");
+            assert!(shadow.color.alpha <= 24);
+            assert!(shadow.offset_y <= 1.0);
+            assert!(shadow.blur_radius <= 3.0);
+            assert_eq!(shadows.layers[1], None);
+        }
+    }
+
+    #[test]
+    fn standard_buttons_keep_theme_specific_surface_depth() {
+        let light_theme = super::super::theme::Theme::LIGHT;
+        let dark_theme = super::super::theme::Theme::DARK;
+        let light = ButtonTokens::from_colors(light_theme.colors, false);
+        let dark = ButtonTokens::from_colors(dark_theme.colors, true);
+
+        assert_eq!(light.standard.rest.background, light_theme.colors.surface);
+        assert_eq!(
+            light.standard.hovered.background,
+            light_theme.colors.surface_muted
+        );
+        assert_eq!(light.standard.pressed.background, light_theme.colors.border);
+        assert_eq!(
+            dark.standard.rest.background,
+            dark_theme.colors.elevated_surface
+        );
+        assert_eq!(dark.standard.hovered.background, dark_theme.colors.border);
+        assert_eq!(
+            dark.standard.pressed.background,
+            dark_theme.colors.border_strong
+        );
+        assert_eq!(light.standard.rest.border, light_theme.colors.border);
+        assert_eq!(dark.standard.rest.border, dark_theme.colors.border);
     }
 }

@@ -6,9 +6,9 @@ use crate::geometry::Rect;
 use crate::renderer::{Renderer, Viewport};
 use crate::theme::Color;
 
-use winit::window::Window;
 #[cfg(target_os = "linux")]
 use winit::event_loop::OwnedDisplayHandle;
+use winit::window::Window;
 
 const SHADER: &str = include_str!("../../shaders/windows_gpu.wgsl");
 const BLIT_SHADER: &str = include_str!("../../shaders/desktop_blit.wgsl");
@@ -17,9 +17,8 @@ const BLIT_SHADER: &str = include_str!("../../shaders/desktop_blit.wgsl");
 const GPU_BACKENDS: wgpu::Backends = wgpu::Backends::DX12;
 
 #[cfg(target_os = "linux")]
-const GPU_BACKENDS: wgpu::Backends = wgpu::Backends::from_bits_retain(
-    wgpu::Backends::VULKAN.bits() | wgpu::Backends::GL.bits(),
-);
+const GPU_BACKENDS: wgpu::Backends =
+    wgpu::Backends::from_bits_retain(wgpu::Backends::VULKAN.bits() | wgpu::Backends::GL.bits());
 
 #[cfg(target_os = "windows")]
 const GPU_DEVICE_LABEL: &str = "ViewKit Windows GPU device";
@@ -229,12 +228,11 @@ impl GpuRenderer {
                     },
                 ],
             });
-        let blit_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("ViewKit desktop blit pipeline layout"),
-                bind_group_layouts: &[Some(&blit_bind_group_layout)],
-                immediate_size: 0,
-            });
+        let blit_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("ViewKit desktop blit pipeline layout"),
+            bind_group_layouts: &[Some(&blit_bind_group_layout)],
+            immediate_size: 0,
+        });
         let blit_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("ViewKit desktop blit shader"),
             source: wgpu::ShaderSource::Wgsl(BLIT_SHADER.into()),

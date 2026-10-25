@@ -7,8 +7,8 @@ use crate::theme::{Color, CornerRadius, ShadowStyle, Theme};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 use super::{
-    BorderStyle, Button, ButtonInteractionState, ButtonStyle, HStack, Icon, Padding, SymbolName,
-    Rectangle, RectangleColor, Text, ZStackAlignment,
+    BorderStyle, Button, ButtonInteractionState, ButtonStyle, HStack, Icon, Padding, Rectangle,
+    RectangleColor, SymbolName, Text, ZStackAlignment,
 };
 
 pub struct Checkbox {

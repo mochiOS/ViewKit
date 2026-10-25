@@ -62,7 +62,6 @@ pub trait PlatformApplication {
         None
     }
 
-
     fn accessibility_nodes(&self) -> &[AccessibilityNode] {
         &[]
     }
