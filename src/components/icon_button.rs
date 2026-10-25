@@ -93,6 +93,7 @@ impl IconButton {
         );
 
         let mut button = Button::with_interaction(self.interaction.clone())
+            .content_padding(false)
             .style(style)
             .size(size)
             .radius(theme.button.radius)

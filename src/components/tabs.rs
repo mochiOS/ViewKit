@@ -84,6 +84,7 @@ impl Tabs {
         };
 
         Button::with_interaction(item.interaction.clone())
+            .content_padding(false)
             .style(ButtonStyle::Custom {
                 background,
                 hovered_background: if selected {

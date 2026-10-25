@@ -85,6 +85,7 @@ impl RadioButton {
         let value = self.value;
 
         let mut button = Button::with_interaction(self.interaction.clone())
+            .content_padding(false)
             .style(ButtonStyle::Custom {
                 background: theme.selection_control.interaction_background,
                 hovered_background: theme.selection_control.interaction_hovered_background,

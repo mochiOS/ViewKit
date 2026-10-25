@@ -58,6 +58,7 @@ impl Stepper {
         };
 
         Button::with_interaction(self.interaction.clone())
+            .content_padding(false)
             .style(ButtonStyle::Custom {
                 background: theme.stepper.background,
                 hovered_background: theme.stepper.hovered_background,

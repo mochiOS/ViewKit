@@ -304,6 +304,7 @@ pub struct Button {
     label: Option<String>,
     leading_symbol: Option<SymbolName>,
     content: Option<StackChild>,
+    content_padding: bool,
     intrinsic_label_size: RefCell<Option<Size>>,
     style: ButtonStyle,
     size: ButtonSize,
@@ -327,6 +328,7 @@ impl Button {
             label: Some(label.into()),
             leading_symbol: None,
             content: None,
+            content_padding: true,
             style: ButtonStyle::Standard,
             size: ButtonSize::Medium,
             radius: None,
@@ -376,6 +378,8 @@ impl Button {
         self
     }
 
+    /// 任意の内容にもButtonSizeに対応する共通の左右余白を適用します。
+    /// 内容側が余白や座標を管理する場合は`content_padding(false)`を指定します。
     pub fn content<C>(mut self, content: C) -> Self
     where
         C: IntoStackChild,
@@ -384,6 +388,13 @@ impl Button {
         self.leading_symbol = None;
         self.content = Some(content.into_stack_child());
 
+        self
+    }
+
+    /// カスタム内容への共通左右余白の適用を切り替えます。
+    /// 通常のラベル・leading_symbolと背景・入力領域には影響しません。
+    pub fn content_padding(mut self, enabled: bool) -> Self {
+        self.content_padding = enabled;
         self
     }
 
@@ -468,6 +479,7 @@ impl Button {
             label: None,
             leading_symbol: None,
             content: None,
+            content_padding: true,
             style: ButtonStyle::Standard,
             size: ButtonSize::Medium,
             radius: None,
@@ -756,17 +768,37 @@ impl View for Button {
             return;
         };
 
-        let content_size = content.overlay_size(bounds.size);
-
-        let content_bounds = self.alignment.child_bounds(bounds, content_size);
+        let inset = if self.content_padding {
+            horizontal_padding.min(bounds.size.width.max(0.0) / 2.0)
+        } else {
+            0.0
+        };
+        let inner = Rect::new(
+            bounds.origin.x + inset,
+            bounds.origin.y,
+            (bounds.size.width - inset * 2.0).max(0.0),
+            bounds.size.height,
+        );
+        if inner.size.width <= 0.0 || inner.size.height <= 0.0 {
+            return;
+        }
+        let content_size = content.overlay_size(inner.size);
+        let content_bounds = self.alignment.child_bounds(inner, content_size);
 
         context.display_list.push(DrawCommand::PushRoundedClip {
             rect: bounds,
             radius: radius.resolve(&context.theme.radius, bounds.size.width, bounds.size.height),
         });
 
+        if self.content_padding {
+            context
+                .display_list
+                .push(DrawCommand::PushClip { rect: inner });
+        }
         content.paint(content_bounds, context);
-
+        if self.content_padding {
+            context.display_list.push(DrawCommand::PopClip);
+        }
         context.display_list.push(DrawCommand::PopClip);
     }
 
@@ -1025,7 +1057,23 @@ impl View for Button {
         }
 
         if let Some(content) = self.content.as_ref() {
-            return content.measure(constraints, context);
+            let padding = if self.content_padding {
+                horizontal_padding * 2.0
+            } else {
+                0.0
+            };
+            let child = Constraints::new(
+                Size::new(
+                    (constraints.minimum.width - padding).max(0.0),
+                    constraints.minimum.height,
+                ),
+                Size::new(
+                    (constraints.maximum.width - padding).max(0.0),
+                    constraints.maximum.height,
+                ),
+            );
+            let size = content.measure(child, context);
+            return constraints.constrain(Size::new(size.width + padding, size.height));
         }
 
         let width = if width_is_fixed {
@@ -1128,6 +1176,106 @@ fn fit_symbol_label(
 mod tests {
     use super::*;
 
+    struct ContentProbe(Rc<RefCell<Option<Rect>>>);
+    impl View for ContentProbe {
+        fn measure(&self, c: Constraints, _: &mut MeasureContext<'_>) -> Size {
+            c.constrain(Size::new(42.0, 18.0))
+        }
+        fn paint(&self, b: Rect, _: &mut PaintContext<'_>) {
+            *self.0.borrow_mut() = Some(b);
+        }
+    }
+    #[test]
+    fn custom_content_uses_shared_size_padding_in_measurement_paint_and_clip() {
+        let mut theme = Theme::LIGHT;
+        theme.spacing.small = 10.0;
+        theme.button.horizontal_padding = 13.0;
+        for size in [ButtonSize::Small, ButtonSize::Medium, ButtonSize::Large] {
+            for hovered in [false, true] {
+                let painted = Rc::new(RefCell::new(None));
+                let button = Button::new("")
+                    .size(size)
+                    .content(ContentProbe(painted.clone()));
+                button.interaction.inner.borrow_mut().hovered = hovered;
+                let pad = size.horizontal_padding(&theme);
+                let mut measurer = crate::typography::TextMeasurer::new();
+                let natural = button.measure(
+                    Constraints::loose(Size::new(200.0, 60.0)),
+                    &mut MeasureContext {
+                        theme: &theme,
+                        typography: &theme.typography,
+                        text_measurer: &mut measurer,
+                    },
+                );
+                assert_eq!(natural, Size::new(42.0 + pad * 2.0, 18.0));
+                let bounds = Rect::new(20.0, 12.0, 120.0, 32.0);
+                let (list, nodes) = render(&button, &theme, bounds);
+                let child = painted.borrow().unwrap();
+                assert_eq!(child.origin.x, bounds.origin.x + pad);
+                assert_eq!(child.size.width, bounds.size.width - 2.0 * pad);
+                assert!(list.commands().iter().any(|command| matches!(command,
+                    DrawCommand::PushClip { rect } if rect.origin.x == bounds.origin.x + pad
+                        && rect.size.width == bounds.size.width - 2.0 * pad)));
+                assert_eq!(nodes[0].bounds, bounds);
+            }
+        }
+    }
+    #[test]
+    fn owned_content_layout_can_opt_out_without_changing_label_padding() {
+        let theme = Theme::LIGHT;
+        let painted = Rc::new(RefCell::new(None));
+        let button = Button::new("")
+            .content_padding(false)
+            .content(ContentProbe(painted.clone()));
+        let bounds = Rect::new(20.0, 12.0, 120.0, 32.0);
+        render(&button, &theme, bounds);
+        assert_eq!(*painted.borrow(), Some(bounds));
+        let mut measurer = crate::typography::TextMeasurer::new();
+        let natural = button.measure(
+            Constraints::loose(Size::new(200.0, 60.0)),
+            &mut MeasureContext {
+                theme: &theme,
+                typography: &theme.typography,
+                text_measurer: &mut measurer,
+            },
+        );
+        assert_eq!(natural, Size::new(42.0, 18.0));
+        let (list, _) = render(&Button::new("Apply").content_padding(false), &theme, bounds);
+        assert!(list.commands().iter().any(|command| matches!(command,
+            DrawCommand::DrawText { command } if command.bounds.origin.x == bounds.origin.x + theme.button.horizontal_padding)));
+    }
+    #[test]
+    fn narrow_custom_content_does_not_escape_and_outer_edges_remain_clickable() {
+        use crate::geometry::Point;
+        use crate::platform::PointerButton;
+        use std::cell::Cell;
+        let theme = Theme::LIGHT;
+        let painted = Rc::new(RefCell::new(None));
+        let clicked = Rc::new(Cell::new(false));
+        let callback = clicked.clone();
+        let button = Button::new("")
+            .size(ButtonSize::Small)
+            .content(ContentProbe(painted.clone()))
+            .on_click(move || callback.set(true));
+        let bounds = Rect::new(0.0, 0.0, 4.0, 30.0);
+        render(&button, &theme, bounds);
+        assert!(painted.borrow().is_none());
+        let mut measurer = crate::typography::TextMeasurer::new();
+        let mut ctx = EventContext::new(&theme, &theme.typography, &mut measurer);
+        for event in [
+            ViewEvent::PointerPressed {
+                position: Point::new(2.0, 15.0),
+                button: PointerButton::Primary,
+            },
+            ViewEvent::PointerReleased {
+                position: Point::new(2.0, 15.0),
+                button: PointerButton::Primary,
+            },
+        ] {
+            button.handle_event(bounds, &event, &mut ctx);
+        }
+        assert!(clicked.get());
+    }
     #[test]
     fn semantic_sizes_follow_shared_control_metrics() {
         let theme = Theme::LIGHT;

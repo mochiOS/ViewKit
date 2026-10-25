@@ -253,6 +253,7 @@ impl ListRow {
 
     fn button(&self, theme: &Theme) -> Button {
         let mut button = Button::with_interaction(self.interaction.clone())
+            .content_padding(false)
             .style(ButtonStyle::Custom {
                 background: if self.selected {
                     theme.list.selected_background

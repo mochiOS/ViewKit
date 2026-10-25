@@ -161,6 +161,7 @@ impl MenuItem {
         };
 
         let mut button = Button::with_interaction(self.interaction.clone())
+            .content_padding(false)
             .style(style)
             .radius(theme.menu.item_radius)
             .shadow(ShadowStyle::None)

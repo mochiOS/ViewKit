@@ -117,6 +117,7 @@ impl Picker {
         };
 
         Button::with_interaction(self.interaction.clone())
+            .content_padding(false)
             .style(ButtonStyle::Custom {
                 background: theme.picker.background,
                 hovered_background: theme.picker.hovered_background,

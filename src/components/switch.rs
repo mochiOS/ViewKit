@@ -157,6 +157,7 @@ impl Switch {
         );
 
         Button::with_interaction(self.interaction.clone())
+            .content_padding(false)
             .style(ButtonStyle::Custom {
                 background: theme.switch.interaction_background,
                 hovered_background: theme.switch.interaction_background,
