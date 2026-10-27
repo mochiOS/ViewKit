@@ -26,6 +26,14 @@ pub struct ContextMenuRequest {
     pub items: Vec<ContextMenuItem>,
 }
 
+impl ContextMenuRequest {
+    pub(crate) fn next_id() -> u64 {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            .max(1)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum ViewEvent {
     PointerMoved {
@@ -314,6 +322,16 @@ impl<'a> EventContext<'a> {
 
     pub fn typography(&self) -> &Typography {
         self.typography
+    }
+
+    /// Measures event-time geometry using the same font scale and cached font
+    /// metrics as painting, including for popover and context-menu anchors.
+    pub fn measure_context(&mut self) -> crate::view::MeasureContext<'_> {
+        crate::view::MeasureContext {
+            theme: self.theme,
+            typography: self.typography,
+            text_measurer: &mut *self.text_measurer,
+        }
     }
 
     pub fn request_redraw(&mut self) {

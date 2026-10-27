@@ -388,7 +388,9 @@ impl Button {
     /// standalone-button shadow or minimum label width. Interaction is retained.
     pub fn toolbar(mut self) -> Self {
         self.toolbar = true;
-        self.style = ButtonStyle::Ghost;
+        if matches!(self.style, ButtonStyle::Standard | ButtonStyle::Ghost) {
+            self.style = ButtonStyle::Ghost;
+        }
         self.size = ButtonSize::Medium;
         self.shadow = Some(ShadowStyle::None);
         self
@@ -546,6 +548,44 @@ impl Button {
     pub fn on_click(mut self, callback: impl FnMut() + 'static) -> Self {
         self.on_click = Some(RefCell::new(Box::new(callback)));
         self
+    }
+
+    pub(crate) fn action_label(&self) -> String {
+        self.accessibility_label
+            .as_deref()
+            .or(self.label.as_deref())
+            .filter(|label| !label.is_empty())
+            .unwrap_or("Action")
+            .to_owned()
+    }
+
+    pub(crate) fn action_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    pub(crate) fn action_checked(&self) -> bool {
+        self.accessibility_checked
+            .unwrap_or(self.accessibility_selected)
+    }
+
+    pub(crate) fn action_destructive(&self) -> bool {
+        matches!(self.style, ButtonStyle::Danger)
+    }
+
+    pub(crate) fn cancel_tracking(&self) {
+        let clicked = self.interaction.inner.borrow().clicked;
+        self.interaction.reset();
+        self.interaction.inner.borrow_mut().clicked = clicked;
+    }
+
+    pub(crate) fn activate_from_menu(&self) {
+        if !self.enabled {
+            return;
+        }
+        self.interaction.inner.borrow_mut().clicked = true;
+        if let Some(callback) = self.on_click.as_ref() {
+            (callback.borrow_mut())();
+        }
     }
 
     fn label_text_alignment(&self) -> TextAlignment {

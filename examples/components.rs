@@ -4,6 +4,7 @@ struct ComponentsGallery {
     theme_mode: State<usize>,
     gallery_page: State<usize>,
     omochi_button: ButtonInteractionState,
+    toolbar_actions: ActionToolbarState<u8>,
     omochi_icon: IconButtonInteractionState,
     omochi_switch: SwitchInteractionState,
     omochi_slider: SliderInteractionState,
@@ -222,7 +223,7 @@ impl ComponentsGallery {
             "Buttons & Actions",
             "Semantic hierarchy, sizes, disabled state, icons, and omochi feedback.",
             VStack::new()
-                .alignment(StackAlignment::Start)
+                .alignment(StackAlignment::Stretch)
                 .gap(StackGap::Small)
                 .child(
                     HStack::new()
@@ -253,20 +254,13 @@ impl ComponentsGallery {
                         ),
                 )
                 .child(
-                    HStack::new()
-                        .alignment(StackAlignment::Center)
-                        .gap(StackGap::Small)
-                        .child(
-                            Button::new("New")
-                                .leading_symbol(SymbolName::Plus)
-                                .toolbar(),
+                    ActionToolbar::new(self.toolbar_actions.clone())
+                        .leading(1, Button::new("New").leading_symbol(SymbolName::Plus))
+                        .trailing(
+                            2,
+                            Button::new("Refresh").leading_symbol(SymbolName::Refresh),
                         )
-                        .child(
-                            Button::new("Refresh")
-                                .leading_symbol(SymbolName::Refresh)
-                                .toolbar(),
-                        )
-                        .child(Button::new("Unavailable").toolbar().enabled(false)),
+                        .trailing(3, Button::new("Unavailable").enabled(false)),
                 ),
         )
     }
@@ -687,6 +681,7 @@ impl App for ComponentsGallery {
             theme_mode: State::new(0),
             gallery_page: State::new(0),
             omochi_button: ButtonInteractionState::new(),
+            toolbar_actions: ActionToolbarState::new(),
             omochi_icon: IconButtonInteractionState::new(),
             omochi_switch: SwitchInteractionState::new(),
             omochi_slider: SliderInteractionState::new(),

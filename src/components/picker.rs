@@ -1,6 +1,5 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::accessibility::AccessibilityRole;
 use crate::event::{ContextMenuItem, ContextMenuRequest, EventContext, EventResult, ViewEvent};
@@ -32,8 +31,6 @@ struct PickerOption {
     enabled: bool,
     on_select: Callback,
 }
-
-static NEXT_PICKER_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 
 impl Picker {
     pub fn new(label: impl Into<String>) -> Self {
@@ -87,9 +84,7 @@ impl Picker {
         if self.options.is_empty() {
             return;
         }
-        let request_id = NEXT_PICKER_REQUEST_ID
-            .fetch_add(1, Ordering::Relaxed)
-            .max(1);
+        let request_id = ContextMenuRequest::next_id();
         self.active_request.set(Some(request_id));
         context.show_context_menu(ContextMenuRequest {
             request_id,

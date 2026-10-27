@@ -1,3 +1,4 @@
+mod action_toolbar;
 mod adaptive_grid;
 mod application_placeholder;
 mod avatar;
@@ -7,10 +8,10 @@ mod button;
 mod card;
 mod checkbox;
 mod command_target;
-#[cfg(test)]
-mod control_contract_tests;
 mod content_area;
 mod context_menu;
+#[cfg(test)]
+mod control_contract_tests;
 mod dialog;
 mod divider;
 mod ellipse;
@@ -73,6 +74,7 @@ pub use surface::{Surface, SurfaceKind};
 pub use vstack::VStack;
 pub use zstack::{ZStack, ZStackAlignment};
 
+pub use action_toolbar::{ActionToolbar, ActionToolbarState};
 pub use adaptive_grid::AdaptiveGrid;
 pub use application_placeholder::ApplicationPlaceholder;
 pub use avatar::{Avatar, AvatarSize};
