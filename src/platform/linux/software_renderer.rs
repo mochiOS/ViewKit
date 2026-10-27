@@ -111,6 +111,7 @@ pub struct SoftwareRenderer {
     viewport: Viewport,
     pixmap: Option<Pixmap>,
     font_system: FontSystem,
+    font_watcher: crate::font::FontWatcher,
     swash_cache: SwashCache,
     text_layout_cache: HashMap<TextLayoutKey, Buffer>,
     present_pixels: Vec<u32>,
@@ -130,6 +131,7 @@ impl SoftwareRenderer {
             viewport,
             pixmap: None,
             font_system: create_font_system(),
+            font_watcher: crate::font::FontWatcher::new(),
             swash_cache: SwashCache::new(),
             text_layout_cache: HashMap::new(),
             present_pixels: Vec::new(),
@@ -207,6 +209,12 @@ impl Renderer for SoftwareRenderer {
         display_list: &DisplayList,
         dirty_bounds: Rect,
     ) -> Result<(), Self::Error> {
+        let dirty_bounds = if self.font_watcher.display_changed(display_list) {
+            self.font_system = create_font_system();
+            self.swash_cache = SwashCache::new();
+            self.text_layout_cache.clear();
+            self.viewport.logical_bounds()
+        } else { dirty_bounds };
         let Some(pixmap) = self.pixmap.as_mut() else {
             return Ok(());
         };
@@ -1110,6 +1118,7 @@ fn draw_text_command(
         return;
     }
 
+    crate::font::ensure_requested_face(font_system, &command.font_family);
     let scale = if scale.is_finite() && scale > 0.0 {
         scale
     } else {

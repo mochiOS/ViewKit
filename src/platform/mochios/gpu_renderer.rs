@@ -293,6 +293,8 @@ impl GpuSceneRenderer {
         Ok(())
     }
 
+    pub(crate) fn invalidate_fonts(&mut self) { self.clear_atlas_cache(); }
+
     fn clear_atlas_cache(&mut self) {
         self.atlas.clear();
         self.atlas_x = 2;
@@ -1005,6 +1007,7 @@ impl GpuSceneRenderer {
         if command.bounds.intersection(self.current_clip()).is_none() {
             return Ok(());
         }
+        crate::font::ensure_requested_face(font_system, &command.font_family);
         let create_buffer = |font_system: &mut FontSystem| {
             let font_size = (command.font_size * scale).max(1.0);
             let line_height = (command.line_height * scale).max(font_size);

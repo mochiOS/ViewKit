@@ -46,6 +46,7 @@ impl TextAlignment {
 
 pub struct TextMeasurer {
     font_system: Option<FontSystem>,
+    font_watcher: crate::font::FontWatcher,
     font_scale: f32,
     measurements: HashMap<TextMeasurementKey, Size>,
     ink_measurements: HashMap<TextMeasurementKey, Option<(f32, f32)>>,
@@ -62,6 +63,7 @@ impl TextMeasurer {
     pub fn new() -> Self {
         Self {
             font_system: None,
+            font_watcher: crate::font::FontWatcher::new(),
             font_scale: 1.0,
             measurements: HashMap::new(),
             ink_measurements: HashMap::new(),
@@ -69,6 +71,18 @@ impl TextMeasurer {
         }
     }
 
+    pub(crate) fn synchronize_font_family(&mut self, family: &str) {
+        if self.font_watcher.revision_changed() | self.font_watcher.family_changed(family) {
+            self.font_system = None;
+            self.measurements.clear();
+            self.ink_measurements.clear();
+            self.ink_cache = SwashCache::new();
+        }
+        if family.starts_with("mochi-font:") {
+            let system = self.font_system.get_or_insert_with(create_font_system);
+            crate::font::ensure_requested_face(system, family);
+        }
+    }
     pub(crate) fn font_system_mut(&mut self) -> &mut FontSystem {
         self.font_system.get_or_insert_with(create_font_system)
     }
@@ -104,6 +118,7 @@ impl TextMeasurer {
 
     /// Visible glyph extents relative to a text command's origin, without line leading.
     pub(crate) fn vertical_ink_bounds(&mut self, key: TextMeasurementKey) -> Option<(f32, f32)> {
+        self.synchronize_font_family(&key.font_family);
         if let Some(bounds) = self.ink_measurements.get(&key) {
             return *bounds;
         }

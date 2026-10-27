@@ -172,6 +172,7 @@ impl Text {
         let font_size = resolved_font_size(style.size) * font_scale;
         let line_height = resolved_line_height(font_size, style.line_height * font_scale);
         let maximum_width = normalize_maximum_width(maximum_width);
+        measurer.synchronize_font_family(self.resolved_family(style.family));
         let cache_key = self.cache_layout.then(|| TextMeasurementKey {
             text: self.value.clone(),
             font_family: self.resolved_family(style.family).to_owned(),

@@ -57,6 +57,7 @@ pub struct GpuRenderer {
     scene_renderer: GpuSceneRenderer,
     scene_bytes: Vec<u8>,
     font_system: FontSystem,
+    font_watcher: crate::font::FontWatcher,
     swash_cache: SwashCache,
     text_layout_cache: HashMap<TextLayoutKey, Buffer>,
 }
@@ -292,6 +293,7 @@ impl GpuRenderer {
             scene_renderer: GpuSceneRenderer::new(),
             scene_bytes: Vec::new(),
             font_system: create_font_system(),
+            font_watcher: crate::font::FontWatcher::new(),
             swash_cache: SwashCache::new(),
             text_layout_cache: HashMap::new(),
         })
@@ -380,6 +382,14 @@ impl Renderer for GpuRenderer {
         display_list: &DisplayList,
         dirty_bounds: Rect,
     ) -> Result<(), Self::Error> {
+        let dirty_bounds = if self.font_watcher.display_changed(display_list) {
+            self.font_system = create_font_system();
+            self.swash_cache = SwashCache::new();
+            self.text_layout_cache.clear();
+            self.scene_renderer.invalidate_fonts();
+            self.retained_valid = false;
+            self.viewport.logical_bounds()
+        } else { dirty_bounds };
         let Some((frame, view)) = self.acquire_frame()? else {
             return Ok(());
         };

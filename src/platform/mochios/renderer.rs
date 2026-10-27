@@ -809,6 +809,7 @@ fn draw_text_command(
         return;
     }
 
+    crate::font::ensure_requested_face(font_system, &command.font_family);
     let scale = if scale.is_finite() && scale > 0.0 {
         scale
     } else {

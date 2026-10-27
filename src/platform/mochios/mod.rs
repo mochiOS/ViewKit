@@ -314,6 +314,7 @@ where
     app: A,
     config: WindowConfig,
     font_system: Option<FontSystem>,
+    font_watcher: crate::font::FontWatcher,
     swash_cache: SwashCache,
     text_layout_cache: HashMap<TextLayoutKey, Buffer>,
     metrics: BackendMetrics,
@@ -375,6 +376,7 @@ where
             app,
             config,
             font_system: None,
+            font_watcher: crate::font::FontWatcher::new(),
             swash_cache: SwashCache::new(),
             text_layout_cache: HashMap::new(),
             metrics: BackendMetrics::default(),
@@ -544,6 +546,15 @@ where
                 handled_work = true;
             }
 
+            if self.font_watcher.revision_changed() {
+                self.font_system = None;
+                self.swash_cache = SwashCache::new();
+                self.text_layout_cache.clear();
+                for state in &mut windows {
+                    state.gpu_renderer.invalidate_fonts();
+                    state.window.request_redraw();
+                }
+            }
             let window_count = windows.len();
             for _ in 0..window_count {
                 let mut state = windows.remove(0);
@@ -589,6 +600,14 @@ where
                     let frame_tick_start = perf_tick();
                     let draw_start = perf_counter();
                     let mut dirty_bounds = self.app.draw(&state.window, &mut display_list);
+                    if self.font_watcher.display_changed(&display_list) {
+                        self.font_system = Some(create_font_system());
+                        self.swash_cache = SwashCache::new();
+                        self.text_layout_cache.clear();
+                        state.gpu_renderer.invalidate_fonts();
+                        for other in &mut windows { other.gpu_renderer.invalidate_fonts(); }
+                        dirty_bounds = state.window.viewport().logical_bounds();
+                    }
                     let draw_cycles = perf_counter_elapsed(draw_start);
                     self.metrics.draw_cycles = self.metrics.draw_cycles.saturating_add(draw_cycles);
                     if let Some(cursor_rect) =
