@@ -119,10 +119,16 @@ pub struct ListRow {
     icon: Option<SymbolName>,
     leading_avatar: Option<String>,
     status_marker: bool,
+    edges: Option<(bool, bool)>,
 }
 
 impl ListRow {
     pub fn new(title: impl Into<String>) -> Self {
+        Self::with_interaction(ButtonInteractionState::new(), title)
+    }
+
+    /// Reuses interaction state when a virtualized list reconstructs its rows.
+    pub fn with_interaction(interaction: ButtonInteractionState, title: impl Into<String>) -> Self {
         Self {
             title: title.into(),
             subtitle: None,
@@ -131,12 +137,20 @@ impl ListRow {
             selected: false,
             enabled: true,
 
-            interaction: ButtonInteractionState::new(),
+            interaction,
             on_select: None,
             icon: None,
             leading_avatar: None,
             status_marker: false,
+            edges: None,
         }
+    }
+
+    /// Declares logical neighbors for rows painted outside `List`, for example
+    /// in a virtualized collection. Count offscreen and filtered-in rows too.
+    pub fn adjacent_rows(mut self, before: bool, after: bool) -> Self {
+        self.edges = Some((!before, !after));
+        self
     }
 
     pub fn subtitle(mut self, subtitle: impl Into<String>) -> Self {
@@ -313,8 +327,9 @@ impl View for ListRow {
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
         let button = self.button(context.theme);
-        if let Some((first, last)) = context
-            .list_row_edges()
+        if let Some((first, last)) = self
+            .edges
+            .or_else(|| context.list_row_edges())
             .filter(|edges| *edges != (true, true))
         {
             let radius = context.inherited_corner_radius().unwrap_or_else(|| {
