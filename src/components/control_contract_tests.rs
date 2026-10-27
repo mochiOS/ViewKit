@@ -109,3 +109,30 @@ fn custom_button_content_inherits_state_without_leaking_or_overwriting_explicit_
     }
 }
 
+#[test]
+fn toolbar_buttons_keep_compact_symbols_and_quiet_resting_surfaces() {
+    let theme = Theme::LIGHT;
+    let mut text = TextMeasurer::new();
+    let button = Button::new("").leading_symbol(SymbolName::Plus).toolbar();
+    let measured = button.measure(
+        Constraints::loose(Size::new(300.0, 100.0)),
+        &mut MeasureContext {
+            theme: &theme,
+            typography: &theme.typography,
+            text_measurer: &mut text,
+        },
+    );
+    assert_eq!(
+        measured,
+        Size::new(theme.controls.height, theme.controls.height)
+    );
+    let mut list = DisplayList::new();
+    button.paint(
+        Rect::new(0.0, 0.0, 28.0, 30.0),
+        &mut PaintContext::new(&mut list, &theme, &theme.typography, &mut text),
+    );
+    assert!(list.commands().iter().any(|command| matches!(command, DrawCommand::DrawSvg { command } if command.bounds.size.width > 10.0)));
+    assert!(!list.commands().iter().any(|command| matches!(command,
+        DrawCommand::FillRoundedRect { color, .. } if color.alpha != 0
+    )));
+}

@@ -251,6 +251,22 @@ impl ComponentsGallery {
                                 .tone(IconButtonTone::Accent)
                                 .accessibility_label("Send"),
                         ),
+                )
+                .child(
+                    HStack::new()
+                        .alignment(StackAlignment::Center)
+                        .gap(StackGap::Small)
+                        .child(
+                            Button::new("New")
+                                .leading_symbol(SymbolName::Plus)
+                                .toolbar(),
+                        )
+                        .child(
+                            Button::new("Refresh")
+                                .leading_symbol(SymbolName::Refresh)
+                                .toolbar(),
+                        )
+                        .child(Button::new("Unavailable").toolbar().enabled(false)),
                 ),
         )
     }

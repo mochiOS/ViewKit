@@ -328,6 +328,7 @@ pub struct Button {
     on_click: Option<RefCell<Box<dyn FnMut()>>>,
     omochi_enabled: bool,
     focus_ring_visible: bool,
+    toolbar: bool,
 }
 
 impl Button {
@@ -352,6 +353,7 @@ impl Button {
             on_click: None,
             omochi_enabled: true,
             focus_ring_visible: true,
+            toolbar: false,
             intrinsic_label_size: RefCell::new(None),
         }
     }
@@ -380,6 +382,36 @@ impl Button {
     pub fn style(mut self, style: ButtonStyle) -> Self {
         self.style = style;
         self
+    }
+
+    /// Uses the common toolbar recipe: quiet at rest, compact symbols, and no
+    /// standalone-button shadow or minimum label width. Interaction is retained.
+    pub fn toolbar(mut self) -> Self {
+        self.toolbar = true;
+        self.style = ButtonStyle::Ghost;
+        self.size = ButtonSize::Medium;
+        self.shadow = Some(ShadowStyle::None);
+        self
+    }
+
+    fn symbol_size(&self, theme: &Theme) -> f32 {
+        if self.toolbar {
+            theme.layout.compact_icon_size
+        } else {
+            self.size.icon_size(theme)
+        }
+    }
+
+    fn horizontal_padding(&self, theme: &Theme) -> f32 {
+        if self.toolbar {
+            if self.label.as_ref().is_some_and(|label| label.is_empty()) {
+                theme.spacing.extra_small
+            } else {
+                theme.spacing.small
+            }
+        } else {
+            self.size.horizontal_padding(theme)
+        }
     }
 
     pub fn size(mut self, size: ButtonSize) -> Self {
@@ -505,6 +537,7 @@ impl Button {
             on_click: None,
             omochi_enabled: false,
             focus_ring_visible: true,
+            toolbar: false,
             intrinsic_label_size: RefCell::new(None),
         }
     }
@@ -559,7 +592,7 @@ impl View for Button {
             return;
         }
 
-        let horizontal_padding = self.size.horizontal_padding(context.theme);
+        let horizontal_padding = self.horizontal_padding(context.theme);
         let label_role = self.size.text_role();
         let mut label_style = context.typography.style(label_role);
         if self.size == ButtonSize::Medium {
@@ -695,8 +728,7 @@ impl View for Button {
                     bounds.size.height,
                 );
                 let icon_size = self
-                    .size
-                    .icon_size(context.theme)
+                    .symbol_size(context.theme)
                     .min(inner.size.width)
                     .min(inner.size.height);
                 let gap = if label.is_empty() {
@@ -1053,7 +1085,7 @@ impl View for Button {
     }
 
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
-        let horizontal_padding = self.size.horizontal_padding(context.theme);
+        let horizontal_padding = self.horizontal_padding(context.theme);
         let intrinsic_height = self.size.height(context.theme);
         let label_role = self.size.text_role();
 
@@ -1098,7 +1130,7 @@ impl View for Button {
                 std::borrow::Cow::Borrowed(label.as_str())
             };
             let symbol_width = self.leading_symbol.map_or(0.0, |_| {
-                self.size.icon_size(context.theme)
+                self.symbol_size(context.theme)
                     + if label.is_empty() {
                         0.0
                     } else {
@@ -1124,7 +1156,9 @@ impl View for Button {
             );
 
             (measured.width + symbol_width + horizontal_padding * 2.0).max(
-                if self.size == ButtonSize::Small {
+                if self.toolbar && label.is_empty() {
+                    self.size.height(context.theme)
+                } else if self.size == ButtonSize::Small || self.toolbar {
                     0.0
                 } else {
                     context.theme.controls.button_min_width
@@ -1199,10 +1233,7 @@ mod tests {
             ButtonSize::Small.height(&theme),
             theme.controls.small_height
         );
-        assert_eq!(
-            ButtonSize::Medium.height(&theme),
-            theme.controls.height
-        );
+        assert_eq!(ButtonSize::Medium.height(&theme), theme.controls.height);
         assert_eq!(
             ButtonSize::Large.height(&theme),
             theme.controls.large_height
@@ -1339,7 +1370,13 @@ mod tests {
         let pointer_strokes = pointer_list
             .commands()
             .iter()
-            .filter(|command| matches!(command, DrawCommand::StrokeRoundedRect { .. } | DrawCommand::StrokeInsideRoundedRect { .. }))
+            .filter(|command| {
+                matches!(
+                    command,
+                    DrawCommand::StrokeRoundedRect { .. }
+                        | DrawCommand::StrokeInsideRoundedRect { .. }
+                )
+            })
             .count();
 
         {
@@ -1362,7 +1399,13 @@ mod tests {
         let keyboard_strokes = keyboard_list
             .commands()
             .iter()
-            .filter(|command| matches!(command, DrawCommand::StrokeRoundedRect { .. } | DrawCommand::StrokeInsideRoundedRect { .. }))
+            .filter(|command| {
+                matches!(
+                    command,
+                    DrawCommand::StrokeRoundedRect { .. }
+                        | DrawCommand::StrokeInsideRoundedRect { .. }
+                )
+            })
             .count();
 
         assert_eq!(keyboard_strokes, pointer_strokes + 1);
@@ -1437,7 +1480,13 @@ mod compatibility_tests {
             },
         );
         assert_eq!(natural, Size::new(42.0, 18.0));
-        let (list, _) = render(&Button::new("Apply").size(ButtonSize::Medium).content_padding(false), &theme, bounds);
+        let (list, _) = render(
+            &Button::new("Apply")
+                .size(ButtonSize::Medium)
+                .content_padding(false),
+            &theme,
+            bounds,
+        );
         assert!(list.commands().iter().any(|command| matches!(command,
             DrawCommand::DrawText { command } if command.bounds.origin.x == bounds.origin.x + theme.button.horizontal_padding)));
     }
