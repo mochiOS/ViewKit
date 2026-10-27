@@ -574,12 +574,15 @@ pub enum TextFieldSize {
 }
 
 impl TextFieldSize {
-    fn height(self, theme: &crate::theme::Theme) -> f32 {
+    pub const fn control_size(self) -> crate::theme::ControlSize {
         match self {
-            Self::Small => theme.controls.small_height,
-            Self::Medium => theme.controls.height,
-            Self::Large => theme.controls.large_height,
+            Self::Small => crate::theme::ControlSize::Small,
+            Self::Medium => crate::theme::ControlSize::Medium,
+            Self::Large => crate::theme::ControlSize::Large,
         }
+    }
+    fn height(self, theme: &crate::theme::Theme) -> f32 {
+        self.control_size().height(&theme.controls)
     }
 
     fn horizontal_padding(self, theme: &crate::theme::Theme) -> f32 {

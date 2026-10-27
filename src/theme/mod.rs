@@ -24,7 +24,7 @@ pub use control::{
     PopoverTokens, ProgressBarTokens, SegmentedControlTokens, SelectionControlTokens, SliderTokens,
     StepperTokens, SurfaceTokens, SwitchTokens, TabsTokens, TextFieldTokens, TooltipTokens,
 };
-pub use control_metrics::ControlMetrics;
+pub use control_metrics::{ControlMetrics, ControlSize};
 pub use divider::{DividerThickness, DividerTokens};
 pub use figma::{
     AccentColorTokens, BackgroundColorTokens, BorderColorTokens, ErrorColorTokens,

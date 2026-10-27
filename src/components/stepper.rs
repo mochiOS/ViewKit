@@ -14,6 +14,7 @@ use super::{
 };
 
 pub struct Stepper {
+    size: crate::theme::ControlSize,
     value: Binding<i32>,
     minimum: i32,
     maximum: i32,
@@ -25,6 +26,7 @@ pub struct Stepper {
 impl Stepper {
     pub fn new(value: Binding<i32>) -> Self {
         Self {
+            size: crate::theme::ControlSize::Medium,
             value,
             minimum: i32::MIN,
             maximum: i32::MAX,
@@ -47,6 +49,11 @@ impl Stepper {
 
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
+        self
+    }
+
+    pub fn size(mut self, size: crate::theme::ControlSize) -> Self {
+        self.size = size;
         self
     }
 
@@ -85,11 +92,11 @@ impl Stepper {
                         .gap(StackGap::Small)
                         .child(
                             Icon::new(SymbolName::Minus)
-                                .size(theme.layout.stepper_icon_size)
+                                .size(theme.layout.compact_icon_size)
                                 .color(foreground)
                                 .frame(
-                                    theme.layout.stepper_icon_size,
-                                    theme.layout.stepper_icon_size,
+                                    theme.layout.compact_icon_size,
+                                    theme.layout.compact_icon_size,
                                 ),
                         )
                         .child(
@@ -102,11 +109,11 @@ impl Stepper {
                         )
                         .child(
                             Icon::new(SymbolName::Plus)
-                                .size(theme.layout.stepper_icon_size)
+                                .size(theme.layout.compact_icon_size)
                                 .color(foreground)
                                 .frame(
-                                    theme.layout.stepper_icon_size,
-                                    theme.layout.stepper_icon_size,
+                                    theme.layout.compact_icon_size,
+                                    theme.layout.compact_icon_size,
                                 ),
                         ),
                 ),
@@ -130,11 +137,11 @@ impl View for Stepper {
             Constraints::new(
                 Size::new(
                     context.theme.layout.control_min_width,
-                    context.theme.layout.compact_control_height,
+                    self.size.height(&context.theme.controls),
                 ),
                 Size::new(
                     context.theme.layout.control_min_width,
-                    context.theme.layout.compact_control_height,
+                    self.size.height(&context.theme.controls),
                 ),
             ),
             context,

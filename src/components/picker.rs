@@ -16,6 +16,7 @@ use super::{
 };
 
 pub struct Picker {
+    size: crate::theme::ControlSize,
     label: String,
     enabled: bool,
     radius: Option<CornerRadius>,
@@ -37,6 +38,7 @@ static NEXT_PICKER_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 impl Picker {
     pub fn new(label: impl Into<String>) -> Self {
         Self {
+            size: crate::theme::ControlSize::Medium,
             label: label.into(),
             enabled: true,
             radius: None,
@@ -48,6 +50,11 @@ impl Picker {
 
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
+        self
+    }
+
+    pub fn size(mut self, size: crate::theme::ControlSize) -> Self {
+        self.size = size;
         self
     }
 
@@ -162,9 +169,9 @@ impl View for Picker {
             Constraints::new(
                 Size::new(
                     context.theme.layout.control_min_width,
-                    context.theme.layout.compact_control_height,
+                    self.size.height(&context.theme.controls),
                 ),
-                Size::new(f32::INFINITY, context.theme.layout.compact_control_height),
+                Size::new(f32::INFINITY, self.size.height(&context.theme.controls)),
             ),
             context,
         ))

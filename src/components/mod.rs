@@ -7,6 +7,8 @@ mod button;
 mod card;
 mod checkbox;
 mod command_target;
+#[cfg(test)]
+mod control_contract_tests;
 mod content_area;
 mod context_menu;
 mod dialog;

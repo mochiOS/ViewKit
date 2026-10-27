@@ -50,6 +50,13 @@ pub enum ButtonSize {
 }
 
 impl ButtonSize {
+    pub const fn control_size(self) -> crate::theme::ControlSize {
+        match self {
+            Self::Small => crate::theme::ControlSize::Small,
+            Self::Medium => crate::theme::ControlSize::Medium,
+            Self::Large => crate::theme::ControlSize::Large,
+        }
+    }
     const fn text_role(self) -> TextRole {
         match self {
             Self::Small => TextRole::Caption,
@@ -58,11 +65,7 @@ impl ButtonSize {
     }
 
     pub(crate) const fn height(self, theme: &Theme) -> f32 {
-        match self {
-            Self::Small => theme.controls.small_height,
-            Self::Medium => theme.controls.height,
-            Self::Large => theme.controls.large_height,
-        }
+        self.control_size().height(&theme.controls)
     }
 
     pub(crate) const fn icon_size(self, theme: &Theme) -> f32 {

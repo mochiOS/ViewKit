@@ -1,5 +1,24 @@
 use super::{CornerRadius, FigmaTokens};
 
+/// Shared size categories for controls placed together in native forms.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ControlSize {
+    Small,
+    #[default]
+    Medium,
+    Large,
+}
+
+impl ControlSize {
+    pub const fn height(self, metrics: &ControlMetrics) -> f32 {
+        match self {
+            Self::Small => metrics.small_height,
+            Self::Medium => metrics.height,
+            Self::Large => metrics.large_height,
+        }
+    }
+}
+
 /// omochiの独立した操作面（ボタン・入力欄）の寸法。
 /// 初期の調整値です。アプリが明示した寸法やシステム装飾の寸法は置き換えません。
 #[derive(Clone, Copy, Debug, PartialEq)]
