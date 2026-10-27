@@ -812,7 +812,9 @@ impl View for Button {
                 .display_list
                 .push(DrawCommand::PushClip { rect: inner });
         }
-        content.paint(content_bounds, context);
+        context.with_control_foreground(appearance.foreground, |context| {
+            content.paint(content_bounds, context);
+        });
         if self.content_padding {
             context.display_list.push(DrawCommand::PopClip);
         }

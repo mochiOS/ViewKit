@@ -73,6 +73,7 @@ pub struct PaintContext<'a> {
     viewport_bounds: Option<Rect>,
     inherited_corner_radii: Vec<f32>,
     list_row_edges: Option<(bool, bool)>,
+    control_foreground: Option<crate::theme::Color>,
 }
 
 impl<'a> PaintContext<'a> {
@@ -118,6 +119,7 @@ impl<'a> PaintContext<'a> {
             viewport_bounds: None,
             inherited_corner_radii: Vec::new(),
             list_row_edges: None,
+            control_foreground: None,
         }
     }
 
@@ -183,6 +185,20 @@ impl<'a> PaintContext<'a> {
 
     pub(crate) fn inherited_corner_radius(&self) -> Option<f32> {
         self.inherited_corner_radii.last().copied()
+    }
+
+    pub(crate) fn control_foreground(&self) -> Option<crate::theme::Color> {
+        self.control_foreground
+    }
+
+    pub(crate) fn with_control_foreground(
+        &mut self,
+        color: crate::theme::Color,
+        paint: impl FnOnce(&mut Self),
+    ) {
+        let previous = self.control_foreground.replace(color);
+        paint(self);
+        self.control_foreground = previous;
     }
 
     pub(crate) fn list_row_edges(&self) -> Option<(bool, bool)> {

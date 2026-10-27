@@ -1,9 +1,11 @@
 use super::*;
-use crate::geometry::Size;
+use crate::draw_command::{DisplayList, DrawCommand};
+use crate::geometry::{Rect, Size};
+use crate::layout::{StackGap, ViewExt};
 use crate::state::State;
-use crate::theme::{ControlSize, Theme};
+use crate::theme::{Color, ControlSize, Theme};
 use crate::typography::TextMeasurer;
-use crate::view::{Constraints, MeasureContext, View};
+use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 #[test]
 fn controls_share_size_categories_and_respect_theme_metrics() {
@@ -47,6 +49,62 @@ fn controls_share_size_categories_and_respect_theme_metrics() {
                     22.0
                 );
             }
+        }
+    }
+}
+
+#[test]
+fn custom_button_content_inherits_state_without_leaking_or_overwriting_explicit_colors() {
+    for theme in [Theme::LIGHT, Theme::DARK] {
+        for enabled in [true, false] {
+            let button = Button::new("")
+                .style(ButtonStyle::Primary)
+                .enabled(enabled)
+                .content(
+                    HStack::new()
+                        .gap(StackGap::Small)
+                        .child(Icon::new(SymbolName::Plus).size(16.0).frame(16.0, 16.0))
+                        .child(Text::label("Inherited"))
+                        .child(Text::label("Explicit").color(Color::from_rgb_hex(0x884422))),
+                );
+            let mut list = DisplayList::new();
+            let mut text = TextMeasurer::new();
+            let mut context = PaintContext::new(&mut list, &theme, &theme.typography, &mut text);
+            button.paint(Rect::new(0.0, 0.0, 260.0, 36.0), &mut context);
+            assert_eq!(context.control_foreground(), None);
+            Icon::new(SymbolName::Plus)
+                .size(16.0)
+                .paint(Rect::new(0.0, 50.0, 16.0, 16.0), &mut context);
+            let inherited = list
+                .commands()
+                .iter()
+                .find_map(|command| match command {
+                    DrawCommand::DrawText { command } if command.text == "Inherited" => {
+                        Some(command.color)
+                    }
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(
+                inherited,
+                Color::WHITE.with_alpha(if enabled {
+                    255
+                } else {
+                    (255.0 * theme.button.disabled_opacity).round() as u8
+                })
+            );
+            let symbols: Vec<_> = list
+                .commands()
+                .iter()
+                .filter_map(|command| match command {
+                    DrawCommand::DrawSvg { command } => command.tint,
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(symbols, vec![inherited, theme.colors.text_primary]);
+            assert!(list.commands().iter().any(|command| matches!(command,
+                DrawCommand::DrawText { command } if command.text == "Explicit" && command.color == Color::from_rgb_hex(0x884422)
+            )));
         }
     }
 }

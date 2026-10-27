@@ -404,9 +404,15 @@ impl View for Text {
 
                 alignment: self.alignment,
 
-                color: self
-                    .color
-                    .unwrap_or_else(|| self.tone.resolve(context.theme)),
+                color: self.color.unwrap_or_else(|| {
+                    if self.tone == TextTone::Primary {
+                        context
+                            .control_foreground()
+                            .unwrap_or_else(|| self.tone.resolve(context.theme))
+                    } else {
+                        self.tone.resolve(context.theme)
+                    }
+                }),
             },
         });
     }

@@ -30,7 +30,7 @@ pub struct Icon {
     name: SymbolName,
 
     size: Option<f32>,
-    color: Color,
+    color: Option<Color>,
     opacity: f32,
     accessibility_label: Option<String>,
 }
@@ -42,7 +42,7 @@ impl Icon {
 
             size: None,
 
-            color: Color::from_rgb_hex(0x17181a),
+            color: None,
 
             opacity: 1.0,
 
@@ -61,7 +61,7 @@ impl Icon {
     }
 
     pub const fn color(mut self, color: Color) -> Self {
-        self.color = color;
+        self.color = Some(color);
 
         self
     }
@@ -97,7 +97,11 @@ impl View for Icon {
             context.record_accessibility(node);
         }
         let symbol = super::svg::Svg::new(svg)
-            .tint(self.color)
+            .tint(self.color.unwrap_or_else(|| {
+                context
+                    .control_foreground()
+                    .unwrap_or(context.theme.colors.text_primary)
+            }))
             .opacity(self.opacity);
         context
             .display_list
