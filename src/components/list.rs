@@ -1,12 +1,13 @@
 //! リストコンポーネント
 
+use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
 use crate::layout::{
     IntoStackChildren, StackAlignment, StackChild, StackDirection, StackDistribution, StackGap,
-    ViewExt, handle_stack_event, measure_stack, paint_stack,
+    ViewExt, handle_stack_event, layout_stack, measure_stack,
 };
-use crate::theme::{Color, Theme};
+use crate::theme::{Color, CornerRadius, Theme};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -19,7 +20,8 @@ use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 
 type Callback = Rc<RefCell<Box<dyn FnMut()>>>;
 
-/// A standard edge-to-edge collection of list rows.
+/// A standard edge-to-edge collection of list rows. Adjacent rows join with
+/// square inner corners; only the first and last rows retain outer corners.
 pub struct List {
     children: Vec<StackChild>,
 }
@@ -63,15 +65,26 @@ impl View for List {
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
         context.record_accessibility(AccessibilityNode::new(AccessibilityRole::List, bounds));
-        paint_stack(
+        let regions = layout_stack(
             StackDirection::Vertical,
             &self.children,
             bounds,
             StackGap::None,
             StackAlignment::Stretch,
             StackDistribution::Start,
-            context,
+            context.theme,
+            &mut MeasureContext {
+                theme: context.theme,
+                typography: context.typography,
+                text_measurer: &mut *context.text_measurer,
+            },
         );
+        let count = self.children.len();
+        for (index, (child, region)) in self.children.iter().zip(regions).enumerate() {
+            context.with_list_row_edges(index == 0, index + 1 == count, |context| {
+                child.paint(region, context);
+            });
+        }
     }
 
     fn handle_event(
@@ -299,7 +312,34 @@ impl View for ListRow {
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
-        self.button(context.theme).paint(bounds, context);
+        let button = self.button(context.theme);
+        if let Some((first, last)) = context
+            .list_row_edges()
+            .filter(|edges| *edges != (true, true))
+        {
+            let radius = context.inherited_corner_radius().unwrap_or_else(|| {
+                context.theme.button.radius.resolve(
+                    &context.theme.radius,
+                    bounds.size.width,
+                    bounds.size.height,
+                )
+            });
+            context
+                .display_list
+                .push(DrawCommand::PushRoundedCornersClip {
+                    rect: bounds,
+                    radii: [
+                        if first { radius } else { 0.0 },
+                        if first { radius } else { 0.0 },
+                        if last { radius } else { 0.0 },
+                        if last { radius } else { 0.0 },
+                    ],
+                });
+            button.radius(CornerRadius::None).paint(bounds, context);
+            context.display_list.push(DrawCommand::PopClip);
+        } else {
+            button.paint(bounds, context);
+        }
     }
 
     fn handle_event(
@@ -310,5 +350,78 @@ impl View for ListRow {
     ) -> EventResult {
         self.button(context.theme)
             .handle_event(bounds, event, context)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::draw_command::DisplayList;
+    use crate::typography::{TextMeasurer, Typography};
+
+    #[test]
+    fn connected_rows_keep_only_the_outer_corners_in_both_themes() {
+        for theme in [&Theme::LIGHT, &Theme::DARK] {
+            let mut commands = DisplayList::new();
+            let mut measurer = TextMeasurer::new();
+            let mut context =
+                PaintContext::new(&mut commands, theme, &Typography::DEFAULT, &mut measurer);
+            let list = List::new()
+                .row(ListRow::new("First").selected(true))
+                .row(ListRow::new("Middle"))
+                .row(ListRow::new("Last").enabled(false));
+            let bounds = Rect::new(10.0, 20.0, 240.0, 180.0);
+            list.paint(bounds, &mut context);
+            assert_eq!(context.list_row_edges(), None);
+            let radius = theme.button.radius.resolve(&theme.radius, 240.0, 48.0);
+            let clips: Vec<_> = commands
+                .commands()
+                .iter()
+                .filter_map(|command| match command {
+                    DrawCommand::PushRoundedCornersClip { rect, radii } => Some((*rect, *radii)),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(clips.len(), 3);
+            assert_eq!(clips[0].1, [radius, radius, 0.0, 0.0]);
+            assert_eq!(clips[1].1, [0.0; 4]);
+            assert_eq!(clips[2].1, [0.0, 0.0, radius, radius]);
+            assert_eq!(
+                clips[0].0.origin.y + clips[0].0.size.height,
+                clips[1].0.origin.y
+            );
+            assert_eq!(
+                clips[1].0.origin.y + clips[1].0.size.height,
+                clips[2].0.origin.y
+            );
+        }
+    }
+
+    #[test]
+    fn single_row_presentation_and_parent_group_context_are_preserved() {
+        let mut commands = DisplayList::new();
+        let mut measurer = TextMeasurer::new();
+        let mut context = PaintContext::new(
+            &mut commands,
+            &Theme::LIGHT,
+            &Typography::DEFAULT,
+            &mut measurer,
+        );
+        context.with_list_row_edges(false, false, |context| {
+            List::new()
+                .row(ListRow::new("Only"))
+                .paint(Rect::new(0.0, 0.0, 240.0, 48.0), context);
+            assert_eq!(context.list_row_edges(), Some((false, false)));
+        });
+        assert_eq!(context.list_row_edges(), None);
+        assert!(
+            !commands
+                .commands()
+                .iter()
+                .any(|command| matches!(command, DrawCommand::PushRoundedCornersClip { .. }))
+        );
+        assert!(commands.commands().iter().any(|command| matches!(
+            command, DrawCommand::FillRoundedRect { radius, .. } if *radius > 0.0
+        )));
     }
 }

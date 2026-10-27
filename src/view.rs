@@ -72,6 +72,7 @@ pub struct PaintContext<'a> {
     command_statuses: Option<&'a mut Vec<CommandStatus>>,
     viewport_bounds: Option<Rect>,
     inherited_corner_radii: Vec<f32>,
+    list_row_edges: Option<(bool, bool)>,
 }
 
 impl<'a> PaintContext<'a> {
@@ -116,6 +117,7 @@ impl<'a> PaintContext<'a> {
             command_statuses: None,
             viewport_bounds: None,
             inherited_corner_radii: Vec::new(),
+            list_row_edges: None,
         }
     }
 
@@ -181,6 +183,21 @@ impl<'a> PaintContext<'a> {
 
     pub(crate) fn inherited_corner_radius(&self) -> Option<f32> {
         self.inherited_corner_radii.last().copied()
+    }
+
+    pub(crate) fn list_row_edges(&self) -> Option<(bool, bool)> {
+        self.list_row_edges
+    }
+
+    pub(crate) fn with_list_row_edges(
+        &mut self,
+        first: bool,
+        last: bool,
+        paint: impl FnOnce(&mut Self),
+    ) {
+        let previous = self.list_row_edges.replace((first, last));
+        paint(self);
+        self.list_row_edges = previous;
     }
 
     pub(crate) fn push_corner_radius(&mut self, radius: f32) {
