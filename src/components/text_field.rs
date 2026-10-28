@@ -125,6 +125,11 @@ impl TextFieldInteractionState {
         if !enabled {
             inner.hovered = false;
             inner.focused = false;
+            inner.focus_visible = false;
+            inner.selecting = false;
+            inner.caret_blink_origin = None;
+            inner.candidate_panel = None;
+            inner.hovered_candidate = None;
         }
 
         changed
@@ -609,6 +614,15 @@ struct TextFieldAppearance {
     foreground: Color,
 }
 
+/// Shared logical geometry for paint, pointer placement, selection and IME.
+struct FieldGeometry {
+    text: Rect,
+    viewport: Rect,
+    symbol: Option<Rect>,
+    line_height: f32,
+    font_size: f32,
+}
+
 pub struct TextField {
     interaction: TextFieldInteractionState,
     binding: Option<Binding<String>>,
@@ -786,11 +800,15 @@ impl TextField {
             context.theme.text_field.background
         };
 
-        let border = if self.invalid {
+        let border = if !interaction.enabled {
+            context.theme.text_field.border
+        } else if self.invalid {
             context.theme.text_field.invalid_border
+        } else if !context.window_active() {
+            context.theme.text_field.border
         } else if interaction.focused && interaction.focus_visible {
             context.theme.text_field.focused_border
-        } else if interaction.hovered {
+        } else if interaction.hovered || interaction.focused {
             context.theme.text_field.hovered_border
         } else {
             context.theme.text_field.border
@@ -830,9 +848,16 @@ impl TextField {
             return 0;
         }
 
-        let text_origin_x = bounds.origin.x
-            + self.size.horizontal_padding(context.theme)
-            + self.leading_inset(context.theme);
+        let text_origin_x = self
+            .geometry(
+                bounds,
+                context.theme,
+                context.typography,
+                context.text_measurer.font_scale(),
+            )
+            .text
+            .origin
+            .x;
 
         let target_x = (pointer_x - text_origin_x + scroll_offset_x).max(0.0);
 
@@ -862,6 +887,66 @@ impl TextField {
 }
 
 impl TextField {
+    fn geometry(
+        &self,
+        bounds: Rect,
+        theme: &crate::theme::Theme,
+        typography: &Typography,
+        font_scale: f32,
+    ) -> FieldGeometry {
+        let padding = self
+            .size
+            .horizontal_padding(theme)
+            .min(bounds.size.width.max(0.0) * 0.5);
+        let available = (bounds.size.width - padding * 2.0).max(0.0);
+        let icon_size = theme
+            .layout
+            .compact_icon_size
+            .min(available)
+            .min(bounds.size.height.max(0.0));
+        let symbol = self.leading_symbol.map(|_| {
+            Rect::new(
+                bounds.origin.x + padding,
+                bounds.origin.y + (bounds.size.height - icon_size) * 0.5,
+                icon_size,
+                icon_size,
+            )
+        });
+        let leading = if symbol.is_some() {
+            (icon_size + theme.spacing.small).min(available)
+        } else {
+            0.0
+        };
+        let style = self.size.text_style(typography);
+        let font_size = super::text::resolved_font_size(style.size) * font_scale;
+        let line_height =
+            super::text::resolved_line_height(font_size, style.line_height * font_scale);
+        let text = Rect::new(
+            bounds.origin.x + padding + leading,
+            bounds.origin.y
+                + (bounds.size.height - line_height) * 0.5
+                + theme.text_field.text_offset_y,
+            (available - leading).max(0.0),
+            line_height,
+        );
+        let top = text
+            .origin
+            .y
+            .max(bounds.origin.y)
+            .min(bounds.origin.y + bounds.size.height);
+        let bottom = (text.origin.y + text.size.height)
+            .min(bounds.origin.y + bounds.size.height)
+            .max(top);
+        let viewport = Rect::new(text.origin.x, top, text.size.width, bottom - top);
+        FieldGeometry {
+            text,
+            viewport,
+            symbol,
+            line_height,
+            font_size,
+        }
+    }
+
     fn leading_inset(&self, theme: &crate::theme::Theme) -> f32 {
         if self.leading_symbol.is_some() {
             theme.layout.compact_icon_size + theme.spacing.small
@@ -915,7 +1000,7 @@ impl View for TextField {
             (
                 inner.value.clone(),
                 inner.cursor.min(inner.value.len()),
-                inner.focused && inner.enabled,
+                inner.focused && inner.enabled && context.window_active(),
                 inner.scroll_offset_x,
                 selection_range(&inner),
                 inner.input_method.marked_range(),
@@ -960,7 +1045,7 @@ impl View for TextField {
         context.record_accessibility(accessibility);
 
         let radius = self.radius.unwrap_or(context.theme.text_field.radius);
-        if focused && self.interaction.inner.borrow().focus_visible {
+        if self.bordered && focused && self.interaction.inner.borrow().focus_visible {
             let ring_width = context.theme.text_field.focus_ring_width;
 
             let radius =
@@ -1002,43 +1087,38 @@ impl View for TextField {
             secure_display.as_str()
         };
 
-        let horizontal_padding = self.size.horizontal_padding(context.theme);
-        let leading_inset = self.leading_inset(context.theme);
-
-        if let Some(symbol) = self.leading_symbol {
-            let icon_size = context.theme.layout.compact_icon_size;
+        let geometry = self.geometry(
+            bounds,
+            context.theme,
+            context.typography,
+            context.text_measurer.font_scale(),
+        );
+        let text_bounds = geometry.text;
+        let clip_bounds = geometry.viewport;
+        let line_height = geometry.line_height;
+        // The field's shape clips its interior, while IME popups remain outside.
+        context.display_list.push(DrawCommand::PushRoundedClip {
+            rect: bounds,
+            radius: radius.resolve(&context.theme.radius, bounds.size.width, bounds.size.height),
+        });
+        if let (Some(symbol), Some(icon_bounds)) = (self.leading_symbol, geometry.symbol) {
             Icon::new(symbol)
-                .size(icon_size)
-                .color(context.theme.colors.text_secondary)
-                .paint(
-                    Rect::new(
-                        bounds.origin.x + horizontal_padding,
-                        bounds.origin.y + (bounds.size.height - icon_size).max(0.0) / 2.0,
-                        icon_size,
-                        icon_size,
-                    ),
-                    context,
-                );
+                .size(icon_bounds.size.width)
+                .color(if self.enabled {
+                    context.theme.text_field.leading_foreground
+                } else {
+                    context.theme.text_field.disabled_foreground
+                })
+                .paint(icon_bounds, context);
         }
 
-        let text_style = self.size.text_style(context.typography);
-        let line_height = text_style.line_height;
-
-        let text_bounds = Rect::new(
-            bounds.origin.x + horizontal_padding + leading_inset,
-            bounds.origin.y
-                + (bounds.size.height - line_height).max(0.0) / 2.0
-                + context.theme.text_field.text_offset_y,
-            (bounds.size.width - horizontal_padding * 2.0 - leading_inset).max(0.0),
-            line_height.min(bounds.size.height),
-        );
-
-        let text_width = if value.is_empty() {
+        let display_width = Text::styled(display_text, self.size.text_role())
+            .measure_unbounded_with_typography(context.text_measurer, context.typography)
+            .width;
+        let text_width = if showing_placeholder {
             0.0
         } else {
-            Text::styled(display_text, self.size.text_role())
-                .measure_unbounded_with_typography(context.text_measurer, context.typography)
-                .width
+            display_width
         };
 
         let prefix_width = if cursor == 0 {
@@ -1073,10 +1153,22 @@ impl View for TextField {
 
         if !display_text.is_empty() {
             if showing_placeholder {
+                context
+                    .display_list
+                    .push(DrawCommand::PushClip { rect: clip_bounds });
                 Text::styled(display_text, self.size.text_role())
                     .accessibility_hidden(true)
                     .color(appearance.foreground)
-                    .paint(text_bounds, context);
+                    .paint(
+                        Rect::new(
+                            text_bounds.origin.x,
+                            text_bounds.origin.y,
+                            display_width.max(viewport_width),
+                            text_bounds.size.height,
+                        ),
+                        context,
+                    );
+                context.display_list.push(DrawCommand::PopClip);
             } else {
                 let content_bounds = Rect::new(
                     text_bounds.origin.x - scroll_offset_x,
@@ -1115,7 +1207,7 @@ impl View for TextField {
                         (text_bounds.origin.x + end_width - scroll_offset_x).min(viewport_right);
 
                     if selection_right > selection_left {
-                        let selection_height = (text_style.size
+                        let selection_height = (geometry.font_size
                             + context.theme.spacing.extra_small)
                             .min(text_bounds.size.height);
                         let selection_y = text_bounds.origin.y
@@ -1137,7 +1229,7 @@ impl View for TextField {
                 if let Some(selection_bounds) = selection_bounds {
                     context
                         .display_list
-                        .push(DrawCommand::PushClip { rect: text_bounds });
+                        .push(DrawCommand::PushClip { rect: clip_bounds });
 
                     context.display_list.push(DrawCommand::FillRoundedRect {
                         rect: selection_bounds,
@@ -1168,7 +1260,7 @@ impl View for TextField {
                     if right > left {
                         context
                             .display_list
-                            .push(DrawCommand::PushClip { rect: text_bounds });
+                            .push(DrawCommand::PushClip { rect: clip_bounds });
                         context.display_list.push(DrawCommand::FillRoundedRect {
                             rect: Rect::new(
                                 left,
@@ -1208,7 +1300,7 @@ impl View for TextField {
                     if right > left {
                         context
                             .display_list
-                            .push(DrawCommand::PushClip { rect: text_bounds });
+                            .push(DrawCommand::PushClip { rect: clip_bounds });
                         context.display_list.push(DrawCommand::FillRect {
                             rect: Rect::new(
                                 left,
@@ -1225,13 +1317,15 @@ impl View for TextField {
             }
         }
 
+        context.display_list.push(DrawCommand::PopClip);
+
         if focused && !self.secure {
             let anchor_x = (text_bounds.origin.x + prefix_width - scroll_offset_x).clamp(
                 text_bounds.origin.x,
                 text_bounds.origin.x + text_bounds.size.width,
             );
             let now = Instant::now();
-            let anchor = Rect::new(anchor_x, text_bounds.origin.y, 1.0, text_bounds.size.height);
+            let anchor = Rect::new(anchor_x, clip_bounds.origin.y, 1.0, clip_bounds.size.height);
             let (candidate_panel, mode_indicator) = {
                 let inner = self.interaction.inner.borrow();
                 let (candidates, selected) = inner.input_method.candidates();
@@ -1294,11 +1388,15 @@ impl View for TextField {
 
         let caret_y = bounds.origin.y + (bounds.size.height - caret_height) / 2.0;
 
+        context
+            .display_list
+            .push(DrawCommand::PushClip { rect: clip_bounds });
         context.display_list.push(DrawCommand::FillRoundedRect {
             rect: Rect::new(caret_x, caret_y, caret_width, caret_height),
             radius: caret_half_width,
             color: context.theme.text_field.caret,
         });
+        context.display_list.push(DrawCommand::PopClip);
     }
 
     fn handle_event(
@@ -1322,6 +1420,17 @@ impl View for TextField {
         }
 
         match event {
+            ViewEvent::FocusVisibilityChanged { visible: false } => {
+                let mut inner = self.interaction.inner.borrow_mut();
+                let changed = inner.focus_visible;
+                inner.focus_visible = false;
+                drop(inner);
+                if changed {
+                    context.request_redraw_in(bounds.expanded(16.0));
+                }
+                EventResult::Ignored
+            }
+
             ViewEvent::KeyPressed {
                 key: Key::CapsLock, ..
             } if self.interaction.is_focused() && !self.secure => {
@@ -1438,9 +1547,11 @@ impl View for TextField {
                 let should_focus = bounds.contains_rounded(radius, *position);
                 let mut inner = self.interaction.inner.borrow_mut();
                 let changed = inner.focused != should_focus
+                    || inner.focus_visible
                     || (!should_focus && inner.selection_anchor.is_some());
 
                 inner.focused = should_focus && inner.enabled;
+                inner.focus_visible = false;
 
                 if !should_focus {
                     inner.selection_anchor = None;
@@ -1475,6 +1586,7 @@ impl View for TextField {
 
                 inner.hovered = true;
                 inner.focused = true;
+                inner.focus_visible = false;
                 inner.cursor = cursor;
                 inner.selection_anchor = Some(cursor);
                 inner.selecting = true;
@@ -1512,6 +1624,8 @@ impl View for TextField {
 
                 inner.hovered = false;
                 inner.focused = false;
+                inner.focus_visible = false;
+                inner.selecting = false;
                 inner.candidate_panel = None;
                 inner.hovered_candidate = None;
 
@@ -2148,3 +2262,7 @@ mod tests {
         assert_eq!(interaction.inner.borrow().selection_anchor, None);
     }
 }
+
+#[cfg(test)]
+#[path = "text_field_contract_tests.rs"]
+mod contract_tests;

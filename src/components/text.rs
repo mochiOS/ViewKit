@@ -452,11 +452,11 @@ fn normalize_maximum_width(maximum_width: Option<f32>) -> Option<f32> {
     })
 }
 
-fn resolved_font_size(font_size: f32) -> f32 {
+pub(crate) fn resolved_font_size(font_size: f32) -> f32 {
     finite_positive_or(font_size, 16.0)
 }
 
-fn resolved_line_height(font_size: f32, line_height: f32) -> f32 {
+pub(crate) fn resolved_line_height(font_size: f32, line_height: f32) -> f32 {
     finite_positive_or(line_height, font_size).max(font_size)
 }
 
