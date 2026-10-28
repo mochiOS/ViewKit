@@ -63,7 +63,7 @@ impl<Content> Surface<Content> {
 
     /// Declares the enclosing application chrome for a manually laid out pane.
     /// Corner selection is derived from the two rectangles, using the theme's
-    /// existing medium radius. No layout space or content inset is added.
+    /// existing extra-large radius. No layout space or content inset is added.
     pub fn in_container(mut self, bounds: Rect) -> Self {
         self.container = Some(bounds);
         self
@@ -71,9 +71,11 @@ impl<Content> Surface<Content> {
 
     fn radii(&self, bounds: Rect, container: Option<Rect>, theme: &Theme) -> [f32; 4] {
         match self.kind {
-            SurfaceKind::Pane => {
-                pane_radii(bounds, self.container.or(container), theme.radius.medium)
-            }
+            SurfaceKind::Pane => pane_radii(
+                bounds,
+                self.container.or(container),
+                theme.radius.extra_large,
+            ),
             SurfaceKind::Floating => {
                 [theme.surface.floating_radius.resolve(
                     &theme.radius,
@@ -386,10 +388,10 @@ mod tests {
         assert_eq!(
             surface.radii(Rect::new(200.0, 48.0, 600.0, 520.0), None, &Theme::LIGHT),
             [
-                Theme::LIGHT.radius.medium,
+                Theme::LIGHT.radius.extra_large,
                 0.0,
                 0.0,
-                Theme::LIGHT.radius.medium
+                Theme::LIGHT.radius.extra_large
             ]
         );
         assert_eq!(
@@ -397,7 +399,7 @@ mod tests {
             [0.0; 4]
         );
         let mut theme = Theme::DARK;
-        theme.radius.medium = 7.0;
+        theme.radius.extra_large = 7.0;
         assert_eq!(
             surface.radii(Rect::new(200.0, 48.0, 600.0, 552.0), None, &theme),
             [7.0, 0.0, 0.0, 0.0]
@@ -420,7 +422,7 @@ mod tests {
             super::super::NavigationSplitView::new(EmptyView, EmptyView).paint(split, context);
         });
         assert_eq!(context.pane_container(), None);
-        assert!(list.commands().iter().any(|cmd| matches!(cmd, DrawCommand::PushRoundedCornersClip {rect, radii} if rect.origin.y == 48.0 && *radii == [Theme::LIGHT.radius.medium, 0.0, 0.0, Theme::LIGHT.radius.medium])));
+        assert!(list.commands().iter().any(|cmd| matches!(cmd, DrawCommand::PushRoundedCornersClip {rect, radii} if rect.origin.y == 48.0 && *radii == [Theme::LIGHT.radius.extra_large, 0.0, 0.0, Theme::LIGHT.radius.extra_large])));
         let mut context = EventContext::new(&Theme::LIGHT, &Typography::DEFAULT, &mut measurer);
         Surface::app().handle_content_event(
             app,

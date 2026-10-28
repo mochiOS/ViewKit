@@ -13,7 +13,7 @@ a footer below the same pane also produces a bottom-left corner. An edge at
 the window boundary stays square here: the window owns its outside shape.
 An unsplit full-width content region is therefore not made into a floating card.
 
-The radius is the existing `theme.radius.medium` setback. The existing continuous
+The radius is the existing `theme.radius.extra_large` setback. The existing continuous
 corner geometry normalizes the four radii proportionally for small rectangles.
 The same geometry drives clipping and input exclusion. The clip surrounds the
 pane background and all its contents, including opaque backgrounds and scroll

@@ -11,7 +11,7 @@ use super::{Rectangle, RectangleColor, Surface};
 /// Owns the standard application chrome used by sidebar-based applications.
 ///
 /// The toolbar spans the full width. The sidebar starts below it, and the
-/// toolbar/sidebar junction receives the theme's medium-radius concave corner.
+/// toolbar/sidebar junction receives the theme's extra-large-radius concave corner.
 /// Its position and maximum size are derived from the resolved regions, so
 /// applications do not specify or paint the inner corner themselves.
 pub struct NavigationLayout {
@@ -246,7 +246,7 @@ mod tests {
         assert_eq!(detail.get(), Some(Rect::new(240.0, 48.0, 800.0, 652.0)));
         let corner_index = display_list.commands().iter().position(|command| matches!(command,
             DrawCommand::PushRoundedCornersClip { rect, radii }
-                if *rect == detail.get().unwrap() && *radii == [Theme::LIGHT.radius.medium, 0.0, 0.0, 0.0]
+                if *rect == detail.get().unwrap() && *radii == [Theme::LIGHT.radius.extra_large, 0.0, 0.0, 0.0]
         )).expect("detail clip");
         let detail_index = display_list
             .commands()
@@ -282,7 +282,7 @@ mod tests {
     #[test]
     fn inner_corner_uses_the_active_theme_radius() {
         let mut theme = Theme::LIGHT;
-        theme.radius.medium = 7.0;
+        theme.radius.extra_large = 7.0;
         let layout = NavigationLayout::new(
             Recorder(Rc::new(Cell::new(None))),
             Recorder(Rc::new(Cell::new(None))),
