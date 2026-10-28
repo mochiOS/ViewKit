@@ -140,6 +140,32 @@ impl View for NavigationLayout {
         );
 
         let (toolbar, sidebar, detail) = Self::regions(bounds, context);
+        let toolbar_height = self
+            .toolbar
+            .measure(
+                Constraints::loose(toolbar.size),
+                &mut MeasureContext {
+                    theme: context.theme,
+                    typography: context.typography,
+                    text_measurer: &mut *context.text_measurer,
+                },
+            )
+            .height;
+        let toolbar = if self.toolbar.owns_toolbar_insets() {
+            Rect::new(
+                bounds.origin.x,
+                bounds.origin.y,
+                bounds.size.width,
+                context
+                    .theme
+                    .layout
+                    .top_bar_height
+                    .min(bounds.size.height)
+                    .max(0.0),
+            )
+        } else {
+            super::toolbar::centered_content_bounds(toolbar, toolbar_height)
+        };
         context.record_accessibility(AccessibilityNode::new(AccessibilityRole::Toolbar, toolbar));
         context.record_accessibility(AccessibilityNode::new(
             AccessibilityRole::Navigation,
@@ -170,6 +196,28 @@ impl View for NavigationLayout {
             context.theme.spacing.medium,
             context.theme.spacing.large,
         );
+        let toolbar_height = self
+            .toolbar
+            .measure(
+                Constraints::loose(toolbar.size),
+                &mut context.measure_context(),
+            )
+            .height;
+        let toolbar = if self.toolbar.owns_toolbar_insets() {
+            Rect::new(
+                bounds.origin.x,
+                bounds.origin.y,
+                bounds.size.width,
+                context
+                    .theme
+                    .layout
+                    .top_bar_height
+                    .min(bounds.size.height)
+                    .max(0.0),
+            )
+        } else {
+            super::toolbar::centered_content_bounds(toolbar, toolbar_height)
+        };
         if event.requires_broadcast() {
             return self
                 .toolbar
@@ -302,5 +350,43 @@ mod tests {
         assert!(display_list.commands().iter().any(|command| matches!(command,
             DrawCommand::PushRoundedCornersClip { radii, .. } if *radii == [7.0, 0.0, 0.0, 0.0]
         )));
+    }
+    #[test]
+    fn toolbar_centers_intrinsic_text_and_does_not_double_pad_actions() {
+        use super::super::{ActionToolbar, ActionToolbarState, Text};
+        for actions in [false, true] {
+            let toolbar: Box<dyn View> = if actions {
+                Box::new(ActionToolbar::<u8>::new(ActionToolbarState::new()).title("Title"))
+            } else {
+                Box::new(Text::label("Title"))
+            };
+            let layout = NavigationLayout::new(
+                toolbar,
+                Recorder(Rc::new(Cell::new(None))),
+                Recorder(Rc::new(Cell::new(None))),
+            );
+            let theme = Theme::LIGHT;
+            let mut list = DisplayList::new();
+            let mut text = TextMeasurer::new();
+            layout.paint(
+                Rect::new(10.0, 20.0, 800.0, 600.0),
+                &mut PaintContext::new(&mut list, &theme, &theme.typography, &mut text),
+            );
+            let title = list
+                .commands()
+                .iter()
+                .find_map(|command| match command {
+                    DrawCommand::DrawText { command } if command.text == "Title" => {
+                        Some(command.bounds)
+                    }
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(title.origin.x, 10.0 + theme.spacing.extra_large);
+            assert_eq!(
+                title.origin.y + title.size.height * 0.5,
+                20.0 + theme.layout.top_bar_height * 0.5
+            );
+        }
     }
 }

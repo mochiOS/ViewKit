@@ -187,6 +187,10 @@ pub struct StackChild {
 }
 
 impl StackChild {
+    pub(crate) fn owns_toolbar_insets(&self) -> bool {
+        self.view.owns_toolbar_insets()
+    }
+
     pub fn new<V>(view: V) -> Self
     where
         V: View + 'static,

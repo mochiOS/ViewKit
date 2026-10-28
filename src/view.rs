@@ -293,6 +293,12 @@ impl RedrawSchedule {
 }
 
 pub trait View {
+    /// Layout containers use this to avoid adding toolbar padding twice to
+    /// content (such as ActionToolbar) that already owns its chrome insets.
+    fn owns_toolbar_insets(&self) -> bool {
+        false
+    }
+
     fn stack_flex_shrink(&self) -> f32 {
         1.0
     }

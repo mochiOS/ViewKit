@@ -66,6 +66,10 @@ where
     B: View,
     C: View,
 {
+    fn owns_toolbar_insets(&self) -> bool {
+        self.content.owns_toolbar_insets()
+    }
+
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
         self.background.paint(bounds, context);
 

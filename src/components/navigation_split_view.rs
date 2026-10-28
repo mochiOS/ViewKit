@@ -376,4 +376,21 @@ mod tests {
             DrawCommand::FillRect { rect, .. } if rect.size.width == Theme::LIGHT.divider.thickness
         )));
     }
+    #[test]
+    fn split_owns_exactly_one_separator_outside_pane_content() {
+        let theme = Theme::LIGHT;
+        let view = NavigationSplitView::new(
+            Recorder(Rc::new(Cell::new(None))),
+            super::super::ContentArea::pane(Recorder(Rc::new(Cell::new(None)))),
+        );
+        let mut list = DisplayList::new();
+        let mut text = TextMeasurer::new();
+        view.paint(
+            Rect::new(0.0, 0.0, 800.0, 600.0),
+            &mut PaintContext::new(&mut list, &theme, &theme.typography, &mut text),
+        );
+        assert_eq!(list.commands().iter().filter(|command| matches!(command,
+            DrawCommand::FillRect { rect, .. } if *rect == Rect::new(theme.layout.navigation_sidebar_width, 0.0, theme.divider.thickness, 600.0)
+        )).count(), 1);
+    }
 }

@@ -7,6 +7,7 @@ use super::{Rectangle, RectangleColor};
 pub struct ContentArea<Content> {
     content: Content,
     maximum_width: Option<f32>,
+    pane: bool,
 }
 
 impl<Content> ContentArea<Content> {
@@ -14,6 +15,25 @@ impl<Content> ContentArea<Content> {
         Self {
             content,
             maximum_width: None,
+            pane: false,
+        }
+    }
+
+    /// A full-width native detail pane with the standard chrome inset.
+    /// Unlike a centered document/form page, it has no implicit width cap.
+    pub fn pane(content: Content) -> Self {
+        Self {
+            content,
+            maximum_width: None,
+            pane: true,
+        }
+    }
+
+    fn margin(&self, theme: &crate::theme::Theme) -> f32 {
+        if self.pane {
+            theme.spacing.extra_large
+        } else {
+            theme.layout.page_margin
         }
     }
 
@@ -23,25 +43,27 @@ impl<Content> ContentArea<Content> {
     }
 
     fn resolved_maximum_width(&self, default: f32) -> f32 {
-        self.maximum_width.unwrap_or(default)
+        self.maximum_width
+            .unwrap_or(if self.pane { f32::INFINITY } else { default })
     }
 
     fn content_bounds(bounds: Rect, margin: f32, maximum_width: f32) -> Rect {
+        let vertical = margin.min(bounds.size.height.max(0.0) * 0.5);
         let available_width = (bounds.size.width - margin * 2.0).max(0.0);
         let content_width = available_width.min(maximum_width);
         let horizontal_offset = (bounds.size.width - content_width).max(0.0) / 2.0;
         Rect::new(
             bounds.origin.x + horizontal_offset,
-            bounds.origin.y + margin,
+            bounds.origin.y + vertical,
             content_width,
-            (bounds.size.height - margin * 2.0).max(0.0),
+            (bounds.size.height - vertical * 2.0).max(0.0),
         )
     }
 }
 
 impl<Content: View> View for ContentArea<Content> {
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
-        let margin = context.theme.layout.page_margin;
+        let margin = self.margin(context.theme);
         let child = self.content.measure(
             Constraints::loose(Size::new(
                 (constraints.maximum.width - margin * 2.0)
@@ -64,7 +86,7 @@ impl<Content: View> View for ContentArea<Content> {
         self.content.paint(
             Self::content_bounds(
                 bounds,
-                context.theme.layout.page_margin,
+                self.margin(context.theme),
                 self.resolved_maximum_width(context.theme.layout.content_max_width),
             ),
             context,
@@ -80,7 +102,7 @@ impl<Content: View> View for ContentArea<Content> {
         self.content.handle_event(
             Self::content_bounds(
                 bounds,
-                context.theme.layout.page_margin,
+                self.margin(context.theme),
                 self.resolved_maximum_width(context.theme.layout.content_max_width),
             ),
             event,
@@ -140,5 +162,31 @@ mod tests {
         view.paint(Rect::new(0.0, 0.0, 859.0, 640.0), &mut context);
 
         assert_eq!(recorded.get(), Some(Rect::new(109.5, 40.0, 640.0, 560.0)));
+    }
+    #[test]
+    fn pane_uses_chrome_inset_without_a_document_width_cap() {
+        let recorded = Rc::new(Cell::new(None));
+        let view = ContentArea::pane(Recorder(recorded.clone()));
+        let mut list = DisplayList::new();
+        let mut text = TextMeasurer::new();
+        for theme in [Theme::LIGHT, Theme::DARK] {
+            for width in [20.0, 420.0, 1200.0] {
+                let bounds = Rect::new(10.0, 20.0, width, 500.0);
+                view.paint(
+                    bounds,
+                    &mut PaintContext::new(&mut list, &theme, &Typography::DEFAULT, &mut text),
+                );
+                let actual = recorded.get().unwrap();
+                assert_eq!(
+                    actual.origin.x,
+                    bounds.origin.x + theme.spacing.extra_large.min(width * 0.5)
+                );
+                assert_eq!(actual.origin.y, bounds.origin.y + theme.spacing.extra_large);
+                assert_eq!(
+                    actual.size.width,
+                    (width - 2.0 * theme.spacing.extra_large).max(0.0)
+                );
+            }
+        }
     }
 }

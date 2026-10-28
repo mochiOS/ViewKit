@@ -91,7 +91,7 @@ impl<Id: Clone + Eq> ActionToolbar<Id> {
     fn geometry(&self, bounds: Rect, context: &mut MeasureContext<'_>) -> Geometry {
         let width = bounds.size.width.max(0.0);
         let height = bounds.size.height.max(0.0);
-        let inset = context.theme.spacing.medium.min(width / 2.0);
+        let inset = context.theme.spacing.extra_large.min(width / 2.0);
         let available = (width - inset * 2.0).max(0.0);
         let gap = context.theme.spacing.extra_small;
         let group_gap = context.theme.spacing.medium;
@@ -232,6 +232,10 @@ impl<Id: Clone + Eq> ActionToolbar<Id> {
     }
 }
 impl<Id: Clone + Eq> View for ActionToolbar<Id> {
+    fn owns_toolbar_insets(&self) -> bool {
+        true
+    }
+
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
         let mut leading = self.title.as_ref().map_or(Vec::new(), |title| {
             vec![
@@ -263,7 +267,7 @@ impl<Id: Clone + Eq> View for ActionToolbar<Id> {
         };
         let width = sum(&leading)
             + sum(&trailing)
-            + context.theme.spacing.medium * 2.0
+            + context.theme.spacing.extra_large * 2.0
             + if !leading.is_empty() && !trailing.is_empty() {
                 context.theme.spacing.medium
             } else {

@@ -201,6 +201,10 @@ impl<Content> View for Surface<Content>
 where
     Content: View,
 {
+    fn owns_toolbar_insets(&self) -> bool {
+        self.content.owns_toolbar_insets()
+    }
+
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
         self.content.measure(constraints, context)
     }

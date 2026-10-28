@@ -6,6 +6,10 @@ impl<T> View for Box<T>
 where
     T: View + ?Sized,
 {
+    fn owns_toolbar_insets(&self) -> bool {
+        (**self).owns_toolbar_insets()
+    }
+
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
         (**self).measure(constraints, context)
     }
