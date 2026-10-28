@@ -38,6 +38,9 @@ mod progress_bar;
 mod radio;
 mod range_slider;
 mod rectangle;
+mod row_appearance;
+#[cfg(test)]
+mod row_contract_tests;
 mod scroll;
 mod segment_control;
 mod settings;

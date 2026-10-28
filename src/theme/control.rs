@@ -246,6 +246,9 @@ pub struct ListTokens {
     pub background: Color,
     pub hovered_background: Color,
     pub selected_background: Color,
+    pub inactive_selected_background: Color,
+    pub inactive_selected_foreground: Color,
+    pub disabled_foreground: Color,
     pub foreground: Color,
     pub selected_foreground: Color,
     pub secondary_foreground: Color,
@@ -258,8 +261,11 @@ impl ListTokens {
     pub const fn from_colors(colors: ColorTokens) -> Self {
         Self {
             background: Color::TRANSPARENT,
-            hovered_background: colors.surface_subtle,
+            hovered_background: colors.surface_muted,
             selected_background: colors.accent_soft,
+            inactive_selected_background: colors.surface_muted,
+            inactive_selected_foreground: colors.text_primary,
+            disabled_foreground: colors.text_disabled,
             foreground: colors.text_primary,
             selected_foreground: colors.accent,
             secondary_foreground: colors.text_secondary,

@@ -75,6 +75,7 @@ pub struct PaintContext<'a> {
     list_row_edges: Option<(bool, bool)>,
     control_foreground: Option<crate::theme::Color>,
     pane_container: Option<Rect>,
+    window_active: bool,
 }
 
 impl<'a> PaintContext<'a> {
@@ -130,7 +131,19 @@ impl<'a> PaintContext<'a> {
             list_row_edges: None,
             control_foreground: None,
             pane_container: None,
+            window_active: true,
         }
+    }
+
+    /// Supplies window activation independently of keyboard/control focus.
+    /// The native and host runtimes set this for each paint pass.
+    pub fn with_window_active(mut self, active: bool) -> Self {
+        self.window_active = active;
+        self
+    }
+
+    pub fn window_active(&self) -> bool {
+        self.window_active
     }
 
     pub fn with_command_statuses(mut self, command_statuses: &'a mut Vec<CommandStatus>) -> Self {

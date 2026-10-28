@@ -192,6 +192,7 @@ struct WindowRuntime<Body> {
     redraw_schedule: RedrawSchedule,
     pending_redraw: RedrawRequest,
     fallback_context_menu: Option<FallbackContextMenu>,
+    window_active: bool,
 }
 
 struct RuntimeAlert {
@@ -287,6 +288,7 @@ impl<Body> WindowRuntime<Body> {
             redraw_schedule: RedrawSchedule::new(),
             pending_redraw: RedrawRequest::None,
             fallback_context_menu: None,
+            window_active: false,
         }
     }
 
@@ -649,6 +651,17 @@ where
         let viewport = window.viewport();
 
         self.ensure_root(window_id, viewport);
+        if let PlatformEvent::Focused(active) = event {
+            let state = self
+                .windows
+                .get_mut(&window_id)
+                .expect("window was ensured");
+            if state.window_active != active {
+                state.window_active = active;
+                state.pending_redraw = RedrawRequest::Full;
+                window.request_redraw();
+            }
+        }
 
         if alert_window {
             self.handle_alert_event(window_id, &event, window);
@@ -827,6 +840,7 @@ where
             &self.theme.typography,
             &mut state.text_measurer,
         )
+        .with_window_active(state.window_active)
         .with_viewport_bounds(viewport_bounds)
         .with_redraw_schedule(&mut state.redraw_schedule)
         .with_accessibility_nodes(&mut state.accessibility_nodes)
@@ -1312,6 +1326,58 @@ mod tests {
     }
 
     #[test]
+    fn activation_changes_repaint_selection_through_the_runtime_context() {
+        struct SelectionApp;
+        impl App for SelectionApp {
+            type Body = crate::components::ListRow;
+            fn new() -> Self {
+                Self
+            }
+            fn body(&self, _: &ViewContext) -> Self::Body {
+                crate::components::ListRow::new("Selected row").selected(true)
+            }
+            fn theme(&self) -> Option<Theme> {
+                let mut theme = Theme::LIGHT;
+                theme.motion = theme.motion.reduced();
+                Some(theme)
+            }
+        }
+        reset_exit_request();
+        let mut runtime = ApplicationRuntime::new(SelectionApp);
+        let window = TestWindow(WindowId::PRIMARY);
+        for active in [true, false, true] {
+            runtime.handle_event(PlatformEvent::Focused(active), &window);
+            let mut list = DisplayList::new();
+            runtime.draw(&window, &mut list);
+            let color = list
+                .commands()
+                .iter()
+                .find_map(|command| match command {
+                    DrawCommand::DrawText { command } if command.text == "Selected row" => {
+                        Some(command.color)
+                    }
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(
+                color,
+                if active {
+                    runtime.theme.list.selected_foreground
+                } else {
+                    runtime.theme.list.inactive_selected_foreground
+                }
+            );
+            assert!(
+                runtime.windows[&WindowId::PRIMARY]
+                    .accessibility_nodes
+                    .iter()
+                    .any(|node| node.selected)
+            );
+        }
+        reset_exit_request();
+    }
+
+    #[test]
     fn focus_tracks_key_and_main_windows_independently() {
         reset_exit_request();
         let app = PaintMutationApp {
@@ -1321,12 +1387,23 @@ mod tests {
         let mut runtime = ApplicationRuntime::new(app);
         let window = TestWindow(WindowId::PRIMARY);
 
+        assert!(!runtime.windows[&WindowId::PRIMARY].window_active);
         assert_eq!(key_window(), None);
         assert_eq!(main_window(), Some(WindowId::PRIMARY));
         runtime.handle_event(PlatformEvent::Focused(true), &window);
+        assert!(runtime.windows[&WindowId::PRIMARY].window_active);
+        assert_eq!(
+            runtime.windows[&WindowId::PRIMARY].pending_redraw,
+            RedrawRequest::Full
+        );
         assert_eq!(key_window(), Some(WindowId::PRIMARY));
         assert_eq!(main_window(), Some(WindowId::PRIMARY));
         runtime.handle_event(PlatformEvent::Focused(false), &window);
+        assert!(!runtime.windows[&WindowId::PRIMARY].window_active);
+        assert_eq!(
+            runtime.windows[&WindowId::PRIMARY].pending_redraw,
+            RedrawRequest::Full
+        );
         assert_eq!(key_window(), None);
         assert_eq!(main_window(), Some(WindowId::PRIMARY));
         reset_exit_request();

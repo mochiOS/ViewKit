@@ -4,37 +4,45 @@ use std::rc::Rc;
 use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
-use crate::layout::{IntoStackChild, StackAlignment, StackGap};
-use crate::theme::{Color, CornerRadius, ShadowStyle, Theme};
+use crate::layout::{IntoStackChild, StackAlignment, StackGap, ViewExt};
+use crate::theme::{CornerRadius, ShadowStyle, Theme};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 use super::{
-    Button, ButtonInteractionState, ButtonStyle, HStack, Icon, Rectangle, RectangleColor,
-    SymbolName, Text, VStack, ZStackAlignment,
+    Button, ButtonInteractionState, HStack, Icon, Rectangle, RectangleColor, SymbolName, Text,
+    VStack, ZStackAlignment,
 };
+
+use super::row_appearance::RowAppearance;
 
 type Callback = Rc<RefCell<Box<dyn FnMut()>>>;
 
-/// A text-only navigation item using the selection treatment from the Layout
-/// Example. Icons are intentionally not synthesized; callers may add only
-/// symbols that exist in VK Symbols through a custom control.
+/// Navigation row sharing selection, hover and inactive-window treatment with
+/// ListRow. Optional icons use the existing VK Symbols and common leading slot.
 pub struct SidebarItem {
     label: String,
     symbol: Option<SymbolName>,
     reserves_symbol_space: bool,
     selected: bool,
+    enabled: bool,
     interaction: ButtonInteractionState,
     on_select: Option<Callback>,
 }
 
 impl SidebarItem {
     pub fn new(label: impl Into<String>) -> Self {
+        Self::with_interaction(ButtonInteractionState::new(), label)
+    }
+
+    /// Reuses state when navigation items are rebuilt by a virtualized view.
+    pub fn with_interaction(interaction: ButtonInteractionState, label: impl Into<String>) -> Self {
         Self {
             label: label.into(),
             symbol: None,
             reserves_symbol_space: false,
             selected: false,
-            interaction: ButtonInteractionState::new(),
+            enabled: true,
+            interaction,
             on_select: None,
         }
     }
@@ -56,59 +64,64 @@ impl SidebarItem {
         self
     }
 
+    pub fn enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+
+    pub fn interaction(&self) -> &ButtonInteractionState {
+        &self.interaction
+    }
+
     pub fn on_select(mut self, callback: impl FnMut() + 'static) -> Self {
         self.on_select = Some(Rc::new(RefCell::new(Box::new(callback))));
         self
     }
 
-    fn button(&self, theme: &Theme) -> Button {
-        let foreground = if self.selected {
-            theme.colors.text_primary
-        } else {
-            theme.colors.text_secondary
-        };
-        let style = if self.selected {
-            ButtonStyle::Custom {
-                background: theme.colors.accent_soft,
-                hovered_background: theme.colors.accent_soft,
-                border: Color::TRANSPARENT,
-                hovered_border: Color::TRANSPARENT,
-                foreground,
-            }
-        } else {
-            ButtonStyle::Ghost
-        };
+    fn button(&self, theme: &Theme, active: bool) -> Button {
+        let appearance = RowAppearance::resolve(theme, self.selected, self.enabled, active);
         let mut content = HStack::new()
             .alignment(StackAlignment::Center)
-            .gap(StackGap::Small);
+            .gap(StackGap::Medium);
         if let Some(symbol) = self.symbol {
             content = content.child(
                 Icon::new(symbol)
                     .size(theme.layout.compact_icon_size)
-                    .color(foreground),
+                    .color(appearance.leading)
+                    .frame(
+                        theme.layout.list_leading_size,
+                        theme.layout.list_leading_size,
+                    ),
             );
         } else if self.reserves_symbol_space {
             content = content.child(
                 super::Spacer::new()
                     .into_stack_child()
-                    .width(theme.layout.compact_icon_size)
+                    .width(theme.layout.list_leading_size)
                     .flex_grow(0.0)
                     .flex_shrink(0.0),
             );
         }
         content = content.child(
             Text::label(self.label.clone())
+                .accessibility_hidden(true)
                 .weight(if self.selected { 600 } else { 500 })
-                .color(foreground),
+                .color(appearance.foreground)
+                .layout()
+                .flex_grow(1.0)
+                .flex_shrink(1.0),
         );
         let mut button = Button::with_interaction(self.interaction.clone())
-            .content(content)
-            .style(style)
+            .content_padding(false)
+            .content(super::Padding::symmetric(theme.list.row_padding, 0.0).content(content))
+            .style(appearance.button_style())
+            .enabled(self.enabled)
             .shadow(ShadowStyle::None)
             .alignment(ZStackAlignment::Leading)
             .radius(CornerRadius::Custom(6.0))
             .accessibility_role(AccessibilityRole::Button)
-            .accessibility_label(self.label.clone());
+            .accessibility_label(self.label.clone())
+            .accessibility_selected(self.selected);
         if let Some(on_select) = &self.on_select {
             let on_select = Rc::clone(on_select);
             button = button.on_click(move || (on_select.borrow_mut())());
@@ -119,7 +132,9 @@ impl SidebarItem {
 
 impl View for SidebarItem {
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
-        let measured = self.button(context.theme).measure(constraints, context);
+        let measured = self
+            .button(context.theme, true)
+            .measure(constraints, context);
         constraints.constrain(Size::new(
             measured.width,
             context.theme.layout.control_height,
@@ -127,7 +142,11 @@ impl View for SidebarItem {
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
-        self.button(context.theme).paint(bounds, context);
+        let button = self.button(context.theme, context.window_active());
+        if !context.window_active() {
+            button.cancel_tracking();
+        }
+        button.paint(bounds, context);
     }
 
     fn handle_event(
@@ -136,8 +155,12 @@ impl View for SidebarItem {
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
-        self.button(context.theme)
-            .handle_event(bounds, event, context)
+        let button = self.button(context.theme, true);
+        if matches!(event, ViewEvent::FocusChanged { focused: false }) {
+            button.cancel_tracking();
+            context.request_redraw_in(bounds);
+        }
+        button.handle_event(bounds, event, context)
     }
 }
 

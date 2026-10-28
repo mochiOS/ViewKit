@@ -1,5 +1,6 @@
 //! リストコンポーネント
 
+use super::row_appearance::RowAppearance;
 use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
@@ -7,14 +8,14 @@ use crate::layout::{
     IntoStackChildren, StackAlignment, StackChild, StackDirection, StackDistribution, StackGap,
     ViewExt, handle_stack_event, layout_stack, measure_stack,
 };
-use crate::theme::{Color, CornerRadius, Theme};
+use crate::theme::{CornerRadius, ShadowStyle, Theme};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use super::{
-    Avatar, Button, ButtonInteractionState, ButtonStyle, Ellipse, EllipseColor, HStack, Icon,
-    Padding, SymbolName, Text, VStack, ZStackAlignment,
+    Avatar, Button, ButtonInteractionState, Ellipse, EllipseColor, HStack, Icon, Padding,
+    SymbolName, Text, VStack, ZStackAlignment,
 };
 use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 
@@ -199,25 +200,27 @@ impl ListRow {
         &self.interaction
     }
 
-    fn content_view(&self, theme: &Theme) -> Padding<HStack> {
+    fn content_view(&self, theme: &Theme, appearance: RowAppearance) -> Padding<HStack> {
         let mut title_row = HStack::new()
             .alignment(StackAlignment::Center)
             .gap(StackGap::Small)
             .child(
                 Text::label(self.title.clone())
                     .accessibility_hidden(true)
-                    .color(if self.selected {
-                        theme.list.selected_foreground
-                    } else {
-                        theme.list.foreground
-                    })
+                    .color(appearance.foreground)
+                    .weight(if self.selected { 600 } else { 500 })
                     .layout()
-                    .flex_grow(1.0),
+                    .flex_grow(1.0)
+                    .flex_shrink(1.0),
             );
 
         if let Some(trailing) = self.trailing.as_ref() {
-            title_row = title_row
-                .child(Text::caption(trailing.clone()).color(theme.list.secondary_foreground));
+            title_row = title_row.child(
+                Text::caption(trailing.clone())
+                    .color(appearance.secondary)
+                    .layout()
+                    .flex_shrink(1.0),
+            );
         }
 
         let mut labels = VStack::new()
@@ -233,7 +236,7 @@ impl ListRow {
             if let Some(subtitle) = self.subtitle.as_ref() {
                 subtitle_row = subtitle_row.child(
                     Text::caption(subtitle.clone())
-                        .color(theme.list.secondary_foreground)
+                        .color(appearance.secondary)
                         .layout()
                         .flex_grow(1.0),
                 );
@@ -265,7 +268,7 @@ impl ListRow {
             row = row.child(
                 Icon::new(icon)
                     .size(theme.layout.compact_icon_size)
-                    .color(theme.list.leading_foreground)
+                    .color(appearance.leading)
                     .frame(
                         theme.layout.list_leading_size,
                         theme.layout.list_leading_size,
@@ -278,27 +281,15 @@ impl ListRow {
         Padding::all(theme.list.row_padding).content(row)
     }
 
-    fn button(&self, theme: &Theme) -> Button {
+    fn button(&self, theme: &Theme, active: bool) -> Button {
+        let appearance = RowAppearance::resolve(theme, self.selected, self.enabled, active);
         let mut button = Button::with_interaction(self.interaction.clone())
             .content_padding(false)
-            .style(ButtonStyle::Custom {
-                background: if self.selected {
-                    theme.list.selected_background
-                } else {
-                    theme.list.background
-                },
-                hovered_background: if self.selected {
-                    theme.list.selected_background
-                } else {
-                    theme.list.hovered_background
-                },
-                border: Color::TRANSPARENT,
-                hovered_border: Color::TRANSPARENT,
-                foreground: theme.list.foreground,
-            })
+            .style(appearance.button_style())
+            .shadow(ShadowStyle::None)
             .alignment(ZStackAlignment::Leading)
             .enabled(self.enabled)
-            .content(self.content_view(theme));
+            .content(self.content_view(theme, appearance));
 
         button = button
             .accessibility_role(AccessibilityRole::ListItem)
@@ -318,7 +309,9 @@ impl ListRow {
 
 impl View for ListRow {
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
-        let measured = self.button(context.theme).measure(constraints, context);
+        let measured = self
+            .button(context.theme, true)
+            .measure(constraints, context);
         constraints.constrain(Size::new(
             measured.width,
             measured.height.max(context.theme.layout.list_row_height),
@@ -326,7 +319,10 @@ impl View for ListRow {
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
-        let button = self.button(context.theme);
+        let button = self.button(context.theme, context.window_active());
+        if !context.window_active() {
+            button.cancel_tracking();
+        }
         if let Some((first, last)) = self
             .edges
             .or_else(|| context.list_row_edges())
@@ -363,8 +359,12 @@ impl View for ListRow {
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
-        self.button(context.theme)
-            .handle_event(bounds, event, context)
+        let button = self.button(context.theme, true);
+        if matches!(event, ViewEvent::FocusChanged { focused: false }) {
+            button.cancel_tracking();
+            context.request_redraw_in(bounds);
+        }
+        button.handle_event(bounds, event, context)
     }
 }
 
@@ -424,7 +424,7 @@ mod tests {
         );
         context.with_list_row_edges(false, false, |context| {
             List::new()
-                .row(ListRow::new("Only"))
+                .row(ListRow::new("Only").selected(true))
                 .paint(Rect::new(0.0, 0.0, 240.0, 48.0), context);
             assert_eq!(context.list_row_edges(), Some((false, false)));
         });
