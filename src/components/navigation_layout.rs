@@ -6,9 +6,7 @@ use crate::geometry::{Rect, Size};
 use crate::layout::{IntoStackChild, StackChild};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
-use super::{Rectangle, RectangleColor};
-use crate::draw_command::DrawCommand;
-use crate::geometry::Point;
+use super::{Rectangle, RectangleColor, Surface};
 
 /// Owns the standard application chrome used by sidebar-based applications.
 ///
@@ -84,19 +82,6 @@ impl NavigationLayout {
         );
         (toolbar, sidebar, detail)
     }
-
-    fn inner_corner_size(bounds: Rect, context: &PaintContext<'_>) -> f32 {
-        let available_width =
-            (bounds.size.width - context.theme.layout.navigation_sidebar_width).max(0.0);
-        let available_height = (bounds.size.height - context.theme.layout.top_bar_height).max(0.0);
-        context
-            .theme
-            .radius
-            .medium
-            .max(0.0)
-            .min(available_width)
-            .min(available_height)
-    }
 }
 
 impl View for NavigationLayout {
@@ -120,7 +105,7 @@ impl View for NavigationLayout {
         }
 
         Rectangle::new()
-            .color(RectangleColor::Surface)
+            .color(RectangleColor::SubtleSurface)
             .paint(bounds, context);
 
         let toolbar_height = context
@@ -160,25 +145,11 @@ impl View for NavigationLayout {
             AccessibilityRole::Navigation,
             sidebar,
         ));
-        self.detail.paint(detail, context);
-
-        // The detail view commonly paints its own opaque surface. Composite
-        // the concave join after it so the inner corner remains visible.
-        let r = Self::inner_corner_size(bounds, context);
-        let x = bounds.origin.x + sidebar_width;
-        let y = bounds.origin.y + toolbar_height;
-        let mut points = vec![Point::new(x, y), Point::new(x + r, y)];
-        let n = crate::continuous_corner::polygon_segments(r * 4.0);
-        for i in 1..=n {
-            let p = crate::continuous_corner::sample(i * 1024 / n);
-            points.push(Point::new(x + r - r * p.0, y + r * p.1));
-        }
-        context.display_list.push(DrawCommand::DrawContour {
-            points,
-            fill: context.theme.colors.surface_subtle,
-            stroke: crate::theme::Color::TRANSPARENT,
-            stroke_width: 0.0,
-        });
+        Surface::pane()
+            .in_container(context.pane_container().unwrap_or(bounds))
+            .paint_content(detail, context, |context| {
+                self.detail.paint(detail, context);
+            });
 
         self.toolbar.paint(toolbar, context);
         self.sidebar.paint(sidebar, context);
@@ -204,14 +175,24 @@ impl View for NavigationLayout {
                 .toolbar
                 .handle_event(toolbar, event, context)
                 .merge(self.sidebar.handle_event(sidebar, event, context))
-                .merge(self.detail.handle_event(detail, event, context));
+                .merge(
+                    Surface::pane()
+                        .in_container(context.pane_container().unwrap_or(bounds))
+                        .handle_content_event(detail, event, context, |event, context| {
+                            self.detail.handle_event(detail, event, context)
+                        }),
+                );
         }
         if event.is_inside(toolbar) {
             self.toolbar.handle_event(toolbar, event, context)
         } else if event.is_inside(sidebar) {
             self.sidebar.handle_event(sidebar, event, context)
         } else if event.is_inside(detail) {
-            self.detail.handle_event(detail, event, context)
+            Surface::pane()
+                .in_container(context.pane_container().unwrap_or(bounds))
+                .handle_content_event(detail, event, context, |event, context| {
+                    self.detail.handle_event(detail, event, context)
+                })
         } else {
             EventResult::Ignored
         }
@@ -263,34 +244,32 @@ mod tests {
         assert_eq!(toolbar.get(), Some(Rect::new(24.0, 8.0, 992.0, 32.0)));
         assert_eq!(sidebar.get(), Some(Rect::new(12.0, 64.0, 216.0, 620.0)));
         assert_eq!(detail.get(), Some(Rect::new(240.0, 48.0, 800.0, 652.0)));
-        assert!(display_list.commands().iter().any(|command| matches!(
-            command,
-            DrawCommand::DrawContour { points, .. }
-                if points[0] == Point::new(240.0,48.0) && points[1] == Point::new(240.0 + Theme::LIGHT.radius.medium,48.0)
-        )));
-        let corner_index = display_list
-            .commands()
-            .iter()
-            .position(|command| matches!(
-                command,
-                DrawCommand::DrawContour { points, .. }
-                    if points[0] == Point::new(240.0,48.0) && points[1] == Point::new(240.0 + Theme::LIGHT.radius.medium,48.0)
-            ))
-            .expect("inner corner");
+        let corner_index = display_list.commands().iter().position(|command| matches!(command,
+            DrawCommand::PushRoundedCornersClip { rect, radii }
+                if *rect == detail.get().unwrap() && *radii == [Theme::LIGHT.radius.medium, 0.0, 0.0, 0.0]
+        )).expect("detail clip");
         let detail_index = display_list
             .commands()
             .iter()
-            .position(|command| {
-                matches!(
-                    command,
-                    DrawCommand::FillRect { rect, .. }
-                        if *rect == Rect::new(240.0, 48.0, 800.0, 652.0)
+            .rposition(|command| {
+                matches!(command,
+                    DrawCommand::FillRect { rect, .. } if *rect == detail.get().unwrap()
                 )
             })
-            .expect("detail paint");
+            .expect("opaque detail content");
         assert!(
-            corner_index > detail_index,
-            "inner corner must be composited over detail"
+            corner_index < detail_index,
+            "opaque children must be inside the clip"
+        );
+        assert!(matches!(
+            display_list.commands()[detail_index + 1],
+            DrawCommand::PopClip
+        ));
+        assert!(
+            !display_list
+                .commands()
+                .iter()
+                .any(|command| matches!(command, DrawCommand::DrawContour { .. }))
         );
         assert!(!display_list.commands().iter().any(|command| matches!(
             command,
@@ -320,10 +299,8 @@ mod tests {
 
         layout.paint(Rect::new(0.0, 0.0, 1040.0, 700.0), &mut context);
 
-        assert!(display_list.commands().iter().any(|command| matches!(
-            command,
-            DrawCommand::DrawContour { points, .. }
-                if points[0] == Point::new(240.0,48.0) && points[1] == Point::new(247.0,48.0)
+        assert!(display_list.commands().iter().any(|command| matches!(command,
+            DrawCommand::PushRoundedCornersClip { radii, .. } if *radii == [7.0, 0.0, 0.0, 0.0]
         )));
     }
 }

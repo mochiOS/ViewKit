@@ -262,9 +262,18 @@ pub struct EventContext<'a> {
     command_statuses: &'a [CommandStatus],
     command_target: Option<Point>,
     corner_radii: Vec<f32>,
+    pane_container: Option<Rect>,
 }
 
 impl<'a> EventContext<'a> {
+    pub(crate) fn pane_container(&self) -> Option<Rect> {
+        self.pane_container
+    }
+
+    pub(crate) fn set_pane_container(&mut self, bounds: Option<Rect>) -> Option<Rect> {
+        std::mem::replace(&mut self.pane_container, bounds)
+    }
+
     pub fn new(
         theme: &'a Theme,
         typography: &'a Typography,
@@ -284,6 +293,7 @@ impl<'a> EventContext<'a> {
             command_statuses: &[],
             command_target: None,
             corner_radii: Vec::new(),
+            pane_container: None,
         }
     }
 

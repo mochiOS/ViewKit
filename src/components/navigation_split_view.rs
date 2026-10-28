@@ -5,7 +5,7 @@ use crate::geometry::{Rect, Size};
 use crate::theme::Theme;
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
-use super::{Rectangle, RectangleColor};
+use super::{Rectangle, RectangleColor, Surface};
 
 pub struct NavigationSplitView<Sidebar, Detail> {
     sidebar: Sidebar,
@@ -241,7 +241,14 @@ impl<Sidebar: View, Detail: View> View for NavigationSplitView<Sidebar, Detail> 
             Self::sidebar_content(sidebar, self.resolved_insets(context.theme)),
             context,
         );
-        self.detail.paint(detail, context);
+        // The enclosing app surface supplies toolbar/footer adjacency even
+        // when this split is nested in a stack or another layout wrapper.
+        Rectangle::new()
+            .color(RectangleColor::SubtleSurface)
+            .paint(detail, context);
+        Surface::pane().paint_content(detail, context, |context| {
+            self.detail.paint(detail, context)
+        });
     }
 
     fn handle_event(
@@ -258,15 +265,18 @@ impl<Sidebar: View, Detail: View> View for NavigationSplitView<Sidebar, Detail> 
         let sidebar = Self::sidebar_content(sidebar, self.resolved_insets(context.theme));
 
         if event.requires_broadcast() {
-            return self
-                .sidebar
-                .handle_event(sidebar, event, context)
-                .merge(self.detail.handle_event(detail, event, context));
+            return self.sidebar.handle_event(sidebar, event, context).merge(
+                Surface::pane().handle_content_event(detail, event, context, |event, context| {
+                    self.detail.handle_event(detail, event, context)
+                }),
+            );
         }
         if event.is_inside(sidebar) {
             self.sidebar.handle_event(sidebar, event, context)
         } else if event.is_inside(detail) {
-            self.detail.handle_event(detail, event, context)
+            Surface::pane().handle_content_event(detail, event, context, |event, context| {
+                self.detail.handle_event(detail, event, context)
+            })
         } else {
             EventResult::Ignored
         }

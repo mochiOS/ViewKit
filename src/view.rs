@@ -74,9 +74,18 @@ pub struct PaintContext<'a> {
     inherited_corner_radii: Vec<f32>,
     list_row_edges: Option<(bool, bool)>,
     control_foreground: Option<crate::theme::Color>,
+    pane_container: Option<Rect>,
 }
 
 impl<'a> PaintContext<'a> {
+    pub(crate) fn pane_container(&self) -> Option<Rect> {
+        self.pane_container
+    }
+
+    pub(crate) fn set_pane_container(&mut self, bounds: Option<Rect>) -> Option<Rect> {
+        std::mem::replace(&mut self.pane_container, bounds)
+    }
+
     /// 子のレイアウトを固定したまま描画だけを変換します。
     /// フォーカスが毎フレーム移らないよう、アクセシビリティのboundsは論理座標を維持します。
     /// ポインター配送時は同じ変換のinverse_pointを使用してください。
@@ -120,6 +129,7 @@ impl<'a> PaintContext<'a> {
             inherited_corner_radii: Vec::new(),
             list_row_edges: None,
             control_foreground: None,
+            pane_container: None,
         }
     }
 

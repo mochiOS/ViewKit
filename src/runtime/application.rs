@@ -716,6 +716,7 @@ where
                 &self.theme.typography,
                 &mut state.text_measurer,
             );
+            context.set_pane_container(Some(viewport.logical_bounds()));
             context.set_command_context(
                 &state.command_statuses,
                 state.event_dispatcher.command_target(),
@@ -830,6 +831,8 @@ where
         .with_redraw_schedule(&mut state.redraw_schedule)
         .with_accessibility_nodes(&mut state.accessibility_nodes)
         .with_command_statuses(&mut state.command_statuses);
+
+        context.set_pane_container(Some(viewport_bounds));
 
         if let Some(alert) = state.alert.as_ref() {
             alert.view.paint(viewport_bounds, &mut context);
@@ -953,6 +956,7 @@ where
                     &self.theme.typography,
                     &mut state.text_measurer,
                 );
+                context.set_pane_container(Some(bounds));
                 state
                     .event_dispatcher
                     .dispatch(alert.view.as_ref(), bounds, event, &mut context);
