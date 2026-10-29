@@ -61,8 +61,9 @@ enum WindowRequest {
 
 /// 現在のViewKitアプリケーションへ正常終了を要求します。
 ///
-/// プラットフォームのイベントループを抜け、WindowやSurfaceを破棄してから
-/// [`run`]を返します。
+/// UIスレッドでApp::close_requestedの確認を通し、許可された場合に
+/// WindowやSurfaceを破棄して[`run`]を返します。拒否時は要求を取り消し、
+/// 処理完了後に自動終了しません。必要なら改めて要求してください。
 pub fn request_exit() {
     EXIT_REQUESTED.with(|requested| requested.set(true));
 }
@@ -921,6 +922,23 @@ where
         exit_requested()
     }
 
+    fn should_exit(&mut self) -> bool {
+        if !EXIT_REQUESTED.with(|requested| requested.replace(false)) {
+            return false;
+        }
+        if self.app.close_requested() {
+            return true;
+        }
+        // A close guard may present an asynchronous confirmation. Rebuild it
+        // without removing windows or spinning on the rejected quit request.
+        for (&id, state) in &mut self.windows {
+            state.root = None;
+            state.pending_redraw = RedrawRequest::Full;
+            self.pending_window_commands.push(PlatformWindowCommand::Redraw { id });
+        }
+        false
+    }
+
     fn should_close_window(&mut self, window: &dyn PlatformWindow) -> bool {
         if self
             .windows
@@ -1318,6 +1336,66 @@ mod tests {
         assert!(exit_requested());
         reset_exit_request();
         assert!(!exit_requested());
+    }
+
+    #[test]
+    fn application_quit_respects_the_close_guard_and_requires_a_new_request_after_rejection() {
+        struct GuardedApp {
+            busy: Rc<Cell<bool>>,
+            checks: Rc<Cell<u32>>,
+        }
+        impl App for GuardedApp {
+            type Body = PaintMutationView;
+            fn new() -> Self {
+                unreachable!()
+            }
+            fn body(&self, _: &ViewContext) -> Self::Body {
+                PaintMutationView {
+                    state: State::new(false),
+                }
+            }
+            fn close_requested(&mut self) -> bool {
+                self.checks.set(self.checks.get() + 1);
+                !self.busy.get()
+            }
+        }
+        reset_exit_request();
+        let busy = Rc::new(Cell::new(true));
+        let checks = Rc::new(Cell::new(0));
+        let mut runtime = ApplicationRuntime::new(GuardedApp {
+            busy: busy.clone(),
+            checks: checks.clone(),
+        });
+        let window = TestWindow(WindowId::PRIMARY);
+        runtime.handle_event(
+            PlatformEvent::Resumed {
+                viewport: window.viewport(),
+            },
+            &window,
+        );
+        request_exit();
+        assert!(!runtime.should_exit());
+        assert!(!runtime.exit_requested());
+        assert!(runtime.windows.contains_key(&WindowId::PRIMARY));
+        assert!(
+            runtime
+                .take_window_commands()
+                .iter()
+                .any(|command| matches!(
+                    command,
+                    PlatformWindowCommand::Redraw {
+                        id: WindowId::PRIMARY
+                    }
+                ))
+        );
+        assert_eq!(checks.get(), 1);
+        busy.set(false);
+        assert!(!runtime.should_exit());
+        assert_eq!(checks.get(), 1);
+        request_exit();
+        assert!(runtime.should_exit());
+        assert_eq!(checks.get(), 2);
+        reset_exit_request();
     }
 
     #[test]

@@ -496,6 +496,9 @@ where
         let mut first_frame_presented = false;
         'event_loop: loop {
             let mut handled_work = self.app.process_ui_notifications();
+            if self.app.should_exit() {
+                break 'event_loop Ok(());
+            }
             for command in self.app.take_window_commands() {
                 match command {
                     PlatformWindowCommand::Open { id, config } => {
@@ -530,7 +533,7 @@ where
                 }
                 handled_work = true;
             }
-            if self.app.exit_requested() {
+            if self.app.should_exit() {
                 break 'event_loop Ok(());
             }
             while let Some((len, event, handles)) = try_recv_event()? {

@@ -352,10 +352,11 @@ pub trait App: Sized + 'static {
     /// Called once after the platform successfully presents the first frame.
     fn first_frame_presented(&mut self) {}
 
-    /// ウィンドウを閉じる要求を受け入れるか返します。
+    /// ウィンドウを閉じる要求、またはアプリ全体の終了要求を受け入れるか返します。
     ///
     /// 未保存のDocumentなどがあるアプリケーションは`false`を返し、確認UIを
-    /// 表示できます。デフォルトは従来どおりWindowを閉じます。
+    /// 表示できます。処理中の終了を保留する場合にも使えます。
+    /// 全体終了を拒否した要求は自動再試行しません。既定はtrueです。
     fn close_requested(&mut self) -> bool {
         true
     }

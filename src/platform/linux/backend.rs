@@ -588,10 +588,12 @@ where
             self.application.reload_appearance();
         }
         self.process_window_commands(event_loop);
-        if self.application.exit_requested() {
+        if self.application.should_exit() {
             event_loop.exit();
             return;
         }
+        // A rejected quit may have queued a confirmation dialog/redraw.
+        self.process_window_commands(event_loop);
         let next = self
             .ids
             .keys()

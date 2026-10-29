@@ -482,7 +482,7 @@ pub(crate) fn run<A: PlatformApplication>(
             connection.send(packet)?;
         }
         connection.flush()?;
-        if windows.is_empty() || app.exit_requested() {
+        if windows.is_empty() || app.should_exit() {
             return Ok(());
         }
         std::thread::park_timeout(Duration::from_millis(8));

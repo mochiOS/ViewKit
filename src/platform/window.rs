@@ -197,4 +197,12 @@ pub trait PlatformApplication {
     fn exit_requested(&self) -> bool {
         false
     }
+
+    /// UIスレッドでアプリ全体の終了要求を確認し、今回終了してよい場合にtrueを返します。
+    ///
+    /// バックエンドはイベント処理後、終了する直前に呼びます。既定では
+    /// exit_requestedに従います。確認を保留する実装はfalseを返してください。
+    fn should_exit(&mut self) -> bool {
+        self.exit_requested()
+    }
 }
