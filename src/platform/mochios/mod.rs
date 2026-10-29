@@ -480,6 +480,9 @@ where
     pub fn run(mut self) -> Result<(), MochiOsBackendError> {
         let compositor = find_compositor()?;
         let application_endpoint = create_event_endpoint()?;
+        let _wake = crate::dispatch::install_wake(move || {
+            mochi_user_platform::ipc::send(application_endpoint, b"VKUIWAKE00000000").is_ok()
+        });
         let _ = mochi_user_platform::workspace::register_application(application_endpoint);
         let mut state = self.create_window_state(
             compositor,
@@ -492,7 +495,7 @@ where
         let mut display_list = DisplayList::new();
         let mut first_frame_presented = false;
         'event_loop: loop {
-            let mut handled_work = false;
+            let mut handled_work = self.app.process_ui_notifications();
             for command in self.app.take_window_commands() {
                 match command {
                     PlatformWindowCommand::Open { id, config } => {
@@ -799,6 +802,10 @@ where
         windows: &mut [MochiWindowState],
     ) -> Result<(), MochiOsBackendError> {
         let message_len = len.min(event.len());
+        if &event[..message_len] == b"VKUIWAKE00000000" && handles.as_mut_slice().is_empty() {
+            self.app.process_ui_notifications();
+            return Ok(());
+        }
         if self
             .app
             .handle_platform_message_with_handles(&event[..message_len], handles.as_mut_slice())

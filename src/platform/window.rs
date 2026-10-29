@@ -132,6 +132,14 @@ pub trait PlatformWindow {
 }
 
 pub trait PlatformApplication {
+    /// ワーカーから予約されたUI処理を、イベントループの所有スレッドで実行します。
+    ///
+    /// 処理があればtrueを返します。バックエンドは描画前と待機前に呼びます。
+    /// このメソッドはブロックするワーカーの終了待ちを行いません。
+    fn process_ui_notifications(&mut self) -> bool {
+        false
+    }
+
     fn handle_event(&mut self, event: PlatformEvent, window: &dyn PlatformWindow);
 
     /// Asks the application whether the platform window may close.

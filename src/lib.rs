@@ -8,6 +8,7 @@ pub mod components;
 pub mod continuous_corner;
 mod contour;
 pub mod draw_command;
+pub mod dispatch;
 pub mod edge_insets;
 pub mod event;
 #[cfg(any(target_os = "linux", target_os = "windows"))]

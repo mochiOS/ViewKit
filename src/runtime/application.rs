@@ -465,6 +465,18 @@ impl<A> PlatformApplication for ApplicationRuntime<A>
 where
     A: App,
 {
+    fn process_ui_notifications(&mut self) -> bool {
+        if !crate::dispatch::drain() {
+            return false;
+        }
+        for (&id, state) in &mut self.windows {
+            state.root = None;
+            state.pending_redraw = RedrawRequest::Full;
+            self.pending_window_commands.push(PlatformWindowCommand::Redraw { id });
+        }
+        true
+    }
+
     fn reopen(&mut self) {
         self.app.reopened();
         if self.windows.is_empty() {

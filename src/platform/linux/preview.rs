@@ -363,6 +363,11 @@ pub(crate) fn run<A: PlatformApplication>(
     socket: &OsStr,
 ) -> io::Result<()> {
     let mut connection = Connection::new(UnixStream::connect(socket)?)?;
+    let ui_thread = std::thread::current();
+    let _wake = crate::dispatch::install_wake(move || {
+        ui_thread.unpark();
+        true
+    });
     let mut windows = BTreeMap::new();
     open(
         &mut app,
@@ -374,6 +379,7 @@ pub(crate) fn run<A: PlatformApplication>(
     let mut first_frame = true;
     let mut appearance_check = Instant::now();
     loop {
+        app.process_ui_notifications();
         if appearance_check.elapsed() >= Duration::from_millis(200) {
             appearance_check = Instant::now();
             app.reload_appearance();
@@ -479,7 +485,7 @@ pub(crate) fn run<A: PlatformApplication>(
         if windows.is_empty() || app.exit_requested() {
             return Ok(());
         }
-        std::thread::sleep(Duration::from_millis(8));
+        std::thread::park_timeout(Duration::from_millis(8));
     }
 }
 

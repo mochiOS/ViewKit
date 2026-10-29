@@ -130,6 +130,8 @@ where
 
     pub fn run(mut self) -> Result<(), WindowsBackendError> {
         let event_loop = EventLoop::new()?;
+        let proxy = event_loop.create_proxy();
+        let _wake = crate::dispatch::install_wake(move || proxy.send_event(()).is_ok());
 
         event_loop.set_control_flow(ControlFlow::Wait);
 
@@ -295,6 +297,10 @@ impl<A> ApplicationHandler for WindowsBackend<A>
 where
     A: PlatformApplication,
 {
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, _event: ()) {
+        self.application.process_ui_notifications();
+        self.process_window_commands(event_loop);
+    }
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if !self.windows.is_empty() || self.runtime_error.is_some() {
             return;
@@ -520,6 +526,7 @@ where
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.application.process_ui_notifications();
         let window_ids = self.windows.keys().copied().collect::<Vec<_>>();
         for window_id in window_ids {
             self.flush_pending_pointer_move(window_id);
