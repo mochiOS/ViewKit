@@ -13,6 +13,7 @@ use crate::typography::{
 };
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
+#[derive(Clone)]
 pub struct Text {
     value: String,
 
@@ -29,6 +30,7 @@ pub struct Text {
     cache_layout: bool,
     accessibility_hidden: bool,
     center_visible_ink: bool,
+    single_line: bool,
 }
 
 impl Text {
@@ -49,6 +51,7 @@ impl Text {
             cache_layout: true,
             accessibility_hidden: false,
             center_visible_ink: false,
+            single_line: false,
         }
     }
 
@@ -89,6 +92,13 @@ impl Text {
     /// Opt in for short labels next to icons; ordinary text layout is unchanged.
     pub fn center_visible_ink(mut self, centered: bool) -> Self {
         self.center_visible_ink = centered;
+        self
+    }
+
+    /// 一行で表示し、幅に収まらない部分を書記素の境界で省略します。
+    /// アクセシビリティには省略前の文字列を提供します。
+    pub fn single_line(mut self, enabled: bool) -> Self {
+        self.single_line = enabled;
         self
     }
 
@@ -163,6 +173,10 @@ impl Text {
         typography: &Typography,
         maximum_width: Option<f32>,
     ) -> Size {
+        if self.single_line {
+            return self.single_line_text(maximum_width.unwrap_or(f32::INFINITY), measurer, typography)
+                .measure_text_with_typography(measurer, typography, None);
+        }
         if self.value.is_empty() {
             return Size::new(0.0, 0.0);
         }
@@ -301,6 +315,32 @@ impl Text {
         style
     }
 
+    fn single_line_text(&self, width: f32, measurer: &mut TextMeasurer, typography: &Typography) -> Self {
+        use unicode_segmentation::UnicodeSegmentation;
+        let mut text = self.clone();
+        text.single_line = false;
+        text.value = text.value.replace(['\r', '\n'], " ");
+        let measure = |value: &str, measurer: &mut TextMeasurer| {
+            let mut candidate = text.clone();
+            candidate.value = value.into();
+            candidate.measure_text_with_typography(measurer, typography, None).width
+        };
+        let width = if width.is_nan() { 0.0 } else { width.max(0.0) };
+        if measure(&text.value, measurer) <= width { return text; }
+        if measure("…", measurer) > width { text.value.clear(); return text; }
+        let boundaries: Vec<_> = text.value.grapheme_indices(true).map(|(i, _)| i)
+            .chain(std::iter::once(text.value.len())).collect();
+        let (mut low, mut high) = (0, boundaries.len() - 1);
+        while low < high {
+            let middle = (low + high).div_ceil(2);
+            let candidate = format!("{}…", &text.value[..boundaries[middle]]);
+            if measure(&candidate, measurer) <= width { low = middle; }
+            else { high = middle - 1; }
+        }
+        text.value = format!("{}…", &text.value[..boundaries[low]]);
+        text
+    }
+
     fn resolved_family(&self, family: FontFamily) -> &str {
         self.font_family.as_deref().unwrap_or(match family {
             FontFamily::Sans => DEFAULT_UI_FONT_FAMILY,
@@ -329,6 +369,7 @@ impl IntoViewNode for Text {
                     .unwrap_or_else(|| self.tone.resolve(&Theme::current())),
                 cache_layout: self.cache_layout,
                 center_visible_ink: self.center_visible_ink,
+                single_line: self.single_line,
             }),
         )
     }
@@ -360,6 +401,17 @@ impl View for Text {
             return;
         }
 
+        if self.single_line {
+            if !self.accessibility_hidden {
+                let mut node = AccessibilityNode::new(AccessibilityRole::StaticText, bounds);
+                node.label = Some(self.value.clone());
+                context.record_accessibility(node);
+            }
+            let mut text = self.single_line_text(bounds.size.width, context.text_measurer, context.typography);
+            text.accessibility_hidden = true;
+            text.paint(bounds, context);
+            return;
+        }
         let style = self.resolved_style(context.typography);
         let font_scale = context.text_measurer.font_scale();
         let font_size = resolved_font_size(style.size) * font_scale;
@@ -474,6 +526,25 @@ mod tests {
     use crate::font::DEFAULT_MONOSPACE_FONT_FAMILY;
     use crate::typography::TextMeasurer;
     use crate::view::View;
+
+    #[test]
+    fn single_line_labels_fit_without_splitting_graphemes_or_adding_rows() {
+        use unicode_segmentation::UnicodeSegmentation;
+        let source = "日本語 e\u{301} 👨‍👩‍👧‍👦 a long filename.rs";
+        let text = Text::label(source).single_line(true);
+        let typography = crate::typography::Typography::DEFAULT;
+        let mut measurer = TextMeasurer::new();
+        for width in [0., 4., 30., 80., 140., 600.] {
+            let fitted = text.single_line_text(width, &mut measurer, &typography);
+            let size = fitted.measure_text_with_typography(&mut measurer, &typography, None);
+            assert!(size.width <= width + 0.01);
+            assert!(size.height <= typography.label.line_height + 0.01);
+            if let Some(prefix) = fitted.value.strip_suffix('…') {
+                assert!(source.grapheme_indices(true).any(|(index, _)| index == prefix.len()));
+            } else { assert!(fitted.value.is_empty() || fitted.value == source); }
+        }
+        assert_eq!(text.value(), source);
+    }
 
     #[test]
     fn monospaced_uses_the_embedded_monospace_family() {

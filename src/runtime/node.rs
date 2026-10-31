@@ -107,6 +107,8 @@ pub struct TextNode {
     pub color: Color,
     pub cache_layout: bool,
     pub center_visible_ink: bool,
+    /// 折り返さず、幅に応じて末尾を省略します。
+    pub single_line: bool,
 }
 
 #[derive(Clone, Debug)]
