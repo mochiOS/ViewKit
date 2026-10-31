@@ -43,6 +43,19 @@ impl SvgData {
         Self::decode_with_options(bytes, &usvg::Options::default())
     }
 
+    /// Decodes vector-only SVG data without loading external or embedded image resources.
+    /// Suitable for isolated document previews; image elements are omitted.
+    pub fn decode_isolated(bytes: &[u8]) -> Result<Self, SvgError> {
+        let options = usvg::Options {
+            image_href_resolver: usvg::ImageHrefResolver {
+                resolve_string: Box::new(|_, _| None),
+                resolve_data: Box::new(|_, _, _| None),
+            },
+            ..usvg::Options::default()
+        };
+        Self::decode_with_options(bytes, &options)
+    }
+
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self, SvgError> {
         let path = path.as_ref();
 
@@ -167,5 +180,16 @@ mod rotation_tests {
         assert_eq!(&pixels[8..12], &[255, 0, 0, 255]);
         assert_eq!(&pixels[..4], &[0, 0, 0, 0]);
         assert_eq!(svg.rotated_quarter_turns(4).unwrap(), svg);
+    }
+}
+
+#[cfg(test)]
+mod isolated_tests {
+    use super::*;
+    #[test]
+    fn isolated_svg_omits_embedded_raster_resources() {
+        let svg = SvgData::decode_isolated(br##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><image href="file:///private/image.png" width="10" height="10"/><image href="data:image/png;base64,aGVsbG8=" width="10" height="10"/></svg>"##).unwrap();
+        let image = crate::image::ImageData::from_svg(&svg, 10, 10).unwrap();
+        assert!(image.premultiplied_rgba8().iter().all(|byte| *byte == 0));
     }
 }

@@ -125,6 +125,40 @@ impl ImageData {
         Self::from_rgba8(width, height, image.into_raw())
     }
 
+    /// Decodes an in-memory raster into an aspect-preserving thumbnail.
+    /// Encoded input is limited to 32MiB, dimensions to 16384px, and decoder
+    /// allocations to 128MiB. Use this off the UI thread for untrusted images.
+    pub fn thumbnail_from_bytes(
+        bytes: &[u8],
+        max_width: u32,
+        max_height: u32,
+    ) -> Result<Self, ImageError> {
+        if bytes.len() > 32 * 1024 * 1024
+            || max_width == 0
+            || max_height == 0
+            || max_width > 512
+            || max_height > 512
+        {
+            return Err(ImageError::InvalidDimensions {
+                width: max_width,
+                height: max_height,
+            });
+        }
+        let mut reader = ::image::ImageReader::new(std::io::Cursor::new(bytes))
+            .with_guessed_format()
+            .map_err(::image::ImageError::IoError)?;
+        let mut limits = ::image::Limits::default();
+        limits.max_image_width = Some(16384);
+        limits.max_image_height = Some(16384);
+        limits.max_alloc = Some(128 * 1024 * 1024);
+        reader.limits(limits);
+        let image = reader
+            .decode()?
+            .thumbnail(max_width, max_height)
+            .into_rgba8();
+        Self::from_rgba8(image.width(), image.height(), image.into_raw())
+    }
+
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self, ImageError> {
         let bytes = std::fs::read(path).map_err(::image::ImageError::IoError)?;
         Self::decode(&bytes)
@@ -190,7 +224,8 @@ impl ImageData {
         Self::from_premultiplied_rgba8(out_width, out_height, pixels)
     }
 
-    pub(crate) fn premultiplied_rgba8(&self) -> &[u8] {
+    /// Returns immutable RGBA8 pixels with premultiplied alpha, in row-major order.
+    pub fn premultiplied_rgba8(&self) -> &[u8] {
         &self.inner.pixels
     }
 }
@@ -292,5 +327,24 @@ mod rotation_tests {
             );
         }
         assert_eq!(image.rotated_quarter_turns(4).unwrap(), image);
+    }
+}
+
+#[cfg(test)]
+mod thumbnail_tests {
+    use super::*;
+    #[test]
+    fn bounded_thumbnail_rejects_bad_data_and_keeps_aspect_ratio() {
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        ::image::DynamicImage::new_rgba8(64, 64)
+            .write_to(&mut encoded, ::image::ImageFormat::Png)
+            .unwrap();
+        let bytes = encoded.get_ref().as_slice();
+        let image = ImageData::thumbnail_from_bytes(bytes, 36, 18).unwrap();
+        assert_eq!(image.dimensions(), (18, 18));
+        assert_eq!(image.premultiplied_rgba8().len(), 18 * 18 * 4);
+        assert!(ImageData::thumbnail_from_bytes(&[0; 16], 144, 144).is_err());
+        assert!(ImageData::thumbnail_from_bytes(bytes, 0, 144).is_err());
+        assert!(ImageData::thumbnail_from_bytes(bytes, 513, 144).is_err());
     }
 }
