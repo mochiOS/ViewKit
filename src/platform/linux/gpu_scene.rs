@@ -382,4 +382,29 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn pane_clip_cuts_a_solid_background_out_of_its_left_junction_corners() {
+        let rect = Rect::new(188.0, 48.0, 892.0, 632.0);
+        let radii = [18.0, 0.0, 0.0, 18.0];
+        let point = (190.0, 50.0);
+        assert!(!crate::continuous_corner::shape(rect, radii).contains(point));
+        let mut list = DisplayList::new();
+        list.push(DrawCommand::PushRoundedCornersClip { rect, radii });
+        list.push(DrawCommand::FillRect { rect, color: Color::WHITE });
+        list.push(DrawCommand::PopClip);
+        let bytes = encode(&mut GpuSceneRenderer::new(), &list);
+        let decoded = mochios_viewkit_gpu_protocol::decode(&bytes).unwrap();
+        assert!(decoded.vertex_count() > 0);
+        for triangle in decoded.vertices.chunks_exact(36 * 3) {
+            let p: Vec<_> = triangle.chunks_exact(36).map(|vertex| (
+                (f32::from_le_bytes(vertex[..4].try_into().unwrap()) + 1.0) * 640.0,
+                (f32::from_le_bytes(vertex[4..8].try_into().unwrap()) + 1.0) * 400.0,
+            )).collect();
+            let edges: Vec<_> = (0..3).map(|i| {
+                let (a,b) = (p[i], p[(i+1)%3]);
+                (b.0-a.0)*(point.1-a.1)-(b.1-a.1)*(point.0-a.0)
+            }).collect();
+            assert!(!(edges.iter().all(|v| *v >= 0.0) || edges.iter().all(|v| *v <= 0.0)), "pane background covers its cutout");
+        }
+    }
 }
