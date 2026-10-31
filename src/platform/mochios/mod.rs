@@ -6,8 +6,8 @@ use std::time::Instant;
 use cosmic_text::{
     Attrs, Buffer, Color as CosmicColor, FontSystem, Metrics, Shaping, SwashCache, Weight,
 };
-use mochi_user_syscall as syscall;
 use mochi_user_platform::memory_object;
+use mochi_user_syscall as syscall;
 use tiny_skia::{
     BlendMode, FillRule, FilterQuality, Mask, Paint, Path, PathBuilder, Pixmap, PixmapPaint,
     Rect as SkiaRect, Stroke, Transform,
@@ -437,7 +437,9 @@ where
                 surface: surface.token(),
             };
             connection::syscall_result(mochi_user_platform::presentation::command(
-                destination, command, None,
+                destination,
+                command,
+                None,
             ))
             .map_err(|error| error.at("protected presentation binding"))?;
         }
@@ -633,7 +635,9 @@ where
                         self.swash_cache = SwashCache::new();
                         self.text_layout_cache.clear();
                         state.gpu_renderer.invalidate_fonts();
-                        for other in &mut windows { other.gpu_renderer.invalidate_fonts(); }
+                        for other in &mut windows {
+                            other.gpu_renderer.invalidate_fonts();
+                        }
                         dirty_bounds = state.window.viewport().logical_bounds();
                     }
                     let draw_cycles = perf_counter_elapsed(draw_start);
@@ -1266,6 +1270,8 @@ where
             EVENT_KEY => {
                 let flags = (c & 0xffff) as u16;
                 let modifiers = key_modifiers_from_wire(c >> 16);
+                self.app
+                    .handle_event(PlatformEvent::ModifiersChanged { modifiers }, &state.window);
                 if flags & INPUT_FLAG_PRESS != 0 {
                     if let Some(key) = key_from_wire(a as u16, b as u32) {
                         self.app.handle_event(

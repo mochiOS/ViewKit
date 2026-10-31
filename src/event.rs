@@ -119,6 +119,11 @@ pub enum ViewEvent {
     },
 
     /// A semantic action routed from the focused view toward its ancestors.
+    /// Current modifier state for pointer and keyboard interactions.
+    ModifiersChanged {
+        modifiers: KeyModifiers,
+    },
+
     Command {
         command: CommandId,
         target: Option<Point>,
@@ -141,6 +146,7 @@ impl ViewEvent {
             }
 
             Self::PointerLeft
+            | Self::ModifiersChanged { .. }
             | Self::KeyPressed { .. }
             | Self::KeyReleased { .. }
             | Self::TextInput { .. }
@@ -179,6 +185,7 @@ impl ViewEvent {
                 | Self::KeyboardFocusRequested { .. }
                 | Self::FocusVisibilityChanged { .. }
                 | Self::PointerLeft
+                | Self::ModifiersChanged { .. }
                 | Self::KeyPressed { .. }
                 | Self::TextInput { .. }
                 | Self::Backspace
@@ -257,6 +264,7 @@ pub struct EventContext<'a> {
     context_menu_request: Option<ContextMenuRequest>,
     keyboard_focus_request: Option<Option<Rect>>,
     focus_visible: bool,
+    modifiers: KeyModifiers,
     pointer_press_intercepted: bool,
     command_requests: Vec<CommandId>,
     command_statuses: &'a [CommandStatus],
@@ -288,6 +296,7 @@ impl<'a> EventContext<'a> {
             context_menu_request: None,
             keyboard_focus_request: None,
             focus_visible: true,
+            modifiers: KeyModifiers::default(),
             pointer_press_intercepted: false,
             command_requests: Vec::new(),
             command_statuses: &[],
@@ -324,6 +333,11 @@ impl<'a> EventContext<'a> {
     }
     pub(crate) fn pop_corner_radius(&mut self) {
         self.corner_radii.pop();
+    }
+
+    /// Current keyboard modifiers, also available during pointer interactions.
+    pub fn modifiers(&self) -> KeyModifiers {
+        self.modifiers
     }
 
     pub fn theme(&self) -> &Theme {
@@ -425,6 +439,7 @@ pub struct EventDispatcher {
     pending_focus_request: Option<Option<Rect>>,
     window_focused: bool,
     focus_visible: bool,
+    modifiers: KeyModifiers,
 }
 
 #[derive(Clone, Debug)]
@@ -555,6 +570,14 @@ impl EventDispatcher {
         context: &mut EventContext<'_>,
     ) -> EventResult {
         let mut result = EventResult::Ignored;
+        match event {
+            PlatformEvent::ModifiersChanged { modifiers }
+            | PlatformEvent::KeyPressed { modifiers, .. }
+            | PlatformEvent::KeyReleased { modifiers, .. } => self.modifiers = *modifiers,
+            PlatformEvent::Focused(false) => self.modifiers = KeyModifiers::default(),
+            _ => {}
+        }
+        context.modifiers = self.modifiers;
         context.focus_visible = self.focus_visible;
 
         if matches!(event, PlatformEvent::KeyPressed { .. }) {
@@ -754,6 +777,9 @@ impl EventDispatcher {
                 command_id: *command_id,
             }),
 
+            PlatformEvent::ModifiersChanged { modifiers } => Some(ViewEvent::ModifiersChanged {
+                modifiers: *modifiers,
+            }),
             PlatformEvent::TextInput { text } => Some(ViewEvent::TextInput { text: text.clone() }),
             PlatformEvent::FileHovered { path } => Some(ViewEvent::FileDragEntered {
                 path: path.clone(),
@@ -797,6 +823,73 @@ mod tests {
     use crate::typography::TextMeasurer;
     use crate::view::{PaintContext, View};
     use std::cell::Cell;
+
+    #[test]
+    fn pointer_context_retains_modifiers_and_clears_them_on_focus_loss() {
+        struct Probe(Cell<u8>);
+        impl View for Probe {
+            fn paint(&self, _: Rect, _: &mut PaintContext<'_>) {}
+            fn handle_event(
+                &self,
+                _: Rect,
+                event: &ViewEvent,
+                context: &mut EventContext<'_>,
+            ) -> EventResult {
+                if matches!(event, ViewEvent::PointerPressed { .. }) {
+                    self.0.set(context.modifiers().bits());
+                }
+                EventResult::Ignored
+            }
+        }
+        let probe = Probe(Cell::new(0));
+        let theme = Theme::LIGHT;
+        let mut measure = TextMeasurer::new();
+        let mut context = EventContext::new(&theme, &theme.typography, &mut measure);
+        let mut dispatcher = EventDispatcher::new();
+        let bounds = Rect::new(0., 0., 400., 300.);
+        let modifiers = crate::platform::KeyModifiers::from_bits(
+            crate::platform::KeyModifiers::CONTROL | crate::platform::KeyModifiers::SHIFT,
+        );
+        dispatcher.dispatch(
+            &probe,
+            bounds,
+            &PlatformEvent::ModifiersChanged { modifiers },
+            &mut context,
+        );
+        dispatcher.dispatch(
+            &probe,
+            bounds,
+            &PlatformEvent::PointerMoved { x: 10., y: 10. },
+            &mut context,
+        );
+        dispatcher.dispatch(
+            &probe,
+            bounds,
+            &PlatformEvent::PointerButton {
+                button: PointerButton::Primary,
+                state: ButtonState::Pressed,
+            },
+            &mut context,
+        );
+        assert_eq!(probe.0.get(), modifiers.bits());
+        dispatcher.dispatch(&probe, bounds, &PlatformEvent::Focused(false), &mut context);
+        dispatcher.dispatch(
+            &probe,
+            bounds,
+            &PlatformEvent::PointerMoved { x: 10., y: 10. },
+            &mut context,
+        );
+        dispatcher.dispatch(
+            &probe,
+            bounds,
+            &PlatformEvent::PointerButton {
+                button: PointerButton::Primary,
+                state: ButtonState::Pressed,
+            },
+            &mut context,
+        );
+        assert_eq!(probe.0.get(), 0);
+    }
 
     #[test]
     fn pointer_focus_keeps_keyboard_input_without_showing_keyboard_focus_ring() {

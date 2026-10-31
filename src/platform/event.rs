@@ -144,6 +144,10 @@ pub enum PlatformEvent {
     },
     RedrawRequested,
     CloseRequested,
+    /// Current modifier state, including changes without a text key event.
+    ModifiersChanged {
+        modifiers: KeyModifiers,
+    },
 }
 
 #[cfg(test)]

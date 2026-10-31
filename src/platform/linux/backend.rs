@@ -430,6 +430,12 @@ where
                 if let Some(state) = self.windows.get_mut(&window_id) {
                     state.modifiers = KeyModifiers::from_bits(bits);
                 }
+                self.emit(
+                    window_id,
+                    PlatformEvent::ModifiersChanged {
+                        modifiers: KeyModifiers::from_bits(bits),
+                    },
+                );
             }
 
             WindowEvent::MouseInput { state, button, .. } => {
