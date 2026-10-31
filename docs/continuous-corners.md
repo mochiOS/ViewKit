@@ -55,7 +55,9 @@ Rectangleの内側ボーダーはStrokeInsideRoundedRectを使用し、半径を
 | ViewKit components/rectangle.rs | ボタン・カード・入力欄・メニュー・タブ・スライダー・スイッチ等の共通描画入口 |
 | ViewKit components/card.rs / surface.rs | 内容の角丸クリップ、外周入力判定 |
 | ViewKit components/navigation_layout.rs | 円弧SVGによる凹角を共通曲線の補形へ |
-| ViewKit omochi.rs | 変形前の円弧サンプリングを共通曲線へ。物理応答・変形・緩和は維持 |
+| ViewKit components/tabs.rs | タブ選択面の上側2隅も共通曲線へ。下側の舌形状・寸法・動きは維持 |
+| ViewKit omochi/shape.rs | 変形用輪郭も共通曲線へ。呼び出し元の旧分割数が小さくても共通精度基準を下回らない |
+| ViewKit omochi/legacy.rs / moving.rs | 静止した操作面を共通ポリゴンへ直接委譲し、基準形状への追加スムージングを廃止。物理応答・変形・緩和は維持 |
 | ViewKit button / text_field / switch / slider | 丸角の入力判定を統一。スライダー等の意図した操作用余白は維持 |
 | Binder window / popup / panels / notifications | ウィンドウやパネルの外形と入力判定、アニメーションの逆座標変換 |
 | Binder Dock / launcher | Rectangle経由の共通描画。アイコン・半径・位置・倍率は維持 |
@@ -67,7 +69,15 @@ BootUIはファームウェア用で依存を持たないため、正本と同�
 ルートの検証スクリプトがバイト一致を検査する。別モデルの手書き実装ではない。
 生成は `python3 user/crates/viewkit-gpu-protocol/tools/generate_continuous_corner.py --bootui libraries/bootui/src`。
 調査対象のローカルリポジトリはすべてアクセス可能だった。
-Windows専用GPU実装は従来から角丸命令が未対応で、今回新しい描画エンジンを追加していない。
+Windows専用GPU実装は角丸命令に対してソフトウェア描画へフォールバックする。
+そのフォールバックはLinuxと同じsoftware_renderer.rsを使用するため、共通CPUパスを通る。
+今回Windows向けビルド・実機検証は行っていない。
+
+2026-10-31の再調査では、AppCore・標準アプリ・Binder・ViewKit・compositor・BootUIの
+角丸生成と呼び出し元を再確認した。残存していたタブ選択面の三角関数による円弧生成を置き換えた。
+Ellipseの円弧近似、Circle、スピナー、SVGや画像資産内部の図形、比較用の旧方式ベンチマークは対象外。
+任意の輪郭を扱うsmooth_closed_pointsは角丸の生成には使用していない。
+変形中のomochi輪郭は共通の基準形状に物理モデルを適用したものであり、静止曲線そのものとは区別する。
 
 ## キャッシュと性能
 
@@ -91,6 +101,8 @@ compositorもサイズ・半径による最大64件のローカルポリゴン�
 - Binder単体テスト：ウィンドウ、アニメーション座標、メニュー、通知等
 - `mmake ui-check`：Linuxプレビューと標準アプリのビルド
 
-この環境での本体ビルドは、角丸処理より前のnewlibの `sys/wait.h` 不足で停止した。
-ネイティブcargo checkも既存sysrootのstdとコンパイラの `panic_null_reference_constructed` lang item不整合で停止した。
-Linux検証の成功を本体フルビルドの成功として扱わない。
+2026-10-31時点ではViewKitを含むBinderとcompositorの本体向けreleaseビルドが成功した。
+OS全体の起動・画面品質やWindows実機での検証とは区別する。
+共有protocolの10件、BootUIの18件の検証は通過。
+ViewKit全体の実行では、Interというfamily名を前提にする既存フォント検証2件が失敗した。
+角丸変更の追加テストは通過しており、この2件を除いた回帰テストは231件通過、性能測定1件は既定どおりignore。
