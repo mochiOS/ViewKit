@@ -663,7 +663,7 @@ impl View for Button {
             appearance = appearance.with_opacity(context.theme.button.disabled_opacity);
         }
 
-        let (mut appearance, next) = self.interaction.inner.borrow_mut().appearance.sample(
+        let (appearance, next) = self.interaction.inner.borrow_mut().appearance.sample(
             appearance,
             context.theme.motion.fast,
             std::time::Instant::now(),
@@ -674,13 +674,6 @@ impl View for Button {
         );
         if let Some(next) = next {
             context.request_redraw_in_at(bounds.expanded(16.0), next);
-        }
-
-        if self.omochi_enabled
-            && self.interaction.omochi.is_animating()
-            && appearance.background.alpha < 64
-        {
-            appearance.background = context.theme.colors.surface_muted;
         }
 
         let shadow = if let Some(shadow) = self.shadow {
@@ -1768,5 +1761,45 @@ mod compatibility_tests {
             text.bounds.size.width,
             110.0 - 2.0 * theme.button.horizontal_padding
         );
+    }
+}
+
+#[cfg(test)]
+mod transparent_omochi_tests {
+    use super::*;
+    use crate::{draw_command::DisplayList, geometry::Point, platform::PointerButton, typography::TextMeasurer};
+    use std::{cell::Cell, rc::Rc};
+
+    #[test]
+    fn transparent_controls_keep_alpha_during_omochi_and_still_activate() {
+        for theme in [Theme::LIGHT, Theme::DARK] {
+            for width in [44.0, 320.0] {
+                let clicked = Rc::new(Cell::new(false));
+                let callback = clicked.clone();
+                let button = Button::new("").style(ButtonStyle::Ghost).focus_ring(false)
+                    .on_click(move || callback.set(true));
+                let bounds = Rect::new(0.0, 0.0, width, 44.0);
+                let position = Point::new(width * 0.5, 22.0);
+                let mut text = TextMeasurer::new();
+                let mut context = EventContext::new(&theme, &theme.typography, &mut text);
+                for event in [ViewEvent::PointerPressed { position, button: PointerButton::Primary },
+                    ViewEvent::PointerReleased { position, button: PointerButton::Primary }] {
+                    button.handle_event(bounds, &event, &mut context);
+                    let mut list = DisplayList::new();
+                    button.paint(bounds, &mut PaintContext::new(&mut list, &theme, &theme.typography, &mut TextMeasurer::new()));
+                    let mut count = 0;
+                    for command in list.commands() {
+                        let color = match command {
+                            DrawCommand::FillPolygon { color, .. } | DrawCommand::FillRoundedRect { color, .. } => color,
+                            _ => continue,
+                        };
+                        count += 1;
+                        assert!(color.alpha <= theme.button.ghost.pressed.background.alpha, "transparent chrome became opaque: {color:?}");
+                    }
+                    assert!(count > 0);
+                }
+                assert!(clicked.get());
+            }
+        }
     }
 }
