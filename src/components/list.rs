@@ -109,6 +109,7 @@ impl View for List {
 
 pub struct ListRow {
     title: String,
+    custom_content: Option<Rc<dyn View>>,
     subtitle: Option<String>,
     trailing: Option<String>,
 
@@ -132,6 +133,7 @@ impl ListRow {
     pub fn with_interaction(interaction: ButtonInteractionState, title: impl Into<String>) -> Self {
         Self {
             title: title.into(),
+            custom_content: None,
             subtitle: None,
             trailing: None,
 
@@ -151,6 +153,13 @@ impl ListRow {
     /// in a virtualized collection. Count offscreen and filtered-in rows too.
     pub fn adjacent_rows(mut self, before: bool, after: bool) -> Self {
         self.edges = Some((!before, !after));
+        self
+    }
+
+    /// 行の内部を任意の標準Viewで構成します。選択・ホバー・角丸・入力判定は
+    /// ListRowが管理し、内容には行の前景色が継承されます。
+    pub fn content(mut self, content: impl View + 'static) -> Self {
+        self.custom_content = Some(Rc::new(content));
         self
     }
 
@@ -288,8 +297,12 @@ impl ListRow {
             .style(appearance.button_style())
             .shadow(ShadowStyle::None)
             .alignment(ZStackAlignment::Leading)
-            .enabled(self.enabled)
-            .content(self.content_view(theme, appearance));
+            .enabled(self.enabled);
+        button = if let Some(content) = &self.custom_content {
+            button.content(Rc::clone(content))
+        } else {
+            button.content(self.content_view(theme, appearance))
+        };
 
         button = button
             .accessibility_role(AccessibilityRole::ListItem)
@@ -373,6 +386,30 @@ mod tests {
     use super::*;
     use crate::draw_command::DisplayList;
     use crate::typography::{TextMeasurer, Typography};
+
+    #[test]
+    fn custom_row_content_inherits_selection_colour_and_keeps_native_clicks() {
+        for theme in [Theme::LIGHT, Theme::DARK] {
+            let clicked = Rc::new(std::cell::Cell::new(false));
+            let callback = clicked.clone();
+            let row = ListRow::new("Accessible title").selected(true)
+                .content(Text::label("Custom columns"))
+                .on_select(move || callback.set(true));
+            let bounds = Rect::new(0., 0., 240., 32.);
+            let mut list = DisplayList::new();
+            let mut text = TextMeasurer::new();
+            row.paint(bounds, &mut PaintContext::new(&mut list, &theme, &theme.typography, &mut text));
+            assert!(list.commands().iter().any(|command| matches!(command,
+                DrawCommand::DrawText { command } if command.text == "Custom columns"
+                    && command.color == theme.list.selected_foreground)));
+            let mut context = EventContext::new(&theme, &theme.typography, &mut text);
+            let point = crate::geometry::Point::new(4., 16.);
+            row.handle_event(bounds, &ViewEvent::PointerPressed { position: point, button: crate::platform::PointerButton::Primary }, &mut context);
+            assert!(!clicked.get());
+            row.handle_event(bounds, &ViewEvent::PointerReleased { position: point, button: crate::platform::PointerButton::Primary }, &mut context);
+            assert!(clicked.get());
+        }
+    }
 
     #[test]
     fn connected_rows_keep_only_the_outer_corners_in_both_themes() {

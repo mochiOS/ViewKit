@@ -98,6 +98,14 @@ impl<Sidebar, Detail> NavigationSplitView<Sidebar, Detail> {
         self
     }
 
+    /// 現在の幅ポリシーでサイドバー・区切り線・本文の領域を計算します。
+    /// 仮想化した子Viewの入力判定でも、標準の描画と同じ領域を使用できます。
+    /// サイドバーの内容用インセットは適用前の領域を返します。
+    pub fn content_regions(&self, bounds: Rect, theme: &Theme) -> (Rect, Rect, Rect) {
+        Self::regions(bounds, self.resolved_sidebar_width(bounds.size.width, theme),
+            self.resolved_divider_width(theme))
+    }
+
     fn resolved_insets(&self, theme: &Theme) -> EdgeInsets {
         self.sidebar_insets
             .unwrap_or_else(|| EdgeInsets::symmetric(theme.spacing.medium, theme.spacing.large))
@@ -223,11 +231,7 @@ impl<Sidebar: View, Detail: View> View for NavigationSplitView<Sidebar, Detail> 
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
-        let (sidebar, divider, detail) = Self::regions(
-            bounds,
-            self.resolved_sidebar_width(bounds.size.width, context.theme),
-            self.resolved_divider_width(context.theme),
-        );
+        let (sidebar, divider, detail) = self.content_regions(bounds, context.theme);
         Rectangle::new()
             .color(RectangleColor::SubtleSurface)
             .paint(sidebar, context);

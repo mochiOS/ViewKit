@@ -22,11 +22,36 @@ type Callback = Rc<RefCell<Box<dyn FnMut()>>>;
 pub struct SidebarItem {
     label: String,
     symbol: Option<SymbolName>,
+    leading: Option<Rc<dyn View>>,
+    indent: f32,
     reserves_symbol_space: bool,
     selected: bool,
     enabled: bool,
     interaction: ButtonInteractionState,
     on_select: Option<Callback>,
+}
+
+#[cfg(test)]
+mod custom_content_tests {
+    use super::*;
+    use crate::{geometry::Point, platform::PointerButton, typography::TextMeasurer};
+
+    #[test]
+    fn indentation_and_custom_leading_keep_the_whole_navigation_row_clickable() {
+        let clicked = Rc::new(std::cell::Cell::new(false));
+        let action = clicked.clone();
+        let item = SidebarItem::new("Nested item").leading(Text::label("Icon"))
+            .indent(80.).on_select(move || action.set(true));
+        let theme = Theme::LIGHT;
+        let mut text = TextMeasurer::new();
+        let mut context = EventContext::new(&theme, &theme.typography, &mut text);
+        let bounds = Rect::new(0., 0., 240., 32.);
+        let position = Point::new(2., 16.);
+        item.handle_event(bounds, &ViewEvent::PointerPressed { position, button: PointerButton::Primary }, &mut context);
+        assert!(!clicked.get());
+        item.handle_event(bounds, &ViewEvent::PointerReleased { position, button: PointerButton::Primary }, &mut context);
+        assert!(clicked.get());
+    }
 }
 
 impl SidebarItem {
@@ -39,6 +64,8 @@ impl SidebarItem {
         Self {
             label: label.into(),
             symbol: None,
+            leading: None,
+            indent: 0.0,
             reserves_symbol_space: false,
             selected: false,
             enabled: true,
@@ -49,6 +76,20 @@ impl SidebarItem {
 
     pub fn symbol(mut self, symbol: SymbolName) -> Self {
         self.symbol = Some(symbol);
+        self.leading = None;
+        self
+    }
+
+    /// シンボルの代わりに任意の先頭Viewを表示します。行の操作と選択表現は維持します。
+    pub fn leading(mut self, content: impl View + 'static) -> Self {
+        self.leading = Some(Rc::new(content));
+        self.symbol = None;
+        self
+    }
+
+    /// 階層表示のために行の内容だけを字下げします。選択背景と入力領域は変えません。
+    pub fn indent(mut self, width: f32) -> Self {
+        self.indent = if width.is_finite() { width.max(0.0) } else { 0.0 };
         self
     }
 
@@ -83,7 +124,9 @@ impl SidebarItem {
         let mut content = HStack::new()
             .alignment(StackAlignment::Center)
             .gap(StackGap::Medium);
-        if let Some(symbol) = self.symbol {
+        if let Some(leading) = &self.leading {
+            content = content.child(Rc::clone(leading));
+        } else if let Some(symbol) = self.symbol {
             content = content.child(
                 Icon::new(symbol)
                     .size(theme.layout.compact_icon_size)
@@ -113,7 +156,9 @@ impl SidebarItem {
         );
         let mut button = Button::with_interaction(self.interaction.clone())
             .content_padding(false)
-            .content(super::Padding::symmetric(theme.list.row_padding, 0.0).content(content))
+            .content(super::Padding::from_insets(crate::edge_insets::EdgeInsets::new(
+                0.0, theme.list.row_padding, 0.0, theme.list.row_padding + self.indent,
+            )).content(content))
             .style(appearance.button_style())
             .enabled(self.enabled)
             .shadow(ShadowStyle::None)
