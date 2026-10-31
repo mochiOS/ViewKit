@@ -103,7 +103,7 @@ impl<Content: View> View for Toolbar<Content> {
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
         context.record_accessibility(AccessibilityNode::new(AccessibilityRole::Toolbar, bounds));
         Rectangle::new()
-            .color(RectangleColor::Surface)
+            .color(RectangleColor::SubtleSurface)
             .paint(bounds, context);
         let horizontal = context.theme.spacing.extra_large;
         let vertical = match self.placement {
