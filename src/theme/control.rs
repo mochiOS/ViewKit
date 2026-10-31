@@ -282,6 +282,8 @@ impl ListTokens {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DialogTokens {
     pub background: Color,
+    /// モーダル表示時に背後のコンテンツを覆う共通の背景色。
+    pub backdrop: Color,
     pub border: Color,
     pub padding: f32,
     pub radius: CornerRadius,
@@ -293,6 +295,7 @@ impl DialogTokens {
     pub const fn from_colors(colors: ColorTokens) -> Self {
         Self {
             background: colors.elevated_surface,
+            backdrop: modal_backdrop(colors.background),
             border: colors.border_strong,
             padding: FigmaTokens::SPACING.space_16,
             radius: CornerRadius::Large,
@@ -300,6 +303,13 @@ impl DialogTokens {
             shadow: ShadowStyle::Window,
         }
     }
+}
+
+pub(super) const fn modal_backdrop(background: Color) -> Color {
+    let brightness = background.red as u32 * 299
+        + background.green as u32 * 587
+        + background.blue as u32 * 114;
+    Color::rgba(0, 0, 0, if brightness < 128_000 { 112 } else { 72 })
 }
 
 /// Shared recipe for checkbox and radio interaction surfaces and indicators.

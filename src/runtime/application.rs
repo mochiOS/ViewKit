@@ -256,7 +256,7 @@ fn runtime_alert_view(
                 .child(
                     Icon::new(symbol)
                         .size(42.0)
-                        .color(Theme::current().shell.alert)
+                        .color(Theme::current().colors.destructive)
                         .frame(42.0, 42.0),
                 )
                 .child(text_column.layout().flex_grow(1.0)),

@@ -1,4 +1,5 @@
-//! Window elevation data shared by ViewKit and the native compositor.
+//! Default window elevation, mirrored in compositor without a source dependency.
+//! scripts/dev/check-ui-boundaries.py verifies that both copies match.
 //! This file intentionally has no renderer, allocation, or OS dependencies.
 
 /// One neutral-black elevation layer, in logical pixels.

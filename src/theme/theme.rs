@@ -241,6 +241,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn modal_backdrop_is_shared_and_preserved_when_accent_changes() {
+        for theme in [Theme::LIGHT, Theme::DARK] {
+            assert_eq!(theme.dialog.backdrop, theme.shell.scrim);
+            assert_eq!(theme.dialog.backdrop,
+                theme.with_accent(Color::rgb(120, 60, 180)).dialog.backdrop);
+            assert_eq!(theme.dialog.backdrop.red, 0);
+            assert!(theme.dialog.backdrop.alpha > 0);
+        }
+        assert!(Theme::DARK.dialog.backdrop.alpha > Theme::LIGHT.dialog.backdrop.alpha);
+    }
+
+    #[test]
     fn shell_and_floating_surfaces_share_material_and_elevation() {
         for theme in [Theme::LIGHT, Theme::DARK] {
             assert_eq!(theme.shell.panel_background, theme.surface.floating_background);
