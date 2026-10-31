@@ -183,21 +183,23 @@ impl Tabs {
         let right = half_width;
         let top = -half_height;
         let bottom = half_height;
+        let shape = crate::continuous_corner::shape(
+            Rect::new(left, top, half_width * 2.0, half_height * 2.0),
+            [radius, radius, 0.0, 0.0],
+        );
+        let segments = crate::continuous_corner::polygon_segments(shape.max_radius());
         let mut points = vec![Point::new(left, bottom), Point::new(left, top + radius)];
-        for index in 1..=12 {
-            let angle = (180.0 + 90.0 * index as f32 / 12.0).to_radians();
-            points.push(Point::new(
-                left + radius + angle.cos() * radius,
-                top + radius + angle.sin() * radius,
-            ));
+        // Keep the tab tongue, but use the same top corners as fill, clip,
+        // border and input geometry throughout ViewKit.
+        for index in 1..=segments {
+            let (x, y) =
+                shape.corner_point(3, crate::continuous_corner::sample(index * 1024 / segments));
+            points.push(Point::new(x, y));
         }
-        points.push(Point::new(right - radius, top));
-        for index in 1..=12 {
-            let angle = (-90.0 + 90.0 * index as f32 / 12.0).to_radians();
-            points.push(Point::new(
-                right - radius + angle.cos() * radius,
-                top + radius + angle.sin() * radius,
-            ));
+        for index in 0..=segments {
+            let (x, y) =
+                shape.corner_point(0, crate::continuous_corner::sample(index * 1024 / segments));
+            points.push(Point::new(x, y));
         }
         let tongue_half = theme.tabs.tongue_width / 2.0;
         points.extend([
@@ -531,6 +533,36 @@ mod tests {
         assert_eq!(maximum_y, 23.5);
         assert!(points.contains(&Point::new(-34.0, 23.5)));
         assert!(points.contains(&Point::new(34.0, 23.5)));
+    }
+
+    #[test]
+    fn indicator_top_corners_follow_the_shared_curve_instead_of_circular_arcs() {
+        let selection = State::new(0_usize);
+        let tabs = Tabs::new(selection.binding()).item(0, "Home");
+        for (width, height, radius) in [(100.0, 45.0, 8.0), (600.0, 300.0, 100.0)] {
+            let mut theme = Theme::LIGHT;
+            theme.layout.tab_width = width;
+            theme.tabs.height = height;
+            theme.tabs.radius = CornerRadius::Custom(radius);
+            let points = tabs.indicator_points(&theme);
+            let half_width = (width - theme.tabs.indicator_inset * 2.0) / 2.0;
+            let top = -(height - theme.tabs.tongue_depth - theme.tabs.indicator_inset) / 2.0;
+            let (x, y) = crate::continuous_corner::sample(512);
+            let expected = Point::new(half_width - radius + radius * x, top + radius * y);
+            assert!(
+                points
+                    .iter()
+                    .any(|p| (p.x - expected.x).hypot(p.y - expected.y) < 0.001)
+            );
+            // Both ends use the same reference and retain reflection symmetry.
+            assert!(
+                points
+                    .iter()
+                    .any(|p| (p.x + expected.x).hypot(p.y - expected.y) < 0.001)
+            );
+            let circle_y = top + radius * (1.0 - std::f32::consts::FRAC_1_SQRT_2);
+            assert!((expected.y - circle_y).abs() > radius * 0.02);
+        }
     }
 
     #[test]
