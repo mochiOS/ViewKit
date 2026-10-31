@@ -247,7 +247,6 @@ mod tests {
             assert_eq!(theme.shell.panel_border, theme.surface.floating_border);
             assert_eq!(Some(theme.shell.panel_shadow), theme.surface.floating_shadow.resolve(&theme.shadows));
             assert!(theme.surface.shadow_outset(&theme.shadows) >= 16.0);
-            assert!(theme.shell.dock_background.alpha > 200);
             assert_eq!(theme.shell.window_background.alpha, 255);
         }
     }

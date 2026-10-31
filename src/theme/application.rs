@@ -1,4 +1,4 @@
-use super::{Color, ColorTokens, FigmaTokens, Shadow, ShadowSet, ShadowTokens};
+use super::{Color, ColorTokens, FigmaTokens, ShadowSet, ShadowTokens};
 
 /// Colors and elevation used by desktop-shell surfaces.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -32,14 +32,9 @@ pub struct ShellTokens {
     pub action_hover: Color,
     pub action_pressed: Color,
     pub alert: Color,
-    pub dock_background: Color,
-    pub dock_border: Color,
-    pub dock_item_hover: Color,
-    pub running_indicator: Color,
     pub inactive_window_shadow: ShadowSet,
     pub active_window_shadow: ShadowSet,
     pub panel_shadow: ShadowSet,
-    pub dock_shadow: ShadowSet,
 }
 
 impl ShellTokens {
@@ -73,16 +68,11 @@ impl ShellTokens {
         action_hover: Color::from_rgb_hex(0x2878d0),
         action_pressed: Color::from_rgb_hex(0x1557b0),
         alert: Color::from_rgb_hex(0xd93025),
-        dock_background: Color::rgba(255, 255, 255, 208),
-        dock_border: Color::rgba(0, 0, 0, 28),
-        dock_item_hover: Color::rgba(255, 255, 255, 225),
-        running_indicator: Color::rgba(45, 45, 45, 210),
         inactive_window_shadow: ShadowSet::single(super::shadow::window_layer(
             super::window_elevation::INACTIVE[0],
         )),
         active_window_shadow: ShadowTokens::DEFAULT.window,
         panel_shadow: ShadowTokens::DEFAULT.floating,
-        dock_shadow: ShadowSet::single(Shadow::new(Color::rgba(0, 0, 0, 12), 0.0, 2.0, 8.0, 0.0)),
     };
 
     pub const DARK: Self = Self {
@@ -115,14 +105,9 @@ impl ShellTokens {
         action_hover: Color::from_rgb_hex(0x64adff),
         action_pressed: Color::from_rgb_hex(0x0a84ff),
         alert: Color::from_rgb_hex(0xff453a),
-        dock_background: Color::rgba(44, 44, 46, 208),
-        dock_border: Color::rgba(255, 255, 255, 32),
-        dock_item_hover: Color::rgba(255, 255, 255, 30),
-        running_indicator: Color::rgba(245, 245, 247, 210),
         inactive_window_shadow: Self::LIGHT.inactive_window_shadow,
         active_window_shadow: Self::LIGHT.active_window_shadow,
         panel_shadow: Self::LIGHT.panel_shadow,
-        dock_shadow: Self::LIGHT.dock_shadow,
     };
 }
 
