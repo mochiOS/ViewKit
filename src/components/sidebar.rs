@@ -21,6 +21,7 @@ type Callback = Rc<RefCell<Box<dyn FnMut()>>>;
 /// ListRow. Optional icons use the existing VK Symbols and common leading slot.
 pub struct SidebarItem {
     label: String,
+    trailing: Option<String>,
     symbol: Option<SymbolName>,
     leading: Option<Rc<dyn View>>,
     indent: f32,
@@ -52,6 +53,33 @@ mod custom_content_tests {
         item.handle_event(bounds, &ViewEvent::PointerReleased { position, button: PointerButton::Primary }, &mut context);
         assert!(clicked.get());
     }
+
+    #[test]
+    fn trailing_counts_share_the_navigation_rows_selection_and_hit_area() {
+        use crate::{draw_command::{DisplayList, DrawCommand}, view::PaintContext};
+        for theme in [Theme::LIGHT, Theme::DARK] {
+            let selected = Rc::new(std::cell::Cell::new(false));
+            let callback = selected.clone();
+            let item = SidebarItem::new("A long mailbox label")
+                .symbol(SymbolName::Tray)
+                .trailing("42")
+                .selected(true)
+                .on_select(move || callback.set(true));
+            let bounds = Rect::new(0.0, 0.0, 180.0, theme.layout.control_height);
+            let mut text = TextMeasurer::new();
+            let mut list = DisplayList::new();
+            item.paint(bounds, &mut PaintContext::new(&mut list, &theme, &theme.typography, &mut text));
+            assert!(list.commands().iter().any(|command| matches!(command,
+                DrawCommand::DrawText { command } if command.text == "42"
+                    && command.bounds.origin.x + command.bounds.size.width <= bounds.size.width)));
+            let mut context = EventContext::new(&theme, &theme.typography, &mut text);
+            let position = Point::new(bounds.size.width - 2.0, bounds.size.height / 2.0);
+            item.handle_event(bounds, &ViewEvent::PointerPressed { position, button: PointerButton::Primary }, &mut context);
+            assert!(!selected.get());
+            item.handle_event(bounds, &ViewEvent::PointerReleased { position, button: PointerButton::Primary }, &mut context);
+            assert!(selected.get());
+        }
+    }
 }
 
 impl SidebarItem {
@@ -63,6 +91,7 @@ impl SidebarItem {
     pub fn with_interaction(interaction: ButtonInteractionState, label: impl Into<String>) -> Self {
         Self {
             label: label.into(),
+            trailing: None,
             symbol: None,
             leading: None,
             indent: 0.0,
@@ -102,6 +131,15 @@ impl SidebarItem {
 
     pub fn selected(mut self, selected: bool) -> Self {
         self.selected = selected;
+        self
+    }
+
+    /// Adds a trailing count or short detail using the standard secondary text
+    /// style. The label keeps its leading alignment and shares the row's full
+    /// selection and hit area; an empty detail reserves no additional space.
+    pub fn trailing(mut self, detail: impl Into<String>) -> Self {
+        let detail = detail.into();
+        self.trailing = (!detail.is_empty()).then_some(detail);
         self
     }
 
@@ -147,6 +185,7 @@ impl SidebarItem {
         }
         content = content.child(
             Text::label(self.label.clone())
+                .single_line(true)
                 .accessibility_hidden(true)
                 .weight(if self.selected { 600 } else { 500 })
                 .color(appearance.foreground)
@@ -154,6 +193,15 @@ impl SidebarItem {
                 .flex_grow(1.0)
                 .flex_shrink(1.0),
         );
+        if let Some(detail) = &self.trailing {
+            content = content.child(
+                Text::caption(detail.clone())
+                    .single_line(true)
+                    .color(appearance.secondary)
+                    .layout()
+                    .flex_shrink(0.0),
+            );
+        }
         let mut button = Button::with_interaction(self.interaction.clone())
             .content_padding(false)
             .content(super::Padding::from_insets(crate::edge_insets::EdgeInsets::new(
