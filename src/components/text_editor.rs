@@ -433,6 +433,7 @@ pub struct TextEditor {
     binding: Option<Binding<String>>,
     placeholder: String,
     enabled: bool,
+    read_only: bool,
     monospaced: bool,
     font_size: Option<f32>,
     line_wrap: bool,
@@ -449,6 +450,7 @@ impl TextEditor {
             binding: Some(binding),
             placeholder: String::new(),
             enabled: true,
+            read_only: false,
             monospaced: false,
             font_size: None,
             line_wrap: false,
@@ -463,6 +465,7 @@ impl TextEditor {
             binding: None,
             placeholder: String::new(),
             enabled: true,
+            read_only: false,
             monospaced: false,
             font_size: None,
             line_wrap: false,
@@ -484,6 +487,14 @@ impl TextEditor {
 
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
+        self
+    }
+
+    /// Prevents edits through this view while keeping selection, copying,
+    /// scrolling and normal text colors available. Programmatic state updates
+    /// remain possible. Unlike `enabled(false)`, this is a readable document view.
+    pub fn read_only(mut self, read_only: bool) -> Self {
+        self.read_only = read_only;
         self
     }
 
@@ -927,12 +938,12 @@ impl View for TextEditor {
         context.record_command_status(CommandStatus::new(
             commands::UNDO,
             bounds,
-            focused && can_undo,
+            focused && !self.read_only && can_undo,
         ));
         context.record_command_status(CommandStatus::new(
             commands::REDO,
             bounds,
-            focused && can_redo,
+            focused && !self.read_only && can_redo,
         ));
         let has_selection = selection.is_some();
         context.record_command_status(CommandStatus::new(
@@ -943,13 +954,17 @@ impl View for TextEditor {
         context.record_command_status(CommandStatus::new(
             commands::CUT,
             bounds,
-            focused && has_selection,
+            focused && !self.read_only && has_selection,
         ));
-        context.record_command_status(CommandStatus::new(commands::PASTE, bounds, focused));
+        context.record_command_status(CommandStatus::new(
+            commands::PASTE,
+            bounds,
+            focused && !self.read_only,
+        ));
         context.record_command_status(CommandStatus::new(
             commands::DELETE,
             bounds,
-            focused && (has_selection || cursor < value.len()),
+            focused && !self.read_only && (has_selection || cursor < value.len()),
         ));
         context.record_command_status(CommandStatus::new(
             commands::SELECT_ALL,
@@ -1111,7 +1126,7 @@ impl View for TextEditor {
             }
         }
 
-        if focused && selection.is_none() {
+        if focused && !self.read_only && selection.is_none() {
             let now = Instant::now();
             let (visible, next_redraw) = caret_state(&self.interaction, now);
             context.request_redraw_in_at(bounds, next_redraw);
@@ -1178,6 +1193,31 @@ impl View for TextEditor {
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
+        if self.read_only && self.interaction.is_focused() {
+            let edits = match event {
+                ViewEvent::TextInput { .. } | ViewEvent::Backspace | ViewEvent::Delete => true,
+                ViewEvent::KeyPressed { key, modifiers } => match key {
+                    Key::Enter | Key::Tab | Key::Space | Key::CapsLock => true,
+                    Key::Character(value) => {
+                        !modifiers.shortcut()
+                            || matches!(value, 'x' | 'X' | 'v' | 'V' | 'z' | 'Z' | 'y' | 'Y')
+                    }
+                    _ => false,
+                },
+                ViewEvent::Command { command, .. } => [
+                    commands::CUT,
+                    commands::PASTE,
+                    commands::DELETE,
+                    commands::UNDO,
+                    commands::REDO,
+                ]
+                .contains(command),
+                _ => false,
+            };
+            if edits {
+                return EventResult::Consumed;
+            }
+        }
         match event {
             ViewEvent::KeyPressed {
                 key: Key::CapsLock, ..
@@ -2182,6 +2222,63 @@ mod tests {
     use super::*;
     use crate::theme::Theme;
     use crate::typography::{TextMeasurer, Typography};
+
+    #[test]
+    fn read_only_blocks_input_and_edit_commands_but_keeps_selection() {
+        let state = TextEditorInteractionState::new();
+        state.set_value("one two");
+        state.inner.borrow_mut().focused = true;
+        let editor = TextEditor::with_interaction(state.clone()).read_only(true);
+        let theme = Theme::LIGHT;
+        let typography = Typography::DEFAULT;
+        let mut measure = TextMeasurer::new();
+        let mut context = EventContext::new(&theme, &typography, &mut measure);
+        let bounds = Rect::new(0., 0., 400., 200.);
+        editor.handle_event(bounds, &ViewEvent::SelectAll, &mut context);
+        assert_eq!(selection_range(&state.inner.borrow()), Some(0..7));
+        for event in [
+            ViewEvent::TextInput {
+                text: "changed".into(),
+            },
+            ViewEvent::Backspace,
+            ViewEvent::Delete,
+            ViewEvent::KeyPressed {
+                key: Key::Enter,
+                modifiers: Default::default(),
+            },
+            ViewEvent::KeyPressed {
+                key: Key::Space,
+                modifiers: Default::default(),
+            },
+        ] {
+            assert!(
+                editor
+                    .handle_event(bounds, &event, &mut context)
+                    .is_consumed()
+            );
+            assert_eq!(state.value(), "one two");
+        }
+        for command in [
+            commands::CUT,
+            commands::PASTE,
+            commands::DELETE,
+            commands::UNDO,
+            commands::REDO,
+        ] {
+            editor.handle_event(
+                bounds,
+                &ViewEvent::Command {
+                    command,
+                    target: None,
+                },
+                &mut context,
+            );
+            assert_eq!(state.value(), "one two");
+        }
+        editor.handle_event(bounds, &ViewEvent::ArrowLeft, &mut context);
+        assert_eq!(state.value(), "one two");
+        assert!(selection_range(&state.inner.borrow()).is_none());
+    }
 
     #[test]
     fn line_navigation_uses_character_columns() {

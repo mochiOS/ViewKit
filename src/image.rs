@@ -136,8 +136,8 @@ impl ImageData {
         if bytes.len() > 32 * 1024 * 1024
             || max_width == 0
             || max_height == 0
-            || max_width > 512
-            || max_height > 512
+            || max_width > 1024
+            || max_height > 1024
         {
             return Err(ImageError::InvalidDimensions {
                 width: max_width,
@@ -345,6 +345,6 @@ mod thumbnail_tests {
         assert_eq!(image.premultiplied_rgba8().len(), 18 * 18 * 4);
         assert!(ImageData::thumbnail_from_bytes(&[0; 16], 144, 144).is_err());
         assert!(ImageData::thumbnail_from_bytes(bytes, 0, 144).is_err());
-        assert!(ImageData::thumbnail_from_bytes(bytes, 513, 144).is_err());
+        assert!(ImageData::thumbnail_from_bytes(bytes, 1025, 144).is_err());
     }
 }
