@@ -114,7 +114,7 @@ pub use switch::{Switch, SwitchInteractionState};
 pub use tabs::{Tabs, TabsInteractionState};
 pub use text::{Text, TextTone};
 pub use text_editor::{TextEditor, TextEditorInteractionState};
-pub use text_field::{TextField, TextFieldInteractionState, TextFieldSize};
+pub use text_field::{TextField, TextFieldInteractionState, TextFieldLabel, TextFieldSize};
 pub use toolbar::{Toolbar, ToolbarPlacement};
 pub use tooltip::Tooltip;
 

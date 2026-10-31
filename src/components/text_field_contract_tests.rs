@@ -254,3 +254,31 @@ fn inactive_window_preserves_validation_error_without_a_focus_ring() {
     assert!(list.commands().iter().any(|command| matches!(command, DrawCommand::StrokeInsideRoundedRect { color, .. } if *color == theme.text_field.invalid_border)));
     assert!(!list.commands().iter().any(|command| matches!(command, DrawCommand::FillRoundedRect { rect, .. } if rect.size.width > bounds.size.width)));
 }
+
+#[test]
+fn external_labels_share_the_fields_text_line_at_all_sizes_and_font_scales() {
+    for mut theme in [Theme::LIGHT, Theme::DARK] {
+        theme.text_field.text_offset_y = 1.0;
+        for size in [TextFieldSize::Small, TextFieldSize::Medium, TextFieldSize::Large] {
+            for scale in [1.0, 2.0] {
+                let interaction = TextFieldInteractionState::new();
+                interaction.set_value("Value");
+                let field = TextField::with_interaction(interaction).size(size);
+                let bounds = Rect::new(100.0, 20.0, 240.0, 40.0);
+                let mut list = paint(&field, bounds, &theme, scale);
+                let mut text = TextMeasurer::new();
+                text.set_font_scale(scale);
+                field.label("Label").paint(Rect::new(0.0, bounds.origin.y, 90.0, bounds.size.height),
+                    &mut PaintContext::new(&mut list, &theme, &theme.typography, &mut text));
+                let texts: Vec<_> = list.commands().iter().filter_map(|command| match command {
+                    DrawCommand::DrawText { command } if command.text == "Value" || command.text == "Label" => Some(command),
+                    _ => None,
+                }).collect();
+                assert_eq!(texts.len(), 2);
+                assert_eq!(texts[0].bounds.origin.y, texts[1].bounds.origin.y);
+                assert_eq!(texts[0].font_size, texts[1].font_size);
+                assert_eq!(texts[0].line_height, texts[1].line_height);
+            }
+        }
+    }
+}

@@ -607,6 +607,37 @@ impl TextFieldSize {
     }
 }
 
+/// A field label aligned to the input's text line, including control size,
+/// theme text offset and accessibility font scale. Construct with `TextField::label`.
+pub struct TextFieldLabel {
+    label: String,
+    size: TextFieldSize,
+}
+
+fn field_text_line(bounds: Rect, style: crate::typography::TextStyle, scale: f32, offset: f32) -> Rect {
+    let font_size = super::text::resolved_font_size(style.size) * scale;
+    let height = super::text::resolved_line_height(font_size, style.line_height * scale);
+    Rect::new(bounds.origin.x, bounds.origin.y + (bounds.size.height - height) * 0.5 + offset,
+        bounds.size.width, height)
+}
+
+impl View for TextFieldLabel {
+    fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
+        let text = Text::styled(&self.label, self.size.text_role()).single_line(true)
+            .measure(constraints, context);
+        constraints.constrain(Size::new(text.width, text.height.max(self.size.height(context.theme))))
+    }
+
+    fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
+        let text = field_text_line(bounds, self.size.text_style(context.typography),
+            context.text_measurer.font_scale(), context.theme.text_field.text_offset_y);
+        context.display_list.push(DrawCommand::PushClip { rect: bounds });
+        Text::styled(&self.label, self.size.text_role()).single_line(true)
+            .tone(super::TextTone::Secondary).paint(text, context);
+        context.display_list.push(DrawCommand::PopClip);
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct TextFieldAppearance {
     background: Color,
@@ -887,6 +918,12 @@ impl TextField {
 }
 
 impl TextField {
+    /// Creates an external label with the same font and vertical text position
+    /// as this field. Give both views row bounds with the same y and height.
+    pub fn label(&self, label: impl Into<String>) -> TextFieldLabel {
+        TextFieldLabel { label: label.into(), size: self.size }
+    }
+
     fn geometry(
         &self,
         bounds: Rect,
@@ -919,16 +956,13 @@ impl TextField {
         };
         let style = self.size.text_style(typography);
         let font_size = super::text::resolved_font_size(style.size) * font_scale;
-        let line_height =
-            super::text::resolved_line_height(font_size, style.line_height * font_scale);
-        let text = Rect::new(
+        let text = field_text_line(Rect::new(
             bounds.origin.x + padding + leading,
-            bounds.origin.y
-                + (bounds.size.height - line_height) * 0.5
-                + theme.text_field.text_offset_y,
+            bounds.origin.y,
             (available - leading).max(0.0),
-            line_height,
-        );
+            bounds.size.height,
+        ), style, font_scale, theme.text_field.text_offset_y);
+        let line_height = text.size.height;
         let top = text
             .origin
             .y
