@@ -1,3 +1,4 @@
+pub(crate) mod window_elevation;
 mod application;
 mod color;
 mod control;

@@ -1,6 +1,6 @@
 //! Shared elevation shadows for controls, surfaces, and windows.
 
-use super::Color;
+use super::{Color, window_elevation};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Shadow {
@@ -63,13 +63,13 @@ impl ShadowTokens {
         ),
 
         floating: ShadowSet::double(
-            Shadow::new(Color::rgba(0, 0, 0, 22), 0.0, 4.0, 12.0, 0.0),
-            Shadow::new(Color::rgba(0, 0, 0, 12), 0.0, 10.0, 28.0, 0.0),
+            Shadow::new(Color::rgba(0, 0, 0, 16), 0.0, 2.0, 5.0, 0.0),
+            Shadow::new(Color::rgba(0, 0, 0, 12), 0.0, 6.0, 16.0, 0.0),
         ),
 
         window: ShadowSet::double(
-            Shadow::new(Color::rgba(0, 0, 0, 16), 0.0, 2.0, 5.0, 0.0),
-            Shadow::new(Color::rgba(0, 0, 0, 24), 0.0, 10.0, 28.0, 0.0),
+            window_layer(window_elevation::ACTIVE[0]),
+            window_layer(window_elevation::ACTIVE[1]),
         ),
     };
 }
@@ -127,6 +127,21 @@ mod tests {
         assert!(floating.iter().all(|shadow| shadow.blur_radius <= 28.0));
         assert!(window.iter().all(|shadow| shadow.blur_radius <= 28.0));
         assert!(floating.iter().all(|shadow| shadow.color.alpha <= 22));
-        assert!(window.iter().all(|shadow| shadow.color.alpha <= 24));
+        assert!(window.iter().all(|shadow| shadow.color.alpha <= 32));
+        assert!(
+            window
+                .iter()
+                .all(|shadow| shadow.blur_radius + shadow.spread + shadow.offset_y.abs() <= 20.0)
+        );
     }
+}
+
+pub(super) const fn window_layer(layer: window_elevation::Layer) -> Shadow {
+    Shadow::new(
+        Color::rgba(0, 0, 0, layer.alpha),
+        0.0,
+        layer.offset_y as f32,
+        layer.blur_radius as f32,
+        layer.spread as f32,
+    )
 }

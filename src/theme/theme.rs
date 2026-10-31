@@ -241,6 +241,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn shell_and_floating_surfaces_share_material_and_elevation() {
+        for theme in [Theme::LIGHT, Theme::DARK] {
+            assert_eq!(theme.shell.panel_background, theme.surface.floating_background);
+            assert_eq!(theme.shell.panel_border, theme.surface.floating_border);
+            assert_eq!(Some(theme.shell.panel_shadow), theme.surface.floating_shadow.resolve(&theme.shadows));
+            assert!(theme.surface.shadow_outset(&theme.shadows) >= 16.0);
+            assert!(theme.shell.dock_background.alpha > 200);
+            assert_eq!(theme.shell.window_background.alpha, 255);
+        }
+    }
+
+    #[test]
     fn accent_is_applied_to_application_tokens() {
         let accent = Color::from_rgb_hex(0x7651c9);
         let theme = Theme::LIGHT.with_accent(accent);

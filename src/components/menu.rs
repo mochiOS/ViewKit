@@ -9,8 +9,8 @@ use crate::theme::{Color, ShadowStyle, Theme};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 use super::{
-    BorderStyle, Button, ButtonInteractionState, ButtonStyle, Card, Divider, HStack, Padding,
-    Rectangle, RectangleColor, Spacer, Text, VStack, ZStackAlignment,
+    Button, ButtonInteractionState, ButtonStyle, Divider, HStack, Padding, Spacer, Surface, Text,
+    VStack, ZStackAlignment,
 };
 
 type Callback = Rc<RefCell<Box<dyn FnMut()>>>;
@@ -285,6 +285,20 @@ impl Menu {
         self
     }
 
+    /// メニュー項目・グループ間隔・外側余白から必要な高さを返します。
+    ///
+    /// 構築時と同じテーマを渡してください。ポップアップの描画・入力範囲を
+    /// この高さで揃え、フォントや行高の変更時に末尾の項目がはみ出すのを防ぎます。
+    pub fn preferred_height(&self, theme: &Theme) -> f32 {
+        self.height
+            + 2.0
+                * if self.compact {
+                    theme.menu.compact_padding
+                } else {
+                    theme.card.compact_padding
+                }
+    }
+
     /// Hit-test the visible menu surface using the same continuous corners.
     pub fn contains(&self, bounds: Rect, point: crate::geometry::Point, theme: &Theme) -> bool {
         let radius = if self.compact {
@@ -298,15 +312,10 @@ impl Menu {
         )
     }
 
-    fn card(&self) -> Card<ViewRef<'_, VStack>> {
-        Card::new()
-            .compact()
-            .radius(Theme::current().menu.surface_radius)
-            .shadow(Theme::current().menu.surface_shadow)
-            .border(BorderStyle::Standard {
-                width: Theme::current().menu.surface_stroke_width,
-            })
-            .content(ViewRef::new(&self.content))
+    fn card(&self, theme: &Theme) -> Surface<Padding<ViewRef<'_, VStack>>> {
+        Surface::floating()
+            .radius(theme.menu.surface_radius)
+            .content(Padding::all(theme.card.compact_padding).content(ViewRef::new(&self.content)))
     }
 }
 
@@ -317,7 +326,7 @@ impl View for Menu {
                 .content(ViewRef::new(&self.content))
                 .measure(constraints, context)
         } else {
-            self.card().measure(constraints, context)
+            self.card(context.theme).measure(constraints, context)
         }
     }
 
@@ -326,8 +335,7 @@ impl View for Menu {
         node.focus_scope = self.compact;
         context.record_accessibility(node);
         if self.compact {
-            Rectangle::new()
-                .color(RectangleColor::Custom(context.theme.card.background))
+            Surface::floating()
                 .radius(crate::theme::CornerRadius::Custom(
                     context.theme.menu.compact_radius,
                 ))
@@ -336,7 +344,7 @@ impl View for Menu {
                 .content(ViewRef::new(&self.content))
                 .paint(bounds, context);
         } else {
-            self.card().paint(bounds, context);
+            self.card(context.theme).paint(bounds, context);
         }
     }
 
@@ -391,7 +399,8 @@ impl View for Menu {
                 .content(ViewRef::new(&self.content))
                 .handle_event(bounds, event, context)
         } else {
-            self.card().handle_event(bounds, event, context)
+            self.card(context.theme())
+                .handle_event(bounds, event, context)
         }
     }
 }
@@ -422,12 +431,14 @@ mod compact_tests {
         let theme = Theme::current();
         let mut measurer = TextMeasurer::new();
         let mut context = EventContext::new(&theme, &theme.typography, &mut measurer);
-        let bounds = Rect::new(15.0, 47.0, 150.0, 48.0);
+        let bounds = Rect::new(15.0, 47.0, 150.0, menu.preferred_height(&theme));
         let item_bounds = |index: f32| {
             Rect::new(
-                25.0,
-                57.0 + theme.menu.compact_row_height * index,
-                130.0,
+                bounds.origin.x + theme.menu.compact_padding,
+                bounds.origin.y
+                    + theme.menu.compact_padding
+                    + theme.menu.compact_row_height * index,
+                bounds.size.width - theme.menu.compact_padding * 2.0,
                 theme.menu.compact_row_height,
             )
         };

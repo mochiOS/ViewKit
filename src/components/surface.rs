@@ -2,7 +2,7 @@
 
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
-use crate::theme::Theme;
+use crate::theme::{CornerRadius, Theme};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 use super::background::EmptyView;
@@ -21,6 +21,7 @@ pub struct Surface<Content = EmptyView> {
     kind: SurfaceKind,
     content: Content,
     container: Option<Rect>,
+    radius: Option<CornerRadius>,
 }
 
 impl Surface<EmptyView> {
@@ -29,6 +30,7 @@ impl Surface<EmptyView> {
             kind,
             content: EmptyView,
             container: None,
+            radius: None,
         }
     }
 
@@ -58,7 +60,18 @@ impl<Content> Surface<Content> {
             kind: self.kind,
             content,
             container: self.container,
+            radius: self.radius,
         }
+    }
+
+    /// 浮遊面の角丸を指定します。色・枠・影は共通の浮遊面トークンを使います。
+    ///
+    /// レイアウトを変えず、描画・クリッピング・入力判定へ同じ形状を適用します。
+    /// Floating以外のSurfaceでは、既存のコンテナー由来の角丸規則を維持します。
+    #[must_use]
+    pub fn radius(mut self, radius: CornerRadius) -> Self {
+        self.radius = Some(radius);
+        self
     }
 
     /// Declares the enclosing application chrome for a manually laid out pane.
@@ -77,11 +90,10 @@ impl<Content> Surface<Content> {
                 theme.radius.extra_large,
             ),
             SurfaceKind::Floating => {
-                [theme.surface.floating_radius.resolve(
-                    &theme.radius,
-                    bounds.size.width,
-                    bounds.size.height,
-                ); 4]
+                [self.radius
+                    .unwrap_or(theme.surface.floating_radius)
+                    .resolve(&theme.radius, bounds.size.width, bounds.size.height);
+                    4]
             }
             _ => [0.0; 4],
         }
@@ -181,7 +193,7 @@ impl<Content> Surface<Content> {
             }
             SurfaceKind::Floating => Rectangle::new()
                 .color(RectangleColor::Custom(theme.surface.floating_background))
-                .radius(theme.surface.floating_radius)
+                .radius(self.radius.unwrap_or(theme.surface.floating_radius))
                 .shadow(theme.surface.floating_shadow)
                 .border(BorderStyle::custom(
                     theme.surface.floating_border,
@@ -257,6 +269,39 @@ mod tests {
     use crate::typography::{TextMeasurer, Typography};
     use std::cell::Cell;
     use std::rc::Rc;
+
+    #[test]
+    fn floating_radius_and_material_match_fill_border_clip_and_input_in_both_themes() {
+        for theme in [Theme::LIGHT, Theme::DARK] {
+            let bounds = Rect::new(10., 20., 120., 80.);
+            let surface = Surface::floating().radius(CornerRadius::Custom(22.));
+            let mut list = DisplayList::new();
+            let mut text = TextMeasurer::new();
+            surface.paint_content(
+                bounds,
+                &mut PaintContext::new(&mut list, &theme, &theme.typography, &mut text),
+                |_| {},
+            );
+            assert!(list.commands().iter().any(|cmd| matches!(cmd, DrawCommand::FillRoundedRect { rect, radius, color } if *rect == bounds && *radius == 22. && *color == theme.surface.floating_background)));
+            assert!(list.commands().iter().any(|cmd| matches!(cmd, DrawCommand::StrokeInsideRoundedRect { rect, radius, color, .. } if *rect == bounds && *radius == 22. && *color == theme.surface.floating_border)));
+            assert!(list.commands().iter().any(|cmd| matches!(cmd, DrawCommand::PushRoundedCornersClip { radii, .. } if *radii == [22.;4])));
+            let mut called = false;
+            let mut context = EventContext::new(&theme, &theme.typography, &mut text);
+            surface.handle_content_event(
+                bounds,
+                &ViewEvent::PointerPressed {
+                    position: bounds.origin,
+                    button: PointerButton::Primary,
+                },
+                &mut context,
+                |_, _| {
+                    called = true;
+                    EventResult::Consumed
+                },
+            );
+            assert!(!called);
+        }
+    }
 
     #[test]
     fn corners_follow_chrome_junctions_not_window_edges() {

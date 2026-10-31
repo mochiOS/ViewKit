@@ -1,4 +1,4 @@
-use super::{Color, ColorTokens, Shadow, ShadowSet};
+use super::{Color, ColorTokens, FigmaTokens, Shadow, ShadowSet, ShadowTokens};
 
 /// Colors and elevation used by desktop-shell surfaces.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -45,10 +45,10 @@ pub struct ShellTokens {
 impl ShellTokens {
     pub const LIGHT: Self = Self {
         bar_background: Color::rgba(250, 250, 250, 100),
-        window_background: Color::rgba(250, 250, 250, 235),
-        window_border: Color::rgba(0, 0, 0, 31),
-        title_bar_background: Color::rgba(255, 255, 255, 245),
-        title_bar_border: Color::rgba(0, 0, 0, 26),
+        window_background: Color::rgb(255, 255, 255),
+        window_border: Color::rgba(0, 0, 0, super::window_elevation::BORDER_ALPHA),
+        title_bar_background: Color::rgb(250, 250, 250),
+        title_bar_border: Color::rgba(0, 0, 0, 12),
         primary_text: Color::from_rgb_hex(0x191919),
         secondary_text: Color::from_rgb_hex(0x626262),
         tertiary_text: Color::rgba(60, 60, 67, 170),
@@ -58,8 +58,8 @@ impl ShellTokens {
         close_pressed: Color::from_rgb_hex(0xc50f1f),
         content_background: Color::from_rgb_hex(0xfafafa),
         scrim: Color::rgba(0, 0, 0, 72),
-        panel_background: Color::rgba(247, 247, 249, 246),
-        panel_border: Color::rgba(255, 255, 255, 180),
+        panel_background: FigmaTokens::LIGHT.background.elevated,
+        panel_border: FigmaTokens::LIGHT.border.default,
         field_background: Color::rgba(255, 255, 255, 232),
         field_border: Color::rgba(0, 0, 0, 30),
         selection_soft: Color::rgba(0, 122, 255, 28),
@@ -73,31 +73,24 @@ impl ShellTokens {
         action_hover: Color::from_rgb_hex(0x2878d0),
         action_pressed: Color::from_rgb_hex(0x1557b0),
         alert: Color::from_rgb_hex(0xd93025),
-        dock_background: Color::rgba(255, 255, 255, 128),
+        dock_background: Color::rgba(255, 255, 255, 208),
         dock_border: Color::rgba(0, 0, 0, 28),
         dock_item_hover: Color::rgba(255, 255, 255, 225),
         running_indicator: Color::rgba(45, 45, 45, 210),
-        inactive_window_shadow: ShadowSet::single(Shadow::new(
-            Color::rgba(0, 0, 0, 6),
-            0.0,
-            1.0,
-            3.0,
-            0.0,
+        inactive_window_shadow: ShadowSet::single(super::shadow::window_layer(
+            super::window_elevation::INACTIVE[0],
         )),
-        active_window_shadow: ShadowSet::double(
-            Shadow::new(Color::rgba(0, 0, 0, 14), 0.0, 1.0, 4.0, 0.0),
-            Shadow::new(Color::rgba(0, 0, 0, 18), 0.0, 4.0, 10.0, 0.0),
-        ),
-        panel_shadow: ShadowSet::single(Shadow::new(Color::rgba(0, 0, 0, 28), 0.0, 8.0, 20.0, 0.0)),
+        active_window_shadow: ShadowTokens::DEFAULT.window,
+        panel_shadow: ShadowTokens::DEFAULT.floating,
         dock_shadow: ShadowSet::single(Shadow::new(Color::rgba(0, 0, 0, 12), 0.0, 2.0, 8.0, 0.0)),
     };
 
     pub const DARK: Self = Self {
         bar_background: Color::rgba(28, 28, 30, 180),
-        window_background: Color::rgba(36, 36, 38, 245),
+        window_background: Color::rgb(36, 36, 38),
         window_border: Color::rgba(255, 255, 255, 38),
-        title_bar_background: Color::rgba(44, 44, 46, 245),
-        title_bar_border: Color::rgba(255, 255, 255, 26),
+        title_bar_background: Color::rgb(36, 36, 38),
+        title_bar_border: Color::rgba(255, 255, 255, 12),
         primary_text: Color::from_rgb_hex(0xf5f5f7),
         secondary_text: Color::from_rgb_hex(0xaeaeb2),
         tertiary_text: Color::rgba(235, 235, 245, 153),
@@ -107,8 +100,8 @@ impl ShellTokens {
         close_pressed: Color::from_rgb_hex(0xd9362e),
         content_background: Color::from_rgb_hex(0x242426),
         scrim: Color::rgba(0, 0, 0, 112),
-        panel_background: Color::rgba(44, 44, 46, 246),
-        panel_border: Color::rgba(255, 255, 255, 38),
+        panel_background: FigmaTokens::DARK.background.elevated,
+        panel_border: FigmaTokens::DARK.border.default,
         field_background: Color::rgba(58, 58, 60, 232),
         field_border: Color::rgba(255, 255, 255, 35),
         selection_soft: Color::rgba(10, 132, 255, 48),
@@ -122,7 +115,7 @@ impl ShellTokens {
         action_hover: Color::from_rgb_hex(0x64adff),
         action_pressed: Color::from_rgb_hex(0x0a84ff),
         alert: Color::from_rgb_hex(0xff453a),
-        dock_background: Color::rgba(44, 44, 46, 128),
+        dock_background: Color::rgba(44, 44, 46, 208),
         dock_border: Color::rgba(255, 255, 255, 32),
         dock_item_hover: Color::rgba(255, 255, 255, 30),
         running_indicator: Color::rgba(245, 245, 247, 210),

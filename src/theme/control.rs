@@ -783,6 +783,24 @@ pub struct SurfaceTokens {
 }
 
 impl SurfaceTokens {
+    /// 浮遊面の影が外形から広がる最大距離を返します。
+    ///
+    /// `shadows`には描画時と同じテーマの影トークンを渡します。描画後の消し残しを
+    /// 防ぐため、ポップアップの再描画範囲・アニメーション範囲の計算に使用します。
+    pub fn shadow_outset(&self, shadows: &super::ShadowTokens) -> f32 {
+        self.floating_shadow.resolve(shadows).map_or(0.0, |set| {
+            set.layers
+                .iter()
+                .flatten()
+                .map(|shadow| {
+                    shadow.blur_radius.max(0.0)
+                        + shadow.spread.max(0.0)
+                        + shadow.offset_x.abs().max(shadow.offset_y.abs())
+                })
+                .fold(0.0_f32, f32::max)
+        })
+    }
+
     pub const fn from_colors(colors: ColorTokens) -> Self {
         Self {
             app_background: colors.background,
@@ -855,10 +873,10 @@ impl StepperTokens {
 impl MenuTokens {
     pub const fn from_colors(colors: ColorTokens) -> Self {
         Self {
-            compact_row_height: 14.0,
-            compact_font_size: 10.0,
-            compact_padding: 10.0,
-            compact_group_gap: 13.0,
+            compact_row_height: super::ControlMetrics::DEFAULT.small_height,
+            compact_font_size: super::ControlMetrics::DEFAULT.font_size,
+            compact_padding: FigmaTokens::SPACING.space_8,
+            compact_group_gap: FigmaTokens::SPACING.space_8,
             compact_radius: 14.0,
             item_background: Color::TRANSPARENT,
             item_hovered_background: colors.surface_subtle,
