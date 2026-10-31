@@ -2,6 +2,25 @@
 // Numeric fixtures evaluated from ../omochi/playground/omochi.js using Node.
 use super::*;
 #[test]
+fn settled_legacy_controls_match_the_shared_continuous_boundary_without_smoothing() {
+    for (width, height, radius) in [(96.0, 30.0, 9.0), (50.0, 18.0, 9.0), (90.0, 60.0, 0.0)] {
+        let bounds = Rect::new(20.0, 30.0, width, height);
+        let actual = button_contour(bounds, radius, SurfaceSample::default(), Material::BUTTON);
+        let reference = crate::continuous_corner::polygon(
+            bounds,
+            [radius; 4],
+            crate::continuous_corner::polygon_segments(radius),
+        );
+        assert_eq!(actual.len(), reference.len());
+        assert!(
+            actual
+                .iter()
+                .zip(reference)
+                .all(|(p, q)| p.x == q.0 && p.y == q.1)
+        );
+    }
+}
+#[test]
 fn matches_javascript_material_and_deformation_fixtures() {
     let motion = OmochiMotion::DEFAULT;
     assert!((creep_compliance(0.0, motion.burgers) - 0.322580645).abs() < 0.00001);

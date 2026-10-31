@@ -464,6 +464,18 @@ pub fn button_contour(
     let w = bounds.size.width;
     let h = bounds.size.height;
     let r = radius.max(0.0).min(w.min(h) * 0.5);
+    if sample.pull == Point::new(0.0, 0.0) && sample.press_depth == 0.0 {
+        // Settled moving controls must have the very same boundary as rigid
+        // controls. Catmull smoothing belongs to deformation, not the rest shape.
+        return crate::continuous_corner::polygon(
+            bounds,
+            [r; 4],
+            crate::continuous_corner::polygon_segments(r),
+        )
+        .into_iter()
+        .map(|(x, y)| Point::new(x, y))
+        .collect();
+    }
     let mut base = vec![Point::new(r, 0.0)];
     let mut line = |a: Point, b: Point, count: usize| {
         for i in 1..=count {
