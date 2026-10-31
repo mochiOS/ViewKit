@@ -316,6 +316,15 @@ pub trait App: Sized + 'static {
         self.window()
     }
 
+    /// Binds a window to an existing broker-issued presentation request.
+    /// The compositor independently checks ownership, focus and scanout.
+    fn protected_presentation_for_window(
+        &self,
+        _window: WindowId,
+    ) -> Option<crate::platform::ProtectedPresentation> {
+        None
+    }
+
     /// Overrides the system appearance theme for this application.
     ///
     /// Returning `None` follows the platform Light/Dark preference. Because

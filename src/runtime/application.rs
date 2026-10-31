@@ -466,6 +466,9 @@ impl<A> PlatformApplication for ApplicationRuntime<A>
 where
     A: App,
 {
+    fn protected_presentation(&self, window: WindowId) -> Option<crate::platform::ProtectedPresentation> {
+        self.app.protected_presentation_for_window(window)
+    }
     fn process_ui_notifications(&mut self) -> bool {
         if !crate::dispatch::drain() {
             return false;

@@ -41,6 +41,15 @@ pub enum PlatformWindowCommand {
     Redraw { id: WindowId },
 }
 
+/// A broker-issued request to bind this window to a protected presentation.
+/// These fields identify the request; they do not authorize or prove display.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProtectedPresentation {
+    pub ticket: u64,
+    pub challenge: [u8; 32],
+    pub display: u64,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct PlatformFileHandle {
     handle: u32,
@@ -132,6 +141,10 @@ pub trait PlatformWindow {
 }
 
 pub trait PlatformApplication {
+    /// Returns the broker-issued binding before a window's first frame.
+    fn protected_presentation(&self, _window: WindowId) -> Option<ProtectedPresentation> {
+        None
+    }
     /// ワーカーから予約されたUI処理を、イベントループの所有スレッドで実行します。
     ///
     /// 処理があればtrueを返します。バックエンドは描画前と待機前に呼びます。

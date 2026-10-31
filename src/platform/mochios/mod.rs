@@ -419,6 +419,28 @@ where
         let surface = CompositorSurface::create(compositor, event_endpoint, role, width, height)
             .map_err(|error| error.at("surface creation"))?;
         let window = MochiOsWindow::new(id, viewport, compositor, surface.token());
+        if let Some(binding) = self.app.protected_presentation(id) {
+            use mochi_user_platform::capability::{
+                consent::{Correlation, Ticket},
+                presentation::Command,
+            };
+            let destination =
+                u32::try_from(compositor).map_err(|_| MochiOsBackendError::InvalidReply)?;
+            let command = Command::Bind {
+                correlation: Correlation {
+                    ticket: Ticket {
+                        id: binding.ticket,
+                        challenge: binding.challenge,
+                    },
+                    display: binding.display,
+                },
+                surface: surface.token(),
+            };
+            connection::syscall_result(mochi_user_platform::presentation::command(
+                destination, command, None,
+            ))
+            .map_err(|error| error.at("protected presentation binding"))?;
+        }
         if role == ROLE_TOPLEVEL {
             window
                 .set_compositor_title(&config.title)
