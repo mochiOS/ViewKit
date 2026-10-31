@@ -232,65 +232,62 @@ fn paint_shadow(bounds: Rect, radius: f32, shadow: Shadow, context: &mut PaintCo
         return;
     }
 
-    let blur_radius = shadow.blur_radius.max(0.0);
-
-    let spread = shadow.spread.max(0.0);
-
-    if blur_radius == 0.0 {
-        let shadow_bounds = expanded_shadow_rect(bounds, shadow.offset_x, shadow.offset_y, spread);
-
-        context.display_list.push(DrawCommand::FillRoundedRect {
-            rect: shadow_bounds,
-            radius: radius + spread,
-            color: shadow.color,
-        });
-
-        return;
-    }
-
-    let layers = blur_radius.ceil().clamp(2.0, shadow.color.alpha as f32) as u32;
-
-    let weight_sum = (1..=layers)
-        .map(|layer| {
-            let progress = layer as f32 / layers as f32;
-
-            1.0 - progress * 0.75
-        })
-        .sum::<f32>();
-
-    let mut remaining_alpha = u32::from(shadow.color.alpha);
-
-    for layer in (1..=layers).rev() {
-        let progress = layer as f32 / layers as f32;
-
-        let expansion = spread + blur_radius * progress;
-
-        let weight = 1.0 - progress * 0.75;
-
-        let mut alpha = (shadow.color.alpha as f32 * weight / weight_sum).round() as u32;
-
-        alpha = alpha.min(remaining_alpha);
-
-        if layer == 1 {
-            alpha = remaining_alpha;
-        }
-
-        remaining_alpha = remaining_alpha.saturating_sub(alpha);
-
-        if alpha == 0 {
-            continue;
-        }
-
+    for (expansion, color) in shadow_layers(shadow) {
         let shadow_bounds =
             expanded_shadow_rect(bounds, shadow.offset_x, shadow.offset_y, expansion);
-
         context.display_list.push(DrawCommand::FillRoundedRect {
             rect: shadow_bounds,
             radius: radius + expansion,
-
-            color: shadow.color.with_alpha(alpha as u8),
+            color,
         });
     }
+}
+
+// The same bounded coverage profile is used by rigid and deforming surfaces.
+// Return outer layers first so compositing and total opacity agree at rest.
+pub(super) fn shadow_layers(shadow: Shadow) -> Vec<(f32, Color)> {
+    if shadow.color.alpha == 0 {
+        return Vec::new();
+    }
+    let blur = if shadow.blur_radius.is_finite() {
+        shadow.blur_radius.max(0.0)
+    } else {
+        0.0
+    };
+    let spread = if shadow.spread.is_finite() {
+        shadow.spread.max(0.0)
+    } else {
+        0.0
+    };
+    if blur == 0.0 {
+        return vec![(spread, shadow.color)];
+    }
+    let layers = blur
+        .ceil()
+        .clamp(2.0, 32.0)
+        .min(f32::from(shadow.color.alpha).max(1.0)) as u32;
+    let weight_sum = (1..=layers)
+        .map(|i| 1.0 - (i as f32 / layers as f32) * 0.75)
+        .sum::<f32>();
+    let mut remaining = u32::from(shadow.color.alpha);
+    let mut result = Vec::with_capacity(layers as usize);
+    for layer in (1..=layers).rev() {
+        let progress = layer as f32 / layers as f32;
+        let mut alpha =
+            (f32::from(shadow.color.alpha) * (1.0 - progress * 0.75) / weight_sum).round() as u32;
+        alpha = alpha.min(remaining);
+        if layer == 1 {
+            alpha = remaining;
+        }
+        remaining -= alpha;
+        if alpha > 0 {
+            result.push((
+                spread + blur * progress,
+                shadow.color.with_alpha(alpha as u8),
+            ));
+        }
+    }
+    result
 }
 
 fn expanded_shadow_rect(bounds: Rect, offset_x: f32, offset_y: f32, expansion: f32) -> Rect {

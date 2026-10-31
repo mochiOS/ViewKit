@@ -155,8 +155,14 @@ impl MagneticSelectionMotion {
         self.state.borrow_mut().surface_direction = direction;
     }
 
-    pub(super) fn sample_for_motion(&self, fallback_center: f32, enabled: bool) -> MagneticSelectionSample {
-        if !enabled { self.cancel(fallback_center); }
+    pub(super) fn sample_for_motion(
+        &self,
+        fallback_center: f32,
+        enabled: bool,
+    ) -> MagneticSelectionSample {
+        if !enabled {
+            self.cancel(fallback_center);
+        }
         self.sample(fallback_center)
     }
 
@@ -335,10 +341,20 @@ impl OmochiShape {
         color: Color,
         context: &mut PaintContext<'_>,
     ) {
-        if !context.theme.motion.omochi.enabled { self.reset(); }
+        if !context.theme.motion.omochi.enabled {
+            self.reset();
+        }
         let now = Instant::now();
         let base = rounded_rect_points(bounds.size.width, bounds.size.height, radius, 10);
         let sample = self.surface.sample(&base, now);
+        if !sample.animating {
+            use crate::view::View;
+            super::Rectangle::new()
+                .color(super::RectangleColor::Custom(color))
+                .radius(crate::theme::CornerRadius::Custom(radius))
+                .paint(bounds, context);
+            return;
+        }
         let center = Point::new(
             bounds.origin.x + bounds.size.width / 2.0,
             bounds.origin.y + bounds.size.height / 2.0,
@@ -364,7 +380,9 @@ impl OmochiShape {
         redraw_bounds: Rect,
         context: &mut PaintContext<'_>,
     ) {
-        if !context.theme.motion.omochi.enabled { self.reset(); }
+        if !context.theme.motion.omochi.enabled {
+            self.reset();
+        }
         let now = Instant::now();
         let sample = self.surface.sample(base_points, now);
         context.display_list.push(DrawCommand::FillPolygon {
@@ -393,18 +411,25 @@ impl OmochiShape {
     ) {
         if !context.theme.motion.omochi.enabled {
             self.reset();
-            use super::{Rectangle, RectangleColor, BorderStyle};
-            use crate::theme::CornerRadius;
-            use crate::view::View;
-            Rectangle::new().color(RectangleColor::Custom(fill))
-                .radius(CornerRadius::Custom(radius)).shadow(shadow)
-                .border(BorderStyle::Custom { color: border, width: border_width })
-                .paint(bounds, context);
-            return;
         }
         let now = Instant::now();
         let base = rounded_rect_points(bounds.size.width, bounds.size.height, radius, 10);
         let sample = self.surface.sample(&base, now);
+        if !sample.animating {
+            use super::{BorderStyle, Rectangle, RectangleColor};
+            use crate::theme::CornerRadius;
+            use crate::view::View;
+            Rectangle::new()
+                .color(RectangleColor::Custom(fill))
+                .radius(CornerRadius::Custom(radius))
+                .shadow(shadow)
+                .border(BorderStyle::Custom {
+                    color: border,
+                    width: border_width,
+                })
+                .paint(bounds, context);
+            return;
+        }
         let center = Point::new(
             bounds.origin.x + bounds.size.width / 2.0,
             bounds.origin.y + bounds.size.height / 2.0,
@@ -416,16 +441,21 @@ impl OmochiShape {
             }
         }
 
-        if border.alpha > 0 && border_width > 0.0 {
-            context.display_list.push(DrawCommand::FillPolygon {
-                points: expanded_points(&sample.points, center, bounds, border_width, 0.0, 0.0),
-                color: border,
-            });
-        }
         context.display_list.push(DrawCommand::FillPolygon {
             points: expanded_points(&sample.points, center, bounds, 0.0, 0.0, 0.0),
             color: fill,
         });
+        if border.alpha > 0 && border_width.is_finite() && border_width > 0.0 {
+            let width = border_width
+                .min(bounds.size.width.min(bounds.size.height) * 0.5)
+                .max(0.0);
+            context.display_list.push(DrawCommand::DrawContour {
+                points: expanded_points(&sample.points, center, bounds, -width * 0.5, 0.0, 0.0),
+                fill: Color::TRANSPARENT,
+                stroke: border,
+                stroke_width: width,
+            });
+        }
 
         if sample.animating {
             context.request_redraw_in_at(bounds.expanded(20.0), now + Duration::from_millis(8));
@@ -441,16 +471,10 @@ fn expanded_points(
     offset_x: f32,
     offset_y: f32,
 ) -> Vec<Point> {
-    let scale_x = 1.0 + expansion * 2.0 / bounds.size.width.max(1.0);
-    let scale_y = 1.0 + expansion * 2.0 / bounds.size.height.max(1.0);
-    points
-        .iter()
-        .map(|point| {
-            Point::new(
-                center.x + point.x * scale_x + offset_x,
-                center.y + point.y * scale_y + offset_y,
-            )
-        })
+    let _ = bounds;
+    crate::contour::offset(points, expansion)
+        .into_iter()
+        .map(|point| Point::new(center.x + point.x + offset_x, center.y + point.y + offset_y))
         .collect()
 }
 
@@ -461,28 +485,17 @@ fn paint_polygon_shadow(
     shadow: Shadow,
     context: &mut PaintContext<'_>,
 ) {
-    if shadow.color.alpha == 0 {
-        return;
-    }
-    let blur = shadow.blur_radius.max(0.0);
-    let layers = if blur > 0.0 { 5 } else { 1 };
-    let layer_alpha = (u16::from(shadow.color.alpha) / layers as u16).max(1) as u8;
-    for layer in (0..layers).rev() {
-        let progress = if layers == 1 {
-            0.0
-        } else {
-            layer as f32 / (layers - 1) as f32
-        };
+    for (expansion, color) in super::rectangle::shadow_layers(shadow) {
         context.display_list.push(DrawCommand::FillPolygon {
             points: expanded_points(
                 points,
                 center,
                 bounds,
-                shadow.spread.max(0.0) + blur * progress,
+                expansion,
                 shadow.offset_x,
                 shadow.offset_y,
             ),
-            color: shadow.color.with_alpha(layer_alpha),
+            color,
         });
     }
 }
@@ -493,6 +506,88 @@ mod tests {
     use crate::draw_command::DisplayList;
     use crate::theme::Theme;
     use crate::typography::{TextMeasurer, Typography};
+
+    #[test]
+    fn resting_omochi_uses_the_exact_rigid_fill_border_and_shadow_commands() {
+        use crate::view::View;
+        for theme in [Theme::LIGHT, Theme::DARK] {
+            for bounds in [
+                Rect::new(10., 20., 80., 30.),
+                Rect::new(10., 20., 240., 24.),
+            ] {
+                let shape = OmochiShape::velocity(OmochiPreset::Thumb);
+                let mut resting = DisplayList::new();
+                let mut rigid = DisplayList::new();
+                let mut text = TextMeasurer::new();
+                shape.paint_styled(
+                    bounds,
+                    9.,
+                    theme.colors.surface,
+                    theme.colors.border,
+                    1.,
+                    ShadowStyle::Floating,
+                    &mut PaintContext::new(&mut resting, &theme, &theme.typography, &mut text),
+                );
+                super::super::Rectangle::new()
+                    .color(super::super::RectangleColor::Custom(theme.colors.surface))
+                    .radius(crate::theme::CornerRadius::Custom(9.))
+                    .shadow(ShadowStyle::Floating)
+                    .border(super::super::BorderStyle::custom(theme.colors.border, 1.))
+                    .paint(
+                        bounds,
+                        &mut PaintContext::new(&mut rigid, &theme, &theme.typography, &mut text),
+                    );
+                assert_eq!(resting.commands(), rigid.commands());
+            }
+        }
+    }
+
+    #[test]
+    fn deformed_outline_offsets_along_normals_instead_of_scaling_the_rectangle() {
+        let base = rounded_rect_points(240., 30., 9., 10);
+        let offset = expanded_points(
+            &base,
+            Point::new(0., 0.),
+            Rect::new(0., 0., 240., 30.),
+            1.,
+            0.,
+            0.,
+        );
+        for index in 0..base.len() {
+            let p = base[index];
+            let q = base[(index + 1) % base.len()];
+            let dx = q.x - p.x;
+            let dy = q.y - p.y;
+            let length = dx.hypot(dy);
+            if length < 0.001 {
+                continue;
+            }
+            let displacement = Point::new(offset[index].x - p.x, offset[index].y - p.y);
+            assert!(((displacement.x * dy - displacement.y * dx).abs() / length - 1.).abs() < 0.01);
+        }
+    }
+
+    #[test]
+    fn shadow_profile_is_bounded_and_preserves_total_alpha() {
+        for blur in [0., 1., 5., 20., 1000., f32::NAN] {
+            let layers = super::super::rectangle::shadow_layers(Shadow::new(
+                Color::rgba(0, 0, 0, 48),
+                0.,
+                1.,
+                blur,
+                0.,
+            ));
+            assert!(layers.len() <= 32);
+            assert_eq!(
+                layers
+                    .iter()
+                    .map(|(_, color)| u32::from(color.alpha))
+                    .sum::<u32>(),
+                48
+            );
+            assert!(layers.iter().all(|(expansion, _)| expansion.is_finite()));
+        }
+    }
 
     #[test]
     fn pressed_shape_emits_a_deformed_polygon() {
@@ -562,10 +657,12 @@ mod tests {
         });
         let polygon_colors = polygon_colors.collect::<Vec<_>>();
         assert!(
-            polygon_colors.len() > 2,
+            polygon_colors.len() >= 2,
             "shadow, border, and fill must be layered"
         );
-        assert!(polygon_colors.contains(&theme.slider.knob_border));
+        assert!(display_list.commands().iter().any(|command| matches!(command,
+            DrawCommand::DrawContour { stroke, stroke_width, .. } if *stroke == theme.slider.knob_border && *stroke_width == theme.slider.stroke_width
+        )));
         assert_eq!(polygon_colors.last(), Some(&Color::WHITE));
     }
 }

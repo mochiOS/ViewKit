@@ -1370,7 +1370,9 @@ mod tests {
             polygon_colors.len() > 2,
             "deformed button must retain shadow, border, and fill layers"
         );
-        assert!(polygon_colors.contains(&Theme::LIGHT.button.standard.hovered.border));
+        assert!(display_list.commands().iter().any(|command| matches!(command,
+            DrawCommand::DrawContour { stroke, .. } if *stroke == Theme::LIGHT.button.standard.hovered.border
+        )));
         assert_eq!(
             polygon_colors.last(),
             Some(&Theme::LIGHT.button.standard.hovered.background)
