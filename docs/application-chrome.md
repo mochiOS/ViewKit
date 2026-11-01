@@ -27,3 +27,14 @@ widths continue to use the existing theme token.
 The changes do not introduce new spacing values, colors, fonts, control shapes
 or animation parameters. Use the shared metrics and the same resolved frames
 for painting, input and scroll viewports in custom layouts.
+
+Native transparent surfaces can register extra pointer targets with
+`DisplayList::add_input_region`. This is input metadata, not a transparent
+paint layer: it changes neither pixels nor layout. Supply final presented,
+surface-local logical rectangles each frame (at most 32); `clear` removes them.
+The native backend converts them to physical pixels and only updates the
+compositor when the region list changes. The compositor requires ownership and
+commit rights for that surface; targets cannot escape its bounds, override
+higher stacking layers, or intercept protected maximized window controls.
+An empty list restores alpha-based panel input. Linux preview drawing transport
+is unchanged; the host view must implement the matching click dispatch itself.

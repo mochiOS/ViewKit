@@ -111,6 +111,9 @@ pub enum DrawCommand {
 #[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]
 pub struct DisplayList {
     commands: Vec<DrawCommand>,
+    // Native compositor metadata; do not change the preview drawing wire format.
+    #[cfg_attr(target_os = "linux", serde(skip))]
+    input_regions: Vec<Rect>,
 }
 
 /// レイアウトを変更せず、描画命令へ適用する一様拡縮と移動です。
@@ -318,6 +321,40 @@ impl DisplayList {
 
     pub fn clear(&mut self) {
         self.commands.clear();
+        self.input_regions.clear();
+    }
+
+    /// Adds an invisible, surface-local logical rectangle to the native
+    /// compositor's pointer targets. These regions supplement alpha hit testing
+    /// and do not paint pixels or bypass surface ownership and stacking rules.
+    /// Supply final presented coordinates; clips/transforms are not inferred.
+    /// Returns false for invalid/empty rectangles or after 32 regions per frame.
+    /// Re-register each frame: `clear()` also removes these regions.
+    pub fn add_input_region(&mut self, rect: Rect) -> bool {
+        if self.input_regions.len() >= 32
+            || ![
+                rect.origin.x,
+                rect.origin.y,
+                rect.size.width,
+                rect.size.height,
+            ]
+            .iter()
+            .all(|v| v.is_finite())
+            || !(rect.origin.x + rect.size.width).is_finite()
+            || !(rect.origin.y + rect.size.height).is_finite()
+            || rect.size.width <= 0.0
+            || rect.size.height <= 0.0
+        {
+            return false;
+        }
+        self.input_regions.push(rect);
+        true
+    }
+
+    /// Returns the explicit native pointer targets for this frame, independently
+    /// of visual drawing commands. Host previews still dispatch through views.
+    pub fn input_regions(&self) -> &[Rect] {
+        &self.input_regions
     }
 
     pub fn commands(&self) -> &[DrawCommand] {
@@ -338,6 +375,26 @@ pub fn clamp_radius(rect: Rect, radius: f32) -> f32 {
 
 #[cfg(test)]
 mod presentation_tests {
+    #[test]
+    fn native_input_metadata_is_bounded_invisible_and_cleared_per_frame() {
+        let mut list = super::DisplayList::new();
+        let rect = super::Rect::new(10.0, 0.0, 30.0, 44.0);
+        assert!(!list.add_input_region(super::Rect::new(f32::NAN, 0.0, 1.0, 1.0)));
+        assert!(!list.add_input_region(super::Rect::new(0.0, 0.0, 0.0, 1.0)));
+        for _ in 0..32 {
+            assert!(list.add_input_region(rect));
+        }
+        assert!(!list.add_input_region(rect));
+        assert!(list.commands().is_empty());
+        assert_eq!(list.input_regions().len(), 32);
+        #[cfg(target_os = "linux")]
+        assert_eq!(
+            postcard::to_stdvec(&list).unwrap(),
+            postcard::to_stdvec(&super::DisplayList::new()).unwrap()
+        );
+        list.clear();
+        assert!(list.input_regions().is_empty());
+    }
     use super::*;
 
     #[test]

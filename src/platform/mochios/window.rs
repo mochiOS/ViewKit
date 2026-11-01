@@ -6,6 +6,7 @@ pub(super) struct MochiOsWindow {
     redraw_requested: Cell<bool>,
     compositor: u64,
     surface: u64,
+    input_regions: std::cell::RefCell<Vec<Rect>>,
 }
 
 impl MochiOsWindow {
@@ -21,6 +22,7 @@ impl MochiOsWindow {
             redraw_requested: Cell::new(false),
             compositor,
             surface,
+            input_regions: std::cell::RefCell::new(Vec::new()),
         }
     }
 
@@ -60,6 +62,47 @@ impl MochiOsWindow {
             reply.len(),
         )?;
         status_from_raw(reply.as_ptr(), len)
+    }
+
+    pub(super) fn set_input_regions(&self, regions: &[Rect]) -> Result<(), MochiOsBackendError> {
+        let scale = renderer::valid_scale_factor(self.viewport.get().scale_factor);
+        let regions: Vec<_> = regions
+            .iter()
+            .map(|rect| {
+                Rect::new(
+                    (rect.origin.x * scale).floor(),
+                    (rect.origin.y * scale).floor(),
+                    ((rect.origin.x + rect.size.width) * scale).ceil()
+                        - (rect.origin.x * scale).floor(),
+                    ((rect.origin.y + rect.size.height) * scale).ceil()
+                        - (rect.origin.y * scale).floor(),
+                )
+            })
+            .collect();
+        if *self.input_regions.borrow() == regions {
+            return Ok(());
+        }
+        let mut request = Vec::with_capacity(16 + regions.len() * 16);
+        request.extend_from_slice(&OP_SET_INPUT_REGIONS.to_le_bytes());
+        request.extend_from_slice(&self.surface.to_le_bytes());
+        request.extend_from_slice(&(regions.len() as u32).to_le_bytes());
+        for rect in &regions {
+            request.extend_from_slice(&(rect.origin.x as i32).to_le_bytes());
+            request.extend_from_slice(&(rect.origin.y as i32).to_le_bytes());
+            request.extend_from_slice(&(rect.size.width as u32).to_le_bytes());
+            request.extend_from_slice(&(rect.size.height as u32).to_le_bytes());
+        }
+        let mut reply = [0u8; 16];
+        let len = ipc_call_raw(
+            self.compositor,
+            request.as_ptr(),
+            request.len(),
+            reply.as_mut_ptr(),
+            reply.len(),
+        )?;
+        status_from_raw(reply.as_ptr(), len)?;
+        *self.input_regions.borrow_mut() = regions;
+        Ok(())
     }
 }
 

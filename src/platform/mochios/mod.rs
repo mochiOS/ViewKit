@@ -64,6 +64,7 @@ const OP_SET_CURSOR_POSITION: u32 = 7;
 const OP_SET_CURSOR_IMAGE: u32 = 8;
 const OP_GET_RENDERER_CAPS: u32 = 9;
 const OP_SET_TITLE: u32 = 10;
+const OP_SET_INPUT_REGIONS: u32 = 12;
 const OP_CONTEXT_MENU_SHOW: u32 = 121;
 const OP_APPEARANCE_CHANGED: u32 = 123;
 const ROLE_TOPLEVEL: u32 = 1;
@@ -630,6 +631,9 @@ where
                     let frame_tick_start = perf_tick();
                     let draw_start = perf_counter();
                     let mut dirty_bounds = self.app.draw(&state.window, &mut display_list);
+                    state
+                        .window
+                        .set_input_regions(display_list.input_regions())?;
                     if self.font_watcher.display_changed(&display_list) {
                         self.font_system = Some(create_font_system());
                         self.swash_cache = SwashCache::new();
