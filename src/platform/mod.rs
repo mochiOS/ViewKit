@@ -1,4 +1,4 @@
-pub(crate) mod clipboard;
+pub mod clipboard;
 mod event;
 mod font;
 pub mod input_method;
