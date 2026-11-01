@@ -57,6 +57,7 @@ pub struct Tabs {
     accessibility_label: Option<String>,
     interaction_state: TabsInteractionState,
     item_width: Option<f32>,
+    document_style: bool,
 }
 
 impl Tabs {
@@ -75,6 +76,7 @@ impl Tabs {
             accessibility_label: None,
             interaction_state,
             item_width: None,
+            document_style: false,
         }
     }
 
@@ -82,6 +84,25 @@ impl Tabs {
     pub fn item_width(mut self, width: f32) -> Self {
         self.item_width = (width.is_finite() && width > 0.0).then_some(width);
         self
+    }
+    /// 文書向けのタブ表示に切り替えます。グループの背景枠とインセットを使いません。
+    pub fn document_style(mut self) -> Self {
+        self.document_style = true;
+        self
+    }
+    fn tongue(&self, theme: &Theme) -> f32 {
+        if self.document_style {
+            0.0
+        } else {
+            theme.tabs.tongue_depth
+        }
+    }
+    fn inset(&self, theme: &Theme) -> f32 {
+        if self.document_style {
+            0.0
+        } else {
+            theme.tabs.indicator_inset
+        }
     }
     fn width(&self, theme: &Theme) -> f32 {
         self.item_width.unwrap_or(theme.layout.tab_width)
@@ -199,8 +220,10 @@ impl Tabs {
                             .into_stack_child()
                             .width(theme.controls.small_height)
                             .height(1.0)
-                            .flex_grow(0.0),
-                    ),
+                            .flex_grow(0.0)
+                            .flex_shrink(0.0),
+                    )
+                    .frame(self.width(theme), 16.0),
             )
         } else {
             button.content(text)
@@ -236,10 +259,8 @@ impl Tabs {
             .alignment(StackAlignment::Center)
             .gap(StackGap::None)
             .children(self.items.iter().map(|item| {
-                self.item_button(item, theme).frame(
-                    self.width(theme),
-                    theme.tabs.height - theme.tabs.tongue_depth,
-                )
+                self.item_button(item, theme)
+                    .frame(self.width(theme), theme.tabs.height - self.tongue(theme))
             }))
     }
 
@@ -256,9 +277,8 @@ impl Tabs {
     }
 
     fn indicator_points(&self, theme: &Theme) -> Vec<Point> {
-        let half_width = (self.width(theme) - theme.tabs.indicator_inset * 2.0) / 2.0;
-        let half_height =
-            (theme.tabs.height - theme.tabs.tongue_depth - theme.tabs.indicator_inset) / 2.0;
+        let half_width = (self.width(theme) - self.inset(theme) * 2.0) / 2.0;
+        let half_height = (theme.tabs.height - self.tongue(theme) - self.inset(theme)) / 2.0;
         let radius = theme
             .tabs
             .radius
@@ -284,6 +304,10 @@ impl Tabs {
             let (x, y) =
                 shape.corner_point(0, crate::continuous_corner::sample(index * 1024 / segments));
             points.push(Point::new(x, y));
+        }
+        if self.document_style {
+            points.extend([Point::new(right, bottom), Point::new(left, bottom)]);
+            return points;
         }
         let tongue_half = theme.tabs.tongue_width / 2.0;
         points.extend([
@@ -361,7 +385,7 @@ impl View for Tabs {
         if !self.enabled && self.interaction_state.indicator_shape.is_animating() {
             self.interaction_state.indicator_shape.reset();
         }
-        let strip_height = (context.theme.tabs.height - context.theme.tabs.tongue_depth)
+        let strip_height = (context.theme.tabs.height - self.tongue(context.theme))
             .min(bounds.size.height)
             .max(0.0);
         let strip_bounds = Rect::new(
@@ -370,28 +394,30 @@ impl View for Tabs {
             (self.width(context.theme) * self.items.len() as f32).min(bounds.size.width),
             strip_height,
         );
-        Rectangle::new()
-            .color(RectangleColor::Custom(context.theme.tabs.strip_background))
-            .radius(CornerRadius::Custom(14.0))
-            .paint(strip_bounds, context);
-        context.display_list.push(DrawCommand::FillRect {
-            rect: Rect::new(
-                strip_bounds.origin.x,
-                strip_bounds.origin.y + strip_height / 2.0,
-                strip_bounds.size.width,
-                strip_height / 2.0,
-            ),
-            color: context.theme.tabs.strip_background,
-        });
-        context.display_list.push(DrawCommand::FillRect {
-            rect: Rect::new(
-                strip_bounds.origin.x,
-                strip_bounds.origin.y + strip_height,
-                strip_bounds.size.width,
-                (bounds.size.height - strip_height).max(0.0),
-            ),
-            color: context.theme.tabs.content_background,
-        });
+        if !self.document_style {
+            Rectangle::new()
+                .color(RectangleColor::Custom(context.theme.tabs.strip_background))
+                .radius(CornerRadius::Custom(14.0))
+                .paint(strip_bounds, context);
+            context.display_list.push(DrawCommand::FillRect {
+                rect: Rect::new(
+                    strip_bounds.origin.x,
+                    strip_bounds.origin.y + strip_height / 2.0,
+                    strip_bounds.size.width,
+                    strip_height / 2.0,
+                ),
+                color: context.theme.tabs.strip_background,
+            });
+            context.display_list.push(DrawCommand::FillRect {
+                rect: Rect::new(
+                    strip_bounds.origin.x,
+                    strip_bounds.origin.y + strip_height,
+                    strip_bounds.size.width,
+                    (bounds.size.height - strip_height).max(0.0),
+                ),
+                color: context.theme.tabs.content_background,
+            });
+        }
         if self
             .items
             .iter()
@@ -404,7 +430,21 @@ impl View for Tabs {
                     context.theme.button.focus_ring,
                     context.theme.button.focus_ring_width,
                 ))
-                .paint(strip_bounds, context);
+                .paint(
+                    if self.document_style {
+                        Rect::new(
+                            strip_bounds.origin.x
+                                + self.selected_index(self.selection.get()).unwrap_or(0) as f32
+                                    * self.width(context.theme),
+                            strip_bounds.origin.y,
+                            self.width(context.theme),
+                            strip_bounds.size.height,
+                        )
+                    } else {
+                        strip_bounds
+                    },
+                    context,
+                );
         }
         if let Some(selected_index) = self.selected_index(self.selection.get()) {
             let width = self.width(context.theme);
@@ -415,7 +455,7 @@ impl View for Tabs {
                 .selection_motion
                 .sample_for_motion(fallback_center, context.theme.motion.omochi.enabled);
             let previous_direction = self.interaction_state.selection_motion.surface_direction();
-            let indicator_half_width = (width - context.theme.tabs.indicator_inset * 2.0) / 2.0;
+            let indicator_half_width = (width - self.inset(context.theme) * 2.0) / 2.0;
 
             if sample.direction != 0.0 && sample.pull_distance > 0.0 {
                 if previous_direction != 0.0 && previous_direction != sample.direction {
@@ -451,7 +491,7 @@ impl View for Tabs {
                     Instant::now() + Duration::from_millis(8),
                 );
             }
-            let inset = context.theme.tabs.indicator_inset;
+            let inset = self.inset(context.theme);
             let indicator_height = strip_height - inset;
             let center = Point::new(
                 sample.center,
@@ -493,7 +533,7 @@ impl View for Tabs {
         context: &mut EventContext<'_>,
     ) -> EventResult {
         let stack = self.stack(context.theme);
-        let strip_height = (context.theme().tabs.height - context.theme().tabs.tongue_depth)
+        let strip_height = (context.theme().tabs.height - self.tongue(context.theme()))
             .min(bounds.size.height)
             .max(0.0);
         let strip_bounds = Rect::new(
@@ -867,6 +907,56 @@ mod close_tests {
         assert_eq!(
             t.tab_centers(Rect::new(0., 0., 440., 45.), &theme),
             vec![110., 330.]
+        );
+    }
+}
+
+#[cfg(test)]
+mod document_tests {
+    use super::*;
+    use crate::{draw_command::DisplayList, state::State, typography::TextMeasurer};
+    #[test]
+    fn document_tabs_omit_the_group_backplate_and_ellipsize_full_titles() {
+        let state = State::new(1usize);
+        let theme = Theme::LIGHT;
+        let title =
+            "A very long terminal title with 日本語 and a directory path /Projects/abcdefghi";
+        let tabs = Tabs::new(state.binding())
+            .document_style()
+            .item_width(180.)
+            .closable_item(1, title, || {});
+        let mut list = DisplayList::new();
+        let mut text = TextMeasurer::new();
+        let mut nodes = vec![];
+        tabs.paint(
+            Rect::new(0., 0., 180., theme.tabs.height),
+            &mut PaintContext::new(&mut list, &theme, &theme.typography, &mut text)
+                .with_accessibility_nodes(&mut nodes),
+        );
+        let label = list
+            .commands()
+            .iter()
+            .find_map(|c| match c {
+                DrawCommand::DrawText { command } => Some(command),
+                _ => None,
+            })
+            .unwrap();
+        assert!(label.text.ends_with('…'), "{}", label.text);
+        assert!(label.bounds.size.width <= 180. - theme.controls.small_height);
+        assert!(nodes.iter().any(|n| n.label.as_deref() == Some(title)));
+        assert!(!list.commands().iter().any(|c| match c {
+            DrawCommand::FillRect { color, .. } | DrawCommand::FillRoundedRect { color, .. } =>
+                *color == theme.tabs.strip_background,
+            _ => false,
+        }));
+        let points = tabs.indicator_points(&theme);
+        assert_eq!(
+            points.iter().map(|p| p.x).fold(f32::INFINITY, f32::min),
+            -90.
+        );
+        assert_eq!(
+            points.iter().map(|p| p.y).fold(f32::INFINITY, f32::min),
+            -theme.tabs.height / 2.
         );
     }
 }
