@@ -2,17 +2,18 @@ use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Point, Rect, Size};
-use crate::layout::{StackAlignment, StackGap, ViewExt};
+use crate::layout::{IntoStackChild, StackAlignment, StackGap, ViewExt};
 use crate::platform::{Key, PointerButton};
 use crate::state::Binding;
 use crate::theme::{Color, CornerRadius, ShadowStyle, Theme};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 use std::time::{Duration, Instant};
+use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 
 use super::omochi_shape::{MagneticSelectionMotion, OmochiPreset, OmochiShape};
 use super::{
-    Button, ButtonInteractionState, ButtonStyle, HStack, Rectangle, RectangleColor, Text,
-    ZStackAlignment,
+    Button, ButtonInteractionState, ButtonStyle, HStack, Icon, Rectangle, RectangleColor,
+    SymbolName, Text, ZStackAlignment,
 };
 
 struct TabItem {
@@ -20,6 +21,8 @@ struct TabItem {
     label: String,
     enabled: bool,
     interaction: ButtonInteractionState,
+    close: Option<Rc<RefCell<Box<dyn FnMut()>>>>,
+    close_interaction: ButtonInteractionState,
 }
 
 const INDICATOR_DEFORMATION_ALLOWANCE: f32 = 34.0;
@@ -28,6 +31,7 @@ const INDICATOR_DEFORMATION_ALLOWANCE: f32 = 34.0;
 pub struct TabsInteractionState {
     indicator_shape: OmochiShape,
     selection_motion: MagneticSelectionMotion,
+    items: Rc<RefCell<BTreeMap<usize, (ButtonInteractionState, ButtonInteractionState)>>>,
 }
 
 impl TabsInteractionState {
@@ -35,6 +39,7 @@ impl TabsInteractionState {
         Self {
             indicator_shape: OmochiShape::displacement(OmochiPreset::SelectionIndicator),
             selection_motion: MagneticSelectionMotion::default(),
+            items: Rc::new(RefCell::new(BTreeMap::new())),
         }
     }
 }
@@ -51,6 +56,7 @@ pub struct Tabs {
     enabled: bool,
     accessibility_label: Option<String>,
     interaction_state: TabsInteractionState,
+    item_width: Option<f32>,
 }
 
 impl Tabs {
@@ -68,25 +74,63 @@ impl Tabs {
             enabled: true,
             accessibility_label: None,
             interaction_state,
+            item_width: None,
         }
     }
 
+    /// タブ1枚の幅を指定します。不正な値は標準幅へ戻します。
+    pub fn item_width(mut self, width: f32) -> Self {
+        self.item_width = (width.is_finite() && width > 0.0).then_some(width);
+        self
+    }
+    fn width(&self, theme: &Theme) -> f32 {
+        self.item_width.unwrap_or(theme.layout.tab_width)
+    }
+    /// 標準の閉じるボタン付きタブを追加します。閉じる操作は選択を変更しません。
+    pub fn closable_item(
+        mut self,
+        value: usize,
+        label: impl Into<String>,
+        on_close: impl FnMut() + 'static,
+    ) -> Self {
+        self = self.item(value, label);
+        self.items.last_mut().unwrap().close = Some(Rc::new(RefCell::new(Box::new(on_close))));
+        self
+    }
     pub fn item(mut self, value: usize, label: impl Into<String>) -> Self {
+        let (interaction, close_interaction) = self
+            .interaction_state
+            .items
+            .borrow_mut()
+            .entry(value)
+            .or_default()
+            .clone();
         self.items.push(TabItem {
             value,
             label: label.into(),
             enabled: true,
-            interaction: ButtonInteractionState::new(),
+            interaction,
+            close_interaction,
+            close: None,
         });
         self
     }
 
     pub fn disabled_item(mut self, value: usize, label: impl Into<String>) -> Self {
+        let (interaction, close_interaction) = self
+            .interaction_state
+            .items
+            .borrow_mut()
+            .entry(value)
+            .or_default()
+            .clone();
         self.items.push(TabItem {
             value,
             label: label.into(),
             enabled: false,
-            interaction: ButtonInteractionState::new(),
+            interaction,
+            close_interaction,
+            close: None,
         });
         self
     }
@@ -115,7 +159,7 @@ impl Tabs {
 
         let background = theme.tabs.background;
 
-        Button::with_interaction(item.interaction.clone())
+        let button = Button::with_interaction(item.interaction.clone())
             .content_padding(false)
             .style(ButtonStyle::Custom {
                 background,
@@ -135,25 +179,65 @@ impl Tabs {
             .enabled(enabled)
             .accessibility_role(AccessibilityRole::Tab)
             .accessibility_label(item.label.clone())
-            .accessibility_selected(selected)
-            .content(
-                Text::label(item.label.clone())
-                    .accessibility_hidden(true)
-                    .font_size(13.0)
-                    .weight(if selected { 600 } else { 500 })
-                    .alignment(crate::typography::TextAlignment::Center)
-                    .color(foreground)
-                    .height(16.0),
+            .accessibility_selected(selected);
+        let text = Text::label(item.label.clone())
+            .accessibility_hidden(true)
+            .font_size(13.0)
+            .weight(if selected { 600 } else { 500 })
+            .alignment(crate::typography::TextAlignment::Center)
+            .color(foreground)
+            .single_line(true)
+            .height(16.0);
+        if item.close.is_some() {
+            button.content(
+                HStack::new()
+                    .alignment(StackAlignment::Center)
+                    .gap(StackGap::None)
+                    .child(text.flex_grow(1.0).flex_shrink(1.0))
+                    .child(
+                        super::Spacer::new()
+                            .into_stack_child()
+                            .width(theme.controls.small_height)
+                            .height(1.0)
+                            .flex_grow(0.0),
+                    ),
             )
+        } else {
+            button.content(text)
+        }
     }
 
+    fn close_bounds(&self, index: usize, b: Rect, theme: &Theme) -> Rect {
+        let width = self.width(theme);
+        let size = theme.controls.small_height.min(width).min(b.size.height);
+        Rect::new(
+            b.origin.x + (index + 1) as f32 * width - size,
+            b.origin.y + (b.size.height - size) * 0.5,
+            size,
+            size,
+        )
+    }
+    fn close_button(&self, item: &TabItem) -> Button {
+        let close = item.close.clone();
+        Button::with_interaction(item.close_interaction.clone())
+            .content_padding(false)
+            .style(ButtonStyle::Ghost)
+            .enabled(self.enabled && item.enabled)
+            .accessibility_label(format!("Close {}", item.label))
+            .content(Icon::new(SymbolName::X).size(Theme::current().layout.compact_icon_size))
+            .on_click(move || {
+                if let Some(close) = &close {
+                    (close.borrow_mut())();
+                }
+            })
+    }
     fn stack(&self, theme: &Theme) -> HStack {
         HStack::new()
             .alignment(StackAlignment::Center)
             .gap(StackGap::None)
             .children(self.items.iter().map(|item| {
                 self.item_button(item, theme).frame(
-                    theme.layout.tab_width,
+                    self.width(theme),
                     theme.tabs.height - theme.tabs.tongue_depth,
                 )
             }))
@@ -167,12 +251,12 @@ impl Tabs {
         self.items
             .iter()
             .enumerate()
-            .map(|(index, _)| bounds.origin.x + theme.layout.tab_width * (index as f32 + 0.5))
+            .map(|(index, _)| bounds.origin.x + self.width(theme) * (index as f32 + 0.5))
             .collect()
     }
 
     fn indicator_points(&self, theme: &Theme) -> Vec<Point> {
-        let half_width = (theme.layout.tab_width - theme.tabs.indicator_inset * 2.0) / 2.0;
+        let half_width = (self.width(theme) - theme.tabs.indicator_inset * 2.0) / 2.0;
         let half_height =
             (theme.tabs.height - theme.tabs.tongue_depth - theme.tabs.indicator_inset) / 2.0;
         let radius = theme
@@ -264,7 +348,7 @@ impl Tabs {
 impl View for Tabs {
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
         constraints.constrain(Size::new(
-            context.theme.layout.tab_width * self.items.len() as f32,
+            self.width(context.theme) * self.items.len() as f32,
             context.theme.tabs.height,
         ))
     }
@@ -283,7 +367,7 @@ impl View for Tabs {
         let strip_bounds = Rect::new(
             bounds.origin.x,
             bounds.origin.y,
-            (context.theme.layout.tab_width * self.items.len() as f32).min(bounds.size.width),
+            (self.width(context.theme) * self.items.len() as f32).min(bounds.size.width),
             strip_height,
         );
         Rectangle::new()
@@ -323,7 +407,7 @@ impl View for Tabs {
                 .paint(strip_bounds, context);
         }
         if let Some(selected_index) = self.selected_index(self.selection.get()) {
-            let width = context.theme.layout.tab_width;
+            let width = self.width(context.theme);
             let centers = self.tab_centers(bounds, context.theme);
             let fallback_center = centers[selected_index];
             let sample = self
@@ -388,6 +472,18 @@ impl View for Tabs {
             context.display_list.push(DrawCommand::PopClip);
         }
         self.stack(context.theme).paint(strip_bounds, context);
+        self.interaction_state
+            .items
+            .borrow_mut()
+            .retain(|value, _| self.items.iter().any(|item| item.value == *value));
+        for (index, item) in self.items.iter().enumerate() {
+            if item.close.is_some() {
+                self.close_button(item).paint(
+                    self.close_bounds(index, strip_bounds, context.theme),
+                    context,
+                );
+            }
+        }
     }
 
     fn handle_event(
@@ -406,6 +502,19 @@ impl View for Tabs {
             bounds.size.width,
             strip_height,
         );
+        let mut close_result = EventResult::Ignored;
+        for (index, item) in self.items.iter().enumerate() {
+            if item.close.is_some() {
+                close_result = close_result.merge(self.close_button(item).handle_event(
+                    self.close_bounds(index, strip_bounds, context.theme()),
+                    event,
+                    context,
+                ));
+            }
+        }
+        if close_result.is_consumed() {
+            return close_result;
+        }
         let child_bounds = stack.child_bounds_for_event(strip_bounds, context);
         let centers = self.tab_centers(bounds, context.theme());
         let selected_index = self.selected_index(self.selection.get()).unwrap_or(0);
@@ -492,7 +601,7 @@ impl View for Tabs {
                 return EventResult::Consumed;
             }
         }
-        stack.handle_event(strip_bounds, event, context)
+        close_result.merge(stack.handle_event(strip_bounds, event, context))
     }
 }
 
@@ -683,5 +792,81 @@ mod tests {
             command,
             DrawCommand::FillPolygon { points, .. } if !points.is_empty()
         )));
+    }
+}
+
+#[cfg(test)]
+mod close_tests {
+    use super::*;
+    use crate::{state::State, typography::TextMeasurer};
+    #[test]
+    fn close_survives_rebuild_without_selecting_the_tab_or_starting_a_drag() {
+        let selected = State::new(1usize);
+        let state = TabsInteractionState::new();
+        let count = Rc::new(RefCell::new(0));
+        let theme = Theme::LIGHT;
+        let b = Rect::new(0., 0., 400., theme.tabs.height);
+        let mut text = TextMeasurer::new();
+        let mut cx = EventContext::new(&theme, &theme.typography, &mut text);
+        let build = || {
+            let count = count.clone();
+            Tabs::with_interaction(selected.binding(), state.clone())
+                .item_width(200.)
+                .item(1, "Shell")
+                .closable_item(2, "Build", move || *count.borrow_mut() += 1)
+        };
+        let tabs = build();
+        let close = tabs.close_bounds(
+            1,
+            Rect::new(0., 0., 400., theme.tabs.height - theme.tabs.tongue_depth),
+            &theme,
+        );
+        let p = Point::new(
+            close.origin.x + close.size.width / 2.,
+            close.origin.y + close.size.height / 2.,
+        );
+        tabs.handle_event(
+            b,
+            &ViewEvent::PointerPressed {
+                position: p,
+                button: PointerButton::Primary,
+            },
+            &mut cx,
+        );
+        build().handle_event(
+            b,
+            &ViewEvent::PointerReleased {
+                position: p,
+                button: PointerButton::Primary,
+            },
+            &mut cx,
+        );
+        assert_eq!(*count.borrow(), 1);
+        assert_eq!(selected.get(), 1);
+        assert!(!state.selection_motion.is_dragging());
+    }
+    #[test]
+    fn width_override_keeps_indicator_hit_geometry_and_measurement_together() {
+        let selected = State::new(0usize);
+        let t = Tabs::new(selected.binding())
+            .item_width(220.)
+            .item(0, "Shell")
+            .item(1, "Build");
+        let theme = Theme::LIGHT;
+        let mut text = TextMeasurer::new();
+        let mut m = MeasureContext {
+            theme: &theme,
+            typography: &theme.typography,
+            text_measurer: &mut text,
+        };
+        assert_eq!(
+            t.measure(Constraints::loose(Size::new(800., 100.)), &mut m)
+                .width,
+            440.
+        );
+        assert_eq!(
+            t.tab_centers(Rect::new(0., 0., 440., 45.), &theme),
+            vec![110., 330.]
+        );
     }
 }
