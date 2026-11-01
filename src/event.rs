@@ -580,14 +580,6 @@ impl EventDispatcher {
         context.modifiers = self.modifiers;
         context.focus_visible = self.focus_visible;
 
-        if matches!(event, PlatformEvent::KeyPressed { .. }) {
-            result = result.merge(root.handle_event(
-                bounds,
-                &ViewEvent::FocusVisibilityChanged { visible: true },
-                context,
-            ));
-        }
-
         if let PlatformEvent::Focused(focused) = event {
             self.window_focused = *focused;
             if *focused {
@@ -619,8 +611,6 @@ impl EventDispatcher {
             modifiers,
         } = event
         {
-            self.focus_visible = true;
-            context.focus_visible = true;
             // Give the focused control the first opportunity to consume Tab.
             // Multi-line editors use it as document input, while controls that
             // ignore it retain the normal keyboard focus traversal behavior.
@@ -637,6 +627,13 @@ impl EventDispatcher {
                 return result;
             }
 
+            self.focus_visible = true;
+            context.focus_visible = true;
+            result = result.merge(root.handle_event(
+                bounds,
+                &ViewEvent::FocusVisibilityChanged { visible: true },
+                context,
+            ));
             let target = self.next_focus(modifiers.shift());
             self.focused_bounds = target;
             return result.merge(root.handle_event(
@@ -1050,5 +1047,72 @@ mod tests {
         );
 
         assert_eq!(root.presses.get(), 1);
+    }
+}
+
+#[cfg(test)]
+mod focus_modality_regressions {
+    use super::*;
+    use std::cell::Cell;
+    struct Probe {
+        visible: Cell<bool>,
+        consume_tab: bool,
+    }
+    impl View for Probe {
+        fn paint(&self, _: Rect, _: &mut crate::view::PaintContext<'_>) {}
+        fn handle_event(&self, _: Rect, e: &ViewEvent, _: &mut EventContext<'_>) -> EventResult {
+            if let ViewEvent::FocusVisibilityChanged { visible } = e {
+                self.visible.set(*visible);
+            }
+            if self.consume_tab && matches!(e, ViewEvent::KeyPressed { key: Key::Tab, .. }) {
+                EventResult::Consumed
+            } else {
+                EventResult::Ignored
+            }
+        }
+    }
+    #[test]
+    fn typing_shortcuts_and_editor_tabs_do_not_show_unrelated_focus_rings() {
+        let theme = crate::theme::Theme::LIGHT;
+        let mut text = crate::typography::TextMeasurer::new();
+        let mut cx = EventContext::new(&theme, &theme.typography, &mut text);
+        let b = Rect::new(0., 0., 100., 40.);
+        let p = Probe {
+            visible: Cell::new(false),
+            consume_tab: true,
+        };
+        let mut d = EventDispatcher::new();
+        for (key, modifiers) in [
+            (Key::Character('a'), KeyModifiers::default()),
+            (
+                Key::Character('t'),
+                KeyModifiers::from_bits(KeyModifiers::CONTROL | KeyModifiers::SHIFT),
+            ),
+            (Key::Tab, KeyModifiers::default()),
+        ] {
+            d.dispatch(
+                &p,
+                b,
+                &PlatformEvent::KeyPressed { key, modifiers },
+                &mut cx,
+            );
+            assert!(!p.visible.get());
+            assert!(!cx.focus_visible());
+        }
+        let p = Probe {
+            visible: Cell::new(false),
+            consume_tab: false,
+        };
+        d.dispatch(
+            &p,
+            b,
+            &PlatformEvent::KeyPressed {
+                key: Key::Tab,
+                modifiers: KeyModifiers::default(),
+            },
+            &mut cx,
+        );
+        assert!(p.visible.get());
+        assert!(cx.focus_visible());
     }
 }
