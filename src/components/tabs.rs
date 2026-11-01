@@ -12,7 +12,7 @@ use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 
 use super::omochi_shape::{MagneticSelectionMotion, OmochiPreset, OmochiShape};
 use super::{
-    Button, ButtonInteractionState, ButtonStyle, HStack, Icon, Rectangle, RectangleColor,
+    Button, ButtonInteractionState, ButtonStyle, HStack, Icon, Padding, Rectangle, RectangleColor,
     SymbolName, Text, ZStackAlignment,
 };
 
@@ -207,14 +207,20 @@ impl Tabs {
             .weight(if selected { 600 } else { 500 })
             .alignment(crate::typography::TextAlignment::Center)
             .color(foreground)
-            .single_line(true)
-            .height(16.0);
+            .single_line(true);
         if item.close.is_some() {
             button.content(
                 HStack::new()
                     .alignment(StackAlignment::Center)
                     .gap(StackGap::None)
-                    .child(text.flex_grow(1.0).flex_shrink(1.0))
+                    .child(
+                        Padding::symmetric(theme.spacing.small, 0.0)
+                            .content(text)
+                            .layout()
+                            .height(16.0)
+                            .flex_grow(1.0)
+                            .flex_shrink(1.0),
+                    )
                     .child(
                         super::Spacer::new()
                             .into_stack_child()
@@ -226,7 +232,7 @@ impl Tabs {
                     .frame(self.width(theme), 16.0),
             )
         } else {
-            button.content(text)
+            button.content(text.height(16.0))
         }
     }
 
