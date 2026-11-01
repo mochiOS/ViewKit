@@ -14,6 +14,7 @@ pub struct NavigationSplitView<Sidebar, Detail> {
     minimum_detail_width: f32,
     sidebar_insets: Option<EdgeInsets>,
     shows_divider: bool,
+    detail_owns_surface: bool,
 }
 
 /// Width policy for the leading region of a [`NavigationSplitView`].
@@ -51,6 +52,7 @@ impl<Sidebar, Detail> NavigationSplitView<Sidebar, Detail> {
             minimum_detail_width: 320.0,
             sidebar_insets: None,
             shows_divider: true,
+            detail_owns_surface: false,
         }
     }
 
@@ -95,6 +97,28 @@ impl<Sidebar, Detail> NavigationSplitView<Sidebar, Detail> {
 
     pub fn shows_divider(mut self, shows_divider: bool) -> Self {
         self.shows_divider = shows_divider;
+        self
+    }
+
+    /// 詳細View自身がペインの背景・角丸・入力領域を管理するか指定します。
+    ///
+    /// 詳細Viewがツールバーと`Surface::pane()`を含む場合は`true`にします。
+    /// SplitViewは詳細領域のクローム下地だけを描画し、ペインを二重に描画・
+    /// クリップしません。子のSurfaceは引き続きウィンドウ全体を基準に角を判定します。
+    /// 既定の`false`では、詳細領域全体を標準ペインとして扱います。
+    ///
+    /// ## Parameters
+    /// - `owns_surface`: 詳細View自身がSurfaceを描画し、同じ形状へ入力を配送する場合は`true`。
+    ///
+    /// ## Returns
+    /// 設定を適用したSplitViewを返します。レイアウト領域は変更しません。
+    ///
+    /// ## Example
+    /// ```rust,ignore
+    /// NavigationSplitView::new(sidebar, toolbar_and_pane).detail_owns_surface(true)
+    /// ```
+    pub fn detail_owns_surface(mut self, owns_surface: bool) -> Self {
+        self.detail_owns_surface = owns_surface;
         self
     }
 
@@ -250,9 +274,13 @@ impl<Sidebar: View, Detail: View> View for NavigationSplitView<Sidebar, Detail> 
         Rectangle::new()
             .color(RectangleColor::SubtleSurface)
             .paint(detail, context);
-        Surface::pane().paint_content(detail, context, |context| {
-            self.detail.paint(detail, context)
-        });
+        if self.detail_owns_surface {
+            self.detail.paint(detail, context);
+        } else {
+            Surface::pane().paint_content(detail, context, |context| {
+                self.detail.paint(detail, context)
+            });
+        }
     }
 
     fn handle_event(
@@ -270,19 +298,32 @@ impl<Sidebar: View, Detail: View> View for NavigationSplitView<Sidebar, Detail> 
 
         if event.requires_broadcast() {
             return self.sidebar.handle_event(sidebar, event, context).merge(
-                Surface::pane().handle_content_event(detail, event, context, |event, context| {
-                    self.detail.handle_event(detail, event, context)
-                }),
+                self.handle_detail_event(detail, event, context),
             );
         }
         if event.is_inside(sidebar) {
             self.sidebar.handle_event(sidebar, event, context)
         } else if event.is_inside(detail) {
-            Surface::pane().handle_content_event(detail, event, context, |event, context| {
-                self.detail.handle_event(detail, event, context)
-            })
+            self.handle_detail_event(detail, event, context)
         } else {
             EventResult::Ignored
+        }
+    }
+}
+
+impl<Sidebar, Detail: View> NavigationSplitView<Sidebar, Detail> {
+    fn handle_detail_event(
+        &self,
+        bounds: Rect,
+        event: &ViewEvent,
+        context: &mut EventContext<'_>,
+    ) -> EventResult {
+        if self.detail_owns_surface {
+            self.detail.handle_event(bounds, event, context)
+        } else {
+            Surface::pane().handle_content_event(bounds, event, context, |event, context| {
+                self.detail.handle_event(bounds, event, context)
+            })
         }
     }
 }
@@ -380,6 +421,36 @@ mod tests {
             DrawCommand::FillRect { rect, .. } if rect.size.width == Theme::LIGHT.divider.thickness
         )));
     }
+    #[test]
+    fn child_owned_surface_does_not_receive_an_extra_pane_fill_or_clip() {
+        for theme in [Theme::LIGHT, Theme::DARK] {
+            for owns_surface in [false, true] {
+                let child_bounds = Rc::new(Cell::new(None));
+                let view = NavigationSplitView::new(
+                    Recorder(Rc::new(Cell::new(None))),
+                    Surface::pane().content(Recorder(child_bounds.clone())),
+                ).detail_owns_surface(owns_surface);
+                let mut list = DisplayList::new();
+                let mut text = TextMeasurer::new();
+                let app = Rect::new(0.0, 0.0, 800.0, 600.0);
+                let bounds = Rect::new(0.0, 48.0, 800.0, 552.0);
+                let (_, _, detail) = view.content_regions(bounds, &theme);
+                Surface::app().paint_content(app, &mut PaintContext::new(
+                    &mut list, &theme, &theme.typography, &mut text,
+                ).with_viewport_bounds(app), |context| view.paint(bounds, context));
+                assert_eq!(child_bounds.get(), Some(detail));
+                let expected = if owns_surface { 1 } else { 2 };
+                assert_eq!(list.commands().iter().filter(|cmd| matches!(cmd,
+                    DrawCommand::FillRect { rect, color }
+                        if *rect == detail && *color == theme.surface.pane_background
+                )).count(), expected);
+                assert_eq!(list.commands().iter().filter(|cmd| matches!(cmd,
+                    DrawCommand::PushRoundedCornersClip { rect, .. } if *rect == detail
+                )).count(), expected);
+            }
+        }
+    }
+
     #[test]
     fn split_owns_exactly_one_separator_outside_pane_content() {
         let theme = Theme::LIGHT;

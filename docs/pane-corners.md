@@ -40,3 +40,9 @@ app region, including outside the window runtime. Nested scopes restore their
 previous container after painting and event dispatch. Custom renderers that draw
 backgrounds directly must opt into a pane surface; arbitrary rectangles are not
 interpreted as semantic panes.
+
+When a split's detail view contains its own toolbar and `Surface::pane()`, use
+`NavigationSplitView::detail_owns_surface(true)`. The split then supplies only
+the chrome backdrop and lets the child surface own fill, clipping and input.
+Otherwise the split's full-height pane would remain visible through the child's
+corner cutouts. The default still wraps plain detail content in a standard pane.
