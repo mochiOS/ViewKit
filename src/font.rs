@@ -288,7 +288,12 @@ mod installed_font_tests {
         let file = mochios_fonts::catalogue(&current)
             .files
             .into_iter()
-            .find(|file| file.faces.iter().any(|face| face.family == "Inter"))
+            .find(|file| {
+                file.faces.iter().any(|face| {
+                    face.family == DEFAULT_UI_FONT_FAMILY
+                        || face.family == format!("{DEFAULT_UI_FONT_FAMILY} Variable")
+                })
+            })
             .unwrap();
         let root = std::env::temp_dir().join(format!(
             "mochios-protected-font-test-{}-{}",
@@ -329,8 +334,8 @@ mod installed_font_tests {
         let file = mochios_fonts::catalogue(&locations)
             .files
             .into_iter()
-            .find(|file| file.faces.iter().any(|face| face.family == "Inter"))
-            .expect("test environment supplies Inter through MOCHIOS_PREVIEW_FONTS_SYSTEM");
+            .find(|file| file.faces.iter().any(|face| face.family == DEFAULT_UI_FONT_FAMILY || face.family == format!("{DEFAULT_UI_FONT_FAMILY} Variable")))
+            .expect("test environment supplies the embedded UI family through MOCHIOS_PREVIEW_FONTS_SYSTEM");
         let mut system = create_font_system();
         let query = fontdb::Query {
             families: &[fontdb::Family::Name(DEFAULT_UI_FONT_FAMILY)],
