@@ -646,6 +646,19 @@ fn convert_key(key: &WinitKey) -> Option<Key> {
             NamedKey::End => Key::End,
             NamedKey::PageUp => Key::PageUp,
             NamedKey::PageDown => Key::PageDown,
+            NamedKey::Insert => Key::Insert,
+            NamedKey::F1 => Key::Function(1),
+            NamedKey::F2 => Key::Function(2),
+            NamedKey::F3 => Key::Function(3),
+            NamedKey::F4 => Key::Function(4),
+            NamedKey::F5 => Key::Function(5),
+            NamedKey::F6 => Key::Function(6),
+            NamedKey::F7 => Key::Function(7),
+            NamedKey::F8 => Key::Function(8),
+            NamedKey::F9 => Key::Function(9),
+            NamedKey::F10 => Key::Function(10),
+            NamedKey::F11 => Key::Function(11),
+            NamedKey::F12 => Key::Function(12),
             _ => return None,
         }),
         WinitKey::Character(text) => {
@@ -725,5 +738,25 @@ fn valid_scale_factor(scale_factor: f64) -> f64 {
         scale_factor
     } else {
         1.0
+    }
+}
+
+#[cfg(test)]
+mod extended_key_tests {
+    use super::*;
+    #[test]
+    fn developer_keys_keep_identity_across_the_host_backend() {
+        assert_eq!(
+            convert_key(&WinitKey::Named(NamedKey::F1)),
+            Some(Key::Function(1))
+        );
+        assert_eq!(
+            convert_key(&WinitKey::Named(NamedKey::F12)),
+            Some(Key::Function(12))
+        );
+        assert_eq!(
+            convert_key(&WinitKey::Named(NamedKey::Insert)),
+            Some(Key::Insert)
+        );
     }
 }

@@ -38,6 +38,10 @@ pub enum Key {
     End,
     PageUp,
     PageDown,
+    /// ファンクションキー。番号は 1〜12（F1〜F12）。
+    Function(u8),
+    /// 上書き入力などを切り替える Insert キー。
+    Insert,
     Character(char),
 }
 

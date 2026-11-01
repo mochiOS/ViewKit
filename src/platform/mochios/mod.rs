@@ -1503,6 +1503,10 @@ fn key_from_wire(keycode: u16, codepoint: u32) -> Option<Key> {
         KEY_DOWN => Key::ArrowDown,
         KEY_PAGE_UP => Key::PageUp,
         KEY_PAGE_DOWN => Key::PageDown,
+        mochi_user_platform::input::KEY_F1..=mochi_user_platform::input::KEY_F12 => {
+            Key::Function((keycode - mochi_user_platform::input::KEY_F1 + 1) as u8)
+        }
+        mochi_user_platform::input::KEY_INSERT => Key::Insert,
         _ => return None,
     })
 }
