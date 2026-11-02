@@ -101,7 +101,7 @@ pub use menu::{Menu, MenuItem};
 pub use menu_button::MenuButton;
 pub use message_bubble::{MessageBubble, MessageDirection};
 pub use navigation_layout::NavigationLayout;
-pub use navigation_split_view::{NavigationSplitView, SidebarWidth};
+pub use navigation_split_view::{NavigationSplitView, SidebarPlacement, SidebarWidth};
 pub use picker::Picker;
 pub use popover::Popover;
 pub use progress_bar::ProgressBar;

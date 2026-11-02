@@ -15,6 +15,17 @@ pub struct NavigationSplitView<Sidebar, Detail> {
     sidebar_insets: Option<EdgeInsets>,
     shows_divider: bool,
     detail_owns_surface: bool,
+    sidebar_placement: SidebarPlacement,
+}
+
+/// The edge used for a split view's sidebar or inspector.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SidebarPlacement {
+    /// Places navigation at the left edge, preserving the default layout.
+    #[default]
+    Leading,
+    /// Places an inspector or action-linked sidebar at the right edge.
+    Trailing,
 }
 
 /// Width policy for the leading region of a [`NavigationSplitView`].
@@ -53,7 +64,15 @@ impl<Sidebar, Detail> NavigationSplitView<Sidebar, Detail> {
             sidebar_insets: None,
             shows_divider: true,
             detail_owns_surface: false,
+            sidebar_placement: SidebarPlacement::Leading,
         }
+    }
+
+    /// Selects the sidebar edge. Painting, clipping, sizing and input routing
+    /// use the same regions; widths and insets keep their configured values.
+    pub fn sidebar_placement(mut self, placement: SidebarPlacement) -> Self {
+        self.sidebar_placement = placement;
+        self
     }
 
     /// Applies an explicit leading-region sizing policy.
@@ -126,8 +145,17 @@ impl<Sidebar, Detail> NavigationSplitView<Sidebar, Detail> {
     /// 仮想化した子Viewの入力判定でも、標準の描画と同じ領域を使用できます。
     /// サイドバーの内容用インセットは適用前の領域を返します。
     pub fn content_regions(&self, bounds: Rect, theme: &Theme) -> (Rect, Rect, Rect) {
-        Self::regions(bounds, self.resolved_sidebar_width(bounds.size.width, theme),
-            self.resolved_divider_width(theme))
+        let (mut sidebar, mut divider, mut detail) = Self::regions(
+            bounds,
+            self.resolved_sidebar_width(bounds.size.width, theme),
+            self.resolved_divider_width(theme),
+        );
+        if self.sidebar_placement == SidebarPlacement::Trailing {
+            sidebar.origin.x = bounds.origin.x + bounds.size.width - sidebar.size.width;
+            divider.origin.x = sidebar.origin.x - divider.size.width;
+            detail.origin.x = bounds.origin.x;
+        }
+        (sidebar, divider, detail)
     }
 
     fn resolved_insets(&self, theme: &Theme) -> EdgeInsets {
@@ -289,17 +317,14 @@ impl<Sidebar: View, Detail: View> View for NavigationSplitView<Sidebar, Detail> 
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
-        let (sidebar, _, detail) = Self::regions(
-            bounds,
-            self.resolved_sidebar_width(bounds.size.width, context.theme),
-            self.resolved_divider_width(context.theme),
-        );
+        let (sidebar, _, detail) = self.content_regions(bounds, context.theme);
         let sidebar = Self::sidebar_content(sidebar, self.resolved_insets(context.theme));
 
         if event.requires_broadcast() {
-            return self.sidebar.handle_event(sidebar, event, context).merge(
-                self.handle_detail_event(detail, event, context),
-            );
+            return self
+                .sidebar
+                .handle_event(sidebar, event, context)
+                .merge(self.handle_detail_event(detail, event, context));
         }
         if event.is_inside(sidebar) {
             self.sidebar.handle_event(sidebar, event, context)
@@ -429,24 +454,40 @@ mod tests {
                 let view = NavigationSplitView::new(
                     Recorder(Rc::new(Cell::new(None))),
                     Surface::pane().content(Recorder(child_bounds.clone())),
-                ).detail_owns_surface(owns_surface);
+                )
+                .detail_owns_surface(owns_surface);
                 let mut list = DisplayList::new();
                 let mut text = TextMeasurer::new();
                 let app = Rect::new(0.0, 0.0, 800.0, 600.0);
                 let bounds = Rect::new(0.0, 48.0, 800.0, 552.0);
                 let (_, _, detail) = view.content_regions(bounds, &theme);
-                Surface::app().paint_content(app, &mut PaintContext::new(
-                    &mut list, &theme, &theme.typography, &mut text,
-                ).with_viewport_bounds(app), |context| view.paint(bounds, context));
+                Surface::app().paint_content(
+                    app,
+                    &mut PaintContext::new(&mut list, &theme, &theme.typography, &mut text)
+                        .with_viewport_bounds(app),
+                    |context| view.paint(bounds, context),
+                );
                 assert_eq!(child_bounds.get(), Some(detail));
                 let expected = if owns_surface { 1 } else { 2 };
-                assert_eq!(list.commands().iter().filter(|cmd| matches!(cmd,
-                    DrawCommand::FillRect { rect, color }
-                        if *rect == detail && *color == theme.surface.pane_background
-                )).count(), expected);
-                assert_eq!(list.commands().iter().filter(|cmd| matches!(cmd,
-                    DrawCommand::PushRoundedCornersClip { rect, .. } if *rect == detail
-                )).count(), expected);
+                assert_eq!(
+                    list.commands()
+                        .iter()
+                        .filter(|cmd| matches!(cmd,
+                            DrawCommand::FillRect { rect, color }
+                                if *rect == detail && *color == theme.surface.pane_background
+                        ))
+                        .count(),
+                    expected
+                );
+                assert_eq!(
+                    list.commands()
+                        .iter()
+                        .filter(|cmd| matches!(cmd,
+                            DrawCommand::PushRoundedCornersClip { rect, .. } if *rect == detail
+                        ))
+                        .count(),
+                    expected
+                );
             }
         }
     }
@@ -467,5 +508,95 @@ mod tests {
         assert_eq!(list.commands().iter().filter(|command| matches!(command,
             DrawCommand::FillRect { rect, .. } if *rect == Rect::new(theme.layout.navigation_sidebar_width, 0.0, theme.divider.thickness, 600.0)
         )).count(), 1);
+    }
+}
+
+#[cfg(test)]
+mod trailing_tests {
+    use super::*;
+    use crate::{platform::PointerButton, typography::TextMeasurer};
+    use std::{cell::Cell, rc::Rc};
+    struct Capture {
+        paint: Rc<Cell<Option<Rect>>>,
+        input: Rc<Cell<Option<Rect>>>,
+    }
+    impl View for Capture {
+        fn paint(&self, b: Rect, _: &mut PaintContext<'_>) {
+            self.paint.set(Some(b));
+        }
+        fn handle_event(&self, b: Rect, e: &ViewEvent, _: &mut EventContext<'_>) -> EventResult {
+            if matches!(e, ViewEvent::PointerPressed { .. }) {
+                self.input.set(Some(b));
+                EventResult::Consumed
+            } else {
+                EventResult::Ignored
+            }
+        }
+    }
+    #[test]
+    fn trailing_regions_mirror_geometry_and_route_input_to_the_painted_sidebar() {
+        let side_p = Rc::new(Cell::new(None));
+        let side_e = Rc::new(Cell::new(None));
+        let detail_p = Rc::new(Cell::new(None));
+        let detail_e = Rc::new(Cell::new(None));
+        let split = NavigationSplitView::new(
+            Capture {
+                paint: side_p.clone(),
+                input: side_e.clone(),
+            },
+            Capture {
+                paint: detail_p.clone(),
+                input: detail_e.clone(),
+            },
+        )
+        .sidebar_insets(EdgeInsets::ZERO)
+        .sidebar_placement(SidebarPlacement::Trailing);
+        for theme in [Theme::LIGHT, Theme::DARK] {
+            for width in [0., 240., 520., 1000.] {
+                let b = Rect::new(7., 13., width, 480.);
+                let (side, divider, detail) = split.content_regions(b, &theme);
+                assert!((side.origin.x + side.size.width - b.origin.x - width).abs() < 0.01);
+                assert!((detail.origin.x - b.origin.x).abs() < 0.01);
+                assert!((detail.origin.x + detail.size.width - divider.origin.x).abs() < 0.01);
+                assert!((divider.origin.x + divider.size.width - side.origin.x).abs() < 0.01);
+                let mut list = crate::draw_command::DisplayList::new();
+                let mut text = TextMeasurer::new();
+                split.paint(
+                    b,
+                    &mut PaintContext::new(&mut list, &theme, &theme.typography, &mut text),
+                );
+                assert_eq!(side_p.get(), Some(side));
+                assert_eq!(detail_p.get(), Some(detail));
+                let mut c = EventContext::new(&theme, &theme.typography, &mut text);
+                if side.size.width > 0. {
+                    split.handle_event(
+                        b,
+                        &ViewEvent::PointerPressed {
+                            position: crate::geometry::Point::new(
+                                side.origin.x + side.size.width / 2.,
+                                20.,
+                            ),
+                            button: PointerButton::Primary,
+                        },
+                        &mut c,
+                    );
+                    assert_eq!(side_e.get(), Some(side));
+                }
+                if detail.size.width > 0. {
+                    split.handle_event(
+                        b,
+                        &ViewEvent::PointerPressed {
+                            position: crate::geometry::Point::new(
+                                detail.origin.x + detail.size.width / 2.,
+                                20.,
+                            ),
+                            button: PointerButton::Primary,
+                        },
+                        &mut c,
+                    );
+                    assert_eq!(detail_e.get(), Some(detail));
+                }
+            }
+        }
     }
 }
