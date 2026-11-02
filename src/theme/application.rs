@@ -3,6 +3,8 @@ use super::{Color, ColorTokens, FigmaTokens, ShadowSet, ShadowTokens};
 /// Colors and elevation used by desktop-shell surfaces.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ShellTokens {
+    /// ウィンドウとDockなどのデスクトップ面で共通の角丸半径です。
+    pub desktop_corner_radius: f32,
     pub bar_background: Color,
     pub window_background: Color,
     pub window_border: Color,
@@ -40,6 +42,7 @@ pub struct ShellTokens {
 
 impl ShellTokens {
     pub const LIGHT: Self = Self {
+        desktop_corner_radius: super::window_elevation::CORNER_RADIUS,
         bar_background: Color::rgba(250, 250, 250, 100),
         window_background: Color::rgb(255, 255, 255),
         window_border: Color::rgba(0, 0, 0, super::window_elevation::BORDER_ALPHA),
@@ -77,6 +80,7 @@ impl ShellTokens {
     };
 
     pub const DARK: Self = Self {
+        desktop_corner_radius: super::window_elevation::CORNER_RADIUS,
         bar_background: Color::rgba(28, 28, 30, 180),
         window_background: Color::rgb(36, 36, 38),
         window_border: Color::rgba(255, 255, 255, 38),

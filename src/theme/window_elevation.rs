@@ -38,3 +38,6 @@ pub const INACTIVE: [Layer; 1] = [Layer {
 }];
 /// Outer edge coverage for the default light window material.
 pub const BORDER_ALPHA: u8 = 24;
+
+/// Shared desktop surface corner setback, in logical pixels.
+pub const CORNER_RADIUS: f32 = 26.5;
