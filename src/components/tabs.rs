@@ -13,7 +13,7 @@ use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 use super::omochi_shape::{MagneticSelectionMotion, OmochiPreset, OmochiShape};
 use super::{
     Button, ButtonInteractionState, ButtonStyle, HStack, Icon, Padding, Rectangle, RectangleColor,
-    SymbolName, Text, ZStackAlignment,
+    Spacer, SymbolName, Text, ZStackAlignment,
 };
 
 struct TabItem {
@@ -32,6 +32,7 @@ pub struct TabsInteractionState {
     indicator_shape: OmochiShape,
     selection_motion: MagneticSelectionMotion,
     items: Rc<RefCell<BTreeMap<usize, (ButtonInteractionState, ButtonInteractionState)>>>,
+    activation_origin: Rc<std::cell::Cell<Option<Point>>>,
 }
 
 impl TabsInteractionState {
@@ -40,6 +41,7 @@ impl TabsInteractionState {
             indicator_shape: OmochiShape::displacement(OmochiPreset::SelectionIndicator),
             selection_motion: MagneticSelectionMotion::default(),
             items: Rc::new(RefCell::new(BTreeMap::new())),
+            activation_origin: Rc::new(std::cell::Cell::new(None)),
         }
     }
 }
@@ -58,6 +60,9 @@ pub struct Tabs {
     interaction_state: TabsInteractionState,
     item_width: Option<f32>,
     document_style: bool,
+    compact_style: bool,
+    selected_content: Option<Rc<dyn View>>,
+    on_selected_activate: Option<Rc<RefCell<Box<dyn FnMut()>>>>,
 }
 
 impl Tabs {
@@ -77,6 +82,9 @@ impl Tabs {
             interaction_state,
             item_width: None,
             document_style: false,
+            compact_style: false,
+            selected_content: None,
+            on_selected_activate: None,
         }
     }
 
@@ -88,7 +96,38 @@ impl Tabs {
     /// 文書向けのタブ表示に切り替えます。グループの背景枠とインセットを使いません。
     pub fn document_style(mut self) -> Self {
         self.document_style = true;
+        self.compact_style = false;
         self
+    }
+    /// Uses a standalone segmented surface with shared continuous corners on
+    /// every edge, without a document tongue or enclosing group background.
+    pub fn compact_style(mut self) -> Self {
+        self.document_style = true;
+        self.compact_style = true;
+        self
+    }
+    /// Replaces the selected tab's label with an embedded control, such as an
+    /// address field. The shared tab surface and close button are retained.
+    /// Disabled tabs display their ordinary label instead of interactive content.
+    pub fn selected_content(mut self, content: impl View + 'static) -> Self {
+        self.selected_content = Some(Rc::new(content));
+        self
+    }
+    /// Invokes a callback when the already-selected tab is clicked without a
+    /// drag, or activated with Enter/Space. Close buttons remain independent.
+    pub fn on_selected_activate(mut self, callback: impl FnMut() + 'static) -> Self {
+        self.on_selected_activate = Some(Rc::new(RefCell::new(Box::new(callback))));
+        self
+    }
+    fn embedded(&self, item: &TabItem) -> Option<SelectedTabContent> {
+        if !self.enabled || !item.enabled || self.selection.get() != item.value {
+            return None;
+        }
+        Some(SelectedTabContent {
+            content: self.selected_content.clone()?,
+            label: item.label.clone(),
+            has_close: item.close.is_some(),
+        })
     }
     fn tongue(&self, theme: &Theme) -> f32 {
         if self.document_style {
@@ -265,8 +304,15 @@ impl Tabs {
             .alignment(StackAlignment::Center)
             .gap(StackGap::None)
             .children(self.items.iter().map(|item| {
-                self.item_button(item, theme)
-                    .frame(self.width(theme), theme.tabs.height - self.tongue(theme))
+                if let Some(content) = self.embedded(item) {
+                    // The embedded control owns focus; the replaced label button
+                    // must not retain a focus ring or intercept editing keys.
+                    item.interaction.reset();
+                    content.frame(self.width(theme), theme.tabs.height - self.tongue(theme))
+                } else {
+                    self.item_button(item, theme)
+                        .frame(self.width(theme), theme.tabs.height - self.tongue(theme))
+                }
             }))
     }
 
@@ -293,6 +339,18 @@ impl Tabs {
         let right = half_width;
         let top = -half_height;
         let bottom = half_height;
+        if self.compact_style {
+            let shape = crate::continuous_corner::shape(
+                Rect::new(left, top, half_width * 2.0, half_height * 2.0),
+                [radius; 4],
+            );
+            let mut points = Vec::new();
+            shape.for_each_point(
+                crate::continuous_corner::polygon_segments(shape.max_radius()),
+                |(x, y)| points.push(Point::new(x, y)),
+            );
+            return points;
+        }
         let shape = crate::continuous_corner::shape(
             Rect::new(left, top, half_width * 2.0, half_height * 2.0),
             [radius, radius, 0.0, 0.0],
@@ -388,6 +446,9 @@ impl View for Tabs {
         node.label = self.accessibility_label.clone();
         node.enabled = self.enabled;
         context.record_accessibility(node);
+        // Build embedded content before inspecting label focus, so a label that
+        // was replaced this frame cannot flash its old keyboard focus ring.
+        let stack = self.stack(context.theme);
         if !self.enabled && self.interaction_state.indicator_shape.is_animating() {
             self.interaction_state.indicator_shape.reset();
         }
@@ -517,7 +578,7 @@ impl View for Tabs {
             );
             context.display_list.push(DrawCommand::PopClip);
         }
-        self.stack(context.theme).paint(strip_bounds, context);
+        stack.paint(strip_bounds, context);
         self.interaction_state
             .items
             .borrow_mut()
@@ -558,7 +619,7 @@ impl View for Tabs {
                 ));
             }
         }
-        if close_result.is_consumed() {
+        if close_result.is_consumed() && !event.requires_broadcast() {
             return close_result;
         }
         let child_bounds = stack.child_bounds_for_event(strip_bounds, context);
@@ -569,11 +630,40 @@ impl View for Tabs {
             .copied()
             .unwrap_or(bounds.origin.x);
 
+        if let Some((item, frame)) = self
+            .items
+            .get(selected_index)
+            .zip(child_bounds.get(selected_index))
+        {
+            if let Some(content) = self.embedded(item) {
+                let inside = event.position().is_some_and(|p| frame.contains(p));
+                if event.requires_broadcast() || inside {
+                    let result = content.handle_event(*frame, event, context);
+                    if result.is_consumed() || inside {
+                        // Focus changes must reach the replaced/inactive labels
+                        // too, even when an embedded editor consumes the event.
+                        if event.requires_broadcast() {
+                            for (other, frame) in self.items.iter().zip(&child_bounds) {
+                                close_result = close_result.merge(
+                                    self.item_button(other, context.theme())
+                                        .handle_event(*frame, event, context),
+                                );
+                            }
+                        }
+                        return close_result.merge(result);
+                    }
+                }
+            }
+        }
+
         match event {
             ViewEvent::PointerPressed {
                 position,
                 button: PointerButton::Primary,
             } if self.enabled && bounds.contains(*position) && !centers.is_empty() => {
+                self.interaction_state
+                    .activation_origin
+                    .set(Some(*position));
                 self.interaction_state.selection_motion.begin_drag(
                     position.x,
                     current_center,
@@ -616,8 +706,24 @@ impl View for Tabs {
                         .selection_motion
                         .select(current_center, centers[index]);
                 }
+                let activate = self.enabled
+                    && self.items[index].enabled
+                    && index == selected_index
+                    && self
+                        .interaction_state
+                        .activation_origin
+                        .take()
+                        .is_some_and(|origin| {
+                            (position.x - origin.x).hypot(position.y - origin.y)
+                                <= context.theme.spacing.small
+                        });
                 self.selection
                     .set_without_notification(self.items[index].value);
+                if activate {
+                    if let Some(callback) = &self.on_selected_activate {
+                        (callback.borrow_mut())();
+                    }
+                }
                 if let Some(target_bounds) = child_bounds.get(index).copied() {
                     context.request_keyboard_focus(target_bounds);
                 }
@@ -635,6 +741,23 @@ impl View for Tabs {
             _ => {}
         }
 
+        if matches!(
+            event,
+            ViewEvent::KeyPressed {
+                key: Key::Enter | Key::Space,
+                ..
+            }
+        ) && self
+            .items
+            .get(selected_index)
+            .is_some_and(|item| self.enabled && item.enabled && item.interaction.is_focused())
+        {
+            if let Some(callback) = &self.on_selected_activate {
+                (callback.borrow_mut())();
+                context.request_redraw();
+                return EventResult::Consumed;
+            }
+        }
         if let Some(index) = self.keyboard_target(event) {
             if let Some(target_bounds) = child_bounds.get(index).copied() {
                 self.selection
@@ -648,6 +771,50 @@ impl View for Tabs {
             }
         }
         close_result.merge(stack.handle_event(strip_bounds, event, context))
+    }
+}
+
+struct SelectedTabContent {
+    content: Rc<dyn View>,
+    label: String,
+    has_close: bool,
+}
+impl SelectedTabContent {
+    fn layout(&self, theme: &Theme) -> HStack {
+        let mut row = HStack::new()
+            .alignment(StackAlignment::Center)
+            .gap(StackGap::None)
+            .child(
+                Padding::symmetric(theme.spacing.small, 0.0)
+                    .content(self.content.clone())
+                    .layout()
+                    .flex_grow(1.0),
+            );
+        if self.has_close {
+            row = row.child(
+                Spacer::new()
+                    .into_stack_child()
+                    .width(theme.controls.small_height)
+                    .flex_grow(0.0)
+                    .flex_shrink(0.0),
+            );
+        }
+        row
+    }
+}
+impl View for SelectedTabContent {
+    fn measure(&self, c: Constraints, m: &mut MeasureContext<'_>) -> Size {
+        self.layout(m.theme).measure(c, m)
+    }
+    fn paint(&self, b: Rect, c: &mut PaintContext<'_>) {
+        let mut node = AccessibilityNode::new(AccessibilityRole::Tab, b);
+        node.label = Some(self.label.clone());
+        node.selected = true;
+        c.record_accessibility(node);
+        self.layout(c.theme).paint(b, c);
+    }
+    fn handle_event(&self, b: Rect, e: &ViewEvent, c: &mut EventContext<'_>) -> EventResult {
+        self.layout(c.theme()).handle_event(b, e, c)
     }
 }
 
@@ -964,5 +1131,257 @@ mod document_tests {
             points.iter().map(|p| p.y).fold(f32::INFINITY, f32::min),
             -theme.tabs.height / 2.
         );
+    }
+}
+
+#[cfg(test)]
+mod selected_content_tests {
+    use super::*;
+    use crate::{
+        components::{TextField, TextFieldInteractionState},
+        draw_command::DisplayList,
+        event::EventDispatcher,
+        platform::{ButtonState, KeyModifiers, PlatformEvent},
+        state::State,
+        typography::TextMeasurer,
+    };
+    #[test]
+    fn embedded_editor_owns_pointer_caret_and_arrow_keys_and_reserves_the_close_target() {
+        let selected = State::new(0usize);
+        let state = TextFieldInteractionState::new();
+        let closed = Rc::new(std::cell::Cell::new(false));
+        let callback = closed.clone();
+        let tabs = Tabs::new(selected.binding())
+            .document_style()
+            .item_width(200.)
+            .closable_item(0, "First", move || callback.set(true))
+            .item(1, "Second")
+            .selected_content(
+                TextField::with_interaction(state.clone())
+                    .placeholder("URL")
+                    .bordered(false),
+            );
+        let b = Rect::new(0., 0., 400., 40.);
+        let theme = Theme::LIGHT;
+        let mut text = TextMeasurer::new();
+        let mut list = DisplayList::new();
+        let mut nodes = vec![];
+        tabs.paint(
+            b,
+            &mut PaintContext::new(&mut list, &theme, &theme.typography, &mut text)
+                .with_accessibility_nodes(&mut nodes),
+        );
+        let field = nodes
+            .iter()
+            .find(|n| n.role == AccessibilityRole::TextField)
+            .unwrap()
+            .bounds;
+        let close = nodes
+            .iter()
+            .find(|n| n.label.as_deref() == Some("Close First"))
+            .unwrap()
+            .bounds;
+        assert!(field.intersection(close).is_none());
+        assert!(
+            nodes
+                .iter()
+                .any(|n| n.role == AccessibilityRole::Tab && n.selected)
+        );
+        let mut d = EventDispatcher::new();
+        d.set_accessibility_nodes(&nodes);
+        let mut c = EventContext::new(&theme, &theme.typography, &mut text);
+        d.dispatch(&tabs, b, &PlatformEvent::Focused(true), &mut c);
+        d.dispatch(
+            &tabs,
+            b,
+            &PlatformEvent::PointerMoved {
+                x: field.origin.x + 4.,
+                y: field.origin.y + field.size.height / 2.,
+            },
+            &mut c,
+        );
+        for state in [ButtonState::Pressed, ButtonState::Released] {
+            d.dispatch(
+                &tabs,
+                b,
+                &PlatformEvent::PointerButton {
+                    button: PointerButton::Primary,
+                    state,
+                },
+                &mut c,
+            );
+        }
+        d.dispatch(
+            &tabs,
+            b,
+            &PlatformEvent::TextInput {
+                text: "abcd".into(),
+            },
+            &mut c,
+        );
+        assert_eq!(state.value(), "abcd");
+        assert!(
+            state.is_focused(),
+            "embedded focus must survive reconciliation"
+        );
+        state.set_selection(2..2);
+        d.dispatch(&tabs, b, &PlatformEvent::ArrowLeft, &mut c);
+        assert_eq!(selected.get(), 0);
+        assert_eq!(state.selection_range(), 1..1);
+        d.dispatch(
+            &tabs,
+            b,
+            &PlatformEvent::PointerMoved {
+                x: close.origin.x + close.size.width / 2.,
+                y: close.origin.y + close.size.height / 2.,
+            },
+            &mut c,
+        );
+        for state in [ButtonState::Pressed, ButtonState::Released] {
+            d.dispatch(
+                &tabs,
+                b,
+                &PlatformEvent::PointerButton {
+                    button: PointerButton::Primary,
+                    state,
+                },
+                &mut c,
+            );
+        }
+        assert!(closed.get());
+        assert_eq!(selected.get(), 0);
+    }
+    #[test]
+    fn disabled_tabs_do_not_expose_an_enabled_embedded_control() {
+        let selected = State::new(0usize);
+        let tabs = Tabs::new(selected.binding())
+            .item(0, "Tab")
+            .selected_content(TextField::new(State::new(String::new()).binding()))
+            .enabled(false);
+        let theme = Theme::LIGHT;
+        let mut text = TextMeasurer::new();
+        let mut list = DisplayList::new();
+        let mut nodes = vec![];
+        tabs.paint(
+            Rect::new(0., 0., 200., 40.),
+            &mut PaintContext::new(&mut list, &theme, &theme.typography, &mut text)
+                .with_accessibility_nodes(&mut nodes),
+        );
+        assert!(!nodes.iter().any(|n| n.role == AccessibilityRole::TextField));
+    }
+}
+
+#[cfg(test)]
+mod compact_activation_tests {
+    use super::*;
+    use crate::{platform::KeyModifiers, state::State, typography::TextMeasurer};
+    #[test]
+    fn only_a_selected_label_click_activates_editing_not_a_selection_drag_or_close() {
+        let selected = State::new(0usize);
+        let edits = Rc::new(std::cell::Cell::new(0));
+        let closes = Rc::new(std::cell::Cell::new(0));
+        let edit = edits.clone();
+        let close = closes.clone();
+        let tabs = Tabs::new(selected.binding())
+            .compact_style()
+            .item_width(200.)
+            .closable_item(0, "One", move || close.set(close.get() + 1))
+            .item(1, "Two")
+            .on_selected_activate(move || edit.set(edit.get() + 1));
+        let theme = Theme::LIGHT;
+        let b = Rect::new(0., 0., 400., 40.);
+        let mut text = TextMeasurer::new();
+        let mut c = EventContext::new(&theme, &theme.typography, &mut text);
+        let mut click = |x: f32, release: f32| {
+            tabs.handle_event(
+                b,
+                &ViewEvent::PointerPressed {
+                    position: Point::new(x, 20.),
+                    button: PointerButton::Primary,
+                },
+                &mut c,
+            );
+            tabs.handle_event(
+                b,
+                &ViewEvent::PointerReleased {
+                    position: Point::new(release, 20.),
+                    button: PointerButton::Primary,
+                },
+                &mut c,
+            );
+        };
+        click(250., 250.);
+        assert_eq!(selected.get(), 1);
+        assert_eq!(edits.get(), 0);
+        click(250., 250.);
+        assert_eq!(edits.get(), 1);
+        click(250., 290.);
+        assert_eq!(edits.get(), 1);
+        click(188., 188.);
+        assert_eq!(closes.get(), 1);
+        assert_eq!(edits.get(), 1);
+        drop(click);
+        let mut list = crate::draw_command::DisplayList::new();
+        let mut nodes = vec![];
+        tabs.paint(
+            b,
+            &mut PaintContext::new(
+                &mut list,
+                &theme,
+                &theme.typography,
+                &mut TextMeasurer::new(),
+            )
+            .with_accessibility_nodes(&mut nodes),
+        );
+        let target = nodes
+            .iter()
+            .find(|n| n.role == AccessibilityRole::Tab && n.selected)
+            .unwrap()
+            .bounds;
+        tabs.handle_event(
+            b,
+            &ViewEvent::KeyboardFocusRequested {
+                bounds: Some(target),
+            },
+            &mut c,
+        );
+        tabs.handle_event(
+            b,
+            &ViewEvent::KeyPressed {
+                key: Key::Enter,
+                modifiers: KeyModifiers::default(),
+            },
+            &mut c,
+        );
+        assert_eq!(edits.get(), 2);
+        tabs.enabled(false).handle_event(
+            b,
+            &ViewEvent::KeyPressed {
+                key: Key::Enter,
+                modifiers: KeyModifiers::default(),
+            },
+            &mut c,
+        );
+        assert_eq!(edits.get(), 2);
+    }
+    #[test]
+    fn compact_surface_uses_the_same_continuous_curve_on_all_four_edges() {
+        let selected = State::new(0usize);
+        let tabs = Tabs::new(selected.binding())
+            .compact_style()
+            .item_width(240.)
+            .item(0, "Tab");
+        let theme = Theme::LIGHT;
+        let points = tabs.indicator_points(&theme);
+        let w = Tabs::width(&tabs, &theme);
+        let h = theme.tabs.height;
+        let radius = theme.tabs.radius.resolve(&theme.radius, w, h);
+        let shape = crate::continuous_corner::shape(Rect::new(-w / 2., -h / 2., w, h), [radius; 4]);
+        let mut expected = vec![];
+        shape.for_each_point(
+            crate::continuous_corner::polygon_segments(shape.max_radius()),
+            |(x, y)| expected.push(Point::new(x, y)),
+        );
+        assert_eq!(points, expected);
     }
 }
