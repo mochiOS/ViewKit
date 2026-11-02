@@ -405,6 +405,12 @@ impl Button {
     }
 
     fn horizontal_padding(&self, theme: &Theme) -> f32 {
+        // Symbol-only buttons share IconButton's square target and padding.
+        if self.leading_symbol.is_some()
+            && self.label.as_ref().is_some_and(|label| label.is_empty())
+        {
+            return ((self.size.height(theme) - self.symbol_size(theme)) * 0.5).max(0.0);
+        }
         if self.toolbar {
             if self.label.as_ref().is_some_and(|label| label.is_empty()) {
                 theme.spacing.extra_small
@@ -1191,7 +1197,10 @@ impl View for Button {
             (measured.width + symbol_width + horizontal_padding * 2.0).max(
                 if self.toolbar && label.is_empty() {
                     self.size.height(context.theme)
-                } else if self.size == ButtonSize::Small || self.toolbar {
+                } else if self.size == ButtonSize::Small
+                    || self.toolbar
+                    || (label.is_empty() && self.leading_symbol.is_some())
+                {
                     0.0
                 } else {
                     context.theme.controls.button_min_width

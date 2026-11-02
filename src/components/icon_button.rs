@@ -160,10 +160,7 @@ impl IconButton {
     fn button(&self, theme: &Theme, icon_color: Color) -> Button {
         let size = self.resolved_size();
         let control_size = size.height(theme);
-        let icon_size = self.size.map_or_else(
-            || self.icon.control_size(theme.layout),
-            |size| size.icon_size(theme),
-        );
+        let icon_size = size.icon_size(theme);
 
         let mut button = Button::with_interaction(self.interaction_state.button.clone())
             .content_padding(false)
@@ -299,4 +296,77 @@ fn color_with_opacity(color: Color, opacity: f32) -> Color {
     };
 
     color.with_alpha((color.alpha as f32 * opacity).round() as u8)
+}
+
+#[cfg(test)]
+mod spacing_tests {
+    use super::*;
+    use crate::draw_command::{DisplayList, DrawCommand};
+    use crate::typography::TextMeasurer;
+
+    #[test]
+    fn symbol_only_button_apis_share_target_and_artwork_padding() {
+        for theme in [Theme::LIGHT, Theme::DARK] {
+            for size in [ButtonSize::Small, ButtonSize::Medium, ButtonSize::Large] {
+                for symbol in [
+                    SymbolName::ArrowBackward,
+                    SymbolName::Plus,
+                    SymbolName::More,
+                ] {
+                    let mut views: Vec<Box<dyn View>> = vec![
+                        Box::new(Button::new("").leading_symbol(symbol).size(size)),
+                        Box::new(IconButton::new(symbol).size(size)),
+                        Box::new(super::super::MenuButton::new("More", symbol).size(size)),
+                    ];
+                    if size == ButtonSize::Small {
+                        views.push(Box::new(IconButton::new(symbol)));
+                    }
+                    let mut reference = None;
+                    for view in views {
+                        let mut text = TextMeasurer::new();
+                        let measured = view.measure(
+                            Constraints::loose(Size::new(200., 100.)),
+                            &mut MeasureContext {
+                                theme: &theme,
+                                typography: &theme.typography,
+                                text_measurer: &mut text,
+                            },
+                        );
+                        assert_eq!(
+                            measured,
+                            Size::new(size.height(&theme), size.height(&theme))
+                        );
+                        let bounds = Rect::new(10., 20., measured.width, measured.height);
+                        let mut list = DisplayList::new();
+                        view.paint(
+                            bounds,
+                            &mut PaintContext::new(&mut list, &theme, &theme.typography, &mut text),
+                        );
+                        let svg = list
+                            .commands()
+                            .iter()
+                            .find_map(|command| match command {
+                                DrawCommand::DrawSvg { command } => Some(command),
+                                _ => None,
+                            })
+                            .expect("symbol must paint");
+                        let content = svg.svg.content_bounds();
+                        let scale = svg.bounds.size.width / svg.svg.width();
+                        let left = svg.bounds.origin.x + content.x * scale - bounds.origin.x;
+                        let right = bounds.origin.x + bounds.size.width
+                            - (svg.bounds.origin.x + (content.x + content.width) * scale);
+                        assert!((left - right).abs() < 0.01);
+                        assert!(
+                            left >= (size.height(&theme) - size.icon_size(&theme)) * 0.5 - 0.01
+                        );
+                        if let Some(reference) = reference {
+                            assert_eq!(svg.bounds, reference);
+                        } else {
+                            reference = Some(svg.bounds);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

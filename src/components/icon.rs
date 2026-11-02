@@ -7,20 +7,11 @@ use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 use crate::draw_command::DrawCommand;
 use crate::geometry::{Rect, Size};
 use crate::svg::{SvgContentBounds, SvgData};
-use crate::theme::{Color, LayoutTokens};
+use crate::theme::Color;
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 use std::sync::OnceLock;
 
 include!(concat!(env!("OUT_DIR"), "/symbols.rs"));
-
-impl SymbolName {
-    pub(crate) const fn control_size(self, layout: LayoutTokens) -> f32 {
-        match self {
-            Self::ArrowTop | Self::ArrowUp => layout.compact_icon_size,
-            _ => layout.control_icon_size,
-        }
-    }
-}
 
 #[deprecated(since = "2.1.0", note = "use `SymbolName` instead")]
 pub type IconName = SymbolName;
