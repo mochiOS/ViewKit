@@ -70,6 +70,19 @@ pub(crate) fn clip_polygon(mut subject: Vec<ClipVertex>, clip: &[(f32, f32)]) ->
     for index in 0..clip.len() {
         let start = clip[index];
         let end = clip[(index + 1) % clip.len()];
+        // Convex clips usually leave an interior triangle unchanged. Keep the
+        // existing allocation and attributes instead of copying it per edge.
+        let inside_count = subject
+            .iter()
+            .filter(|vertex| edge_contains(start, end, vertex.position, clockwise))
+            .count();
+        if inside_count == subject.len() {
+            continue;
+        }
+        if inside_count == 0 {
+            subject.clear();
+            return subject;
+        }
         let Some(mut previous) = subject.last().copied() else {
             return subject;
         };
@@ -214,5 +227,110 @@ mod tests {
         assert!((color[1] - 100.0 / 255.0 * alpha).abs() < 0.0001);
         assert!((color[2] - 50.0 / 255.0 * alpha).abs() < 0.0001);
         assert!((color[3] - alpha).abs() < 0.0001);
+    }
+}
+
+#[cfg(test)]
+mod optimization_tests {
+    use super::*;
+    fn reference_clip_polygon(
+        mut subject: Vec<ClipVertex>,
+        clip: &[(f32, f32)],
+    ) -> Vec<ClipVertex> {
+        if subject.len() < 3 || clip.len() < 3 {
+            return Vec::new();
+        }
+        let clockwise = polygon_area(&clip) >= 0.0;
+        let mut scratch = Vec::new();
+        for index in 0..clip.len() {
+            let start = clip[index];
+            let end = clip[(index + 1) % clip.len()];
+            let Some(mut previous) = subject.last().copied() else {
+                return subject;
+            };
+            scratch.clear();
+            let mut previous_inside = edge_contains(start, end, previous.position, clockwise);
+            for current in subject.iter().copied() {
+                let current_inside = edge_contains(start, end, current.position, clockwise);
+                if current_inside != previous_inside {
+                    scratch.push(intersect_edge(previous, current, start, end));
+                }
+                if current_inside {
+                    scratch.push(current);
+                }
+                previous = current;
+                previous_inside = current_inside;
+            }
+            core::mem::swap(&mut subject, &mut scratch);
+            if subject.is_empty() {
+                return subject;
+            }
+        }
+        subject
+    }
+
+    fn vertices(points: &[(f32, f32)]) -> Vec<ClipVertex> {
+        points
+            .iter()
+            .map(|&position| ClipVertex {
+                position,
+                uv: [position.0 * 0.01, position.1 * 0.02],
+                color: [0.2, 0.4, position.0 * 0.001, 0.8],
+            })
+            .collect()
+    }
+
+    #[test]
+    fn fast_clipping_matches_reference_including_interpolated_attributes() {
+        let shape = crate::continuous_corner::shape(Rect::new(0., 0., 160., 100.), [26.5; 4]);
+        let mut clip = Vec::new();
+        shape.for_each_point(32, |p| clip.push(p));
+        for reverse in [false, true] {
+            if reverse {
+                clip.reverse();
+            }
+            for x in (-20..180).step_by(7) {
+                for y in (-20..120).step_by(7) {
+                    let triangle = vertices(&[
+                        (x as f32, y as f32),
+                        (x as f32 + 17.25, y as f32 - 5.),
+                        (x as f32 + 8., y as f32 + 22.5),
+                    ]);
+                    let expected = reference_clip_polygon(triangle.clone(), &clip);
+                    let actual = clip_polygon(triangle, &clip);
+                    let attributes = |v: Vec<ClipVertex>| {
+                        v.into_iter()
+                            .map(|v| (v.position, v.uv, v.color))
+                            .collect::<Vec<_>>()
+                    };
+                    assert_eq!(attributes(actual), attributes(expected));
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "manual clipping CPU benchmark"]
+    fn benchmark_mostly_interior_edges() {
+        let shape = crate::continuous_corner::shape(Rect::new(0., 0., 800., 600.), [26.5; 4]);
+        let mut clip = Vec::new();
+        shape.for_each_point(32, |p| clip.push(p));
+        let triangle = vertices(&[(-2., 200.), (16., 190.), (16., 210.)]);
+        for (label, f) in [
+            (
+                "reference",
+                reference_clip_polygon as fn(Vec<ClipVertex>, &[(f32, f32)]) -> Vec<ClipVertex>,
+            ),
+            (
+                "optimized",
+                clip_polygon as fn(Vec<ClipVertex>, &[(f32, f32)]) -> Vec<ClipVertex>,
+            ),
+        ] {
+            let start = std::time::Instant::now();
+            for _ in 0..10_000 {
+                std::hint::black_box(f(std::hint::black_box(triangle.clone()), &clip));
+            }
+            eprintln!("clip {label}: {:?}", start.elapsed());
+        }
     }
 }
