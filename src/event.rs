@@ -466,6 +466,9 @@ impl EventDispatcher {
         })
     }
 
+    /// キーボード移動の候補を更新します。未フォーカス状態を維持し、
+    /// 消えたコントロールから別のコントロールへ自動で移動しません。
+    /// ダイアログのフォーカス範囲への移動と明示的な要求は別に扱います。
     pub fn set_accessibility_nodes(&mut self, nodes: &[AccessibilityNode]) {
         let scope_entries: Vec<(usize, Rect)> = nodes
             .iter()
@@ -530,15 +533,14 @@ impl EventDispatcher {
             return;
         }
 
-        let focus_is_valid = self
+        // None is an intentional state (startup, blank click, or explicit clear).
+        // A disappearing control loses focus; it must not select a sibling.
+        if self
             .focused_bounds
-            .is_some_and(|focused| self.focus_order.contains(&focused));
-        if !focus_is_valid {
-            let target = self.focus_order.first().copied();
-            if self.focused_bounds != target {
-                self.focused_bounds = target;
-                self.pending_focus_request = Some(target);
-            }
+            .is_some_and(|focused| !self.focus_order.contains(&focused))
+        {
+            self.focused_bounds = None;
+            self.pending_focus_request = Some(None);
         }
     }
 
@@ -582,16 +584,7 @@ impl EventDispatcher {
 
         if let PlatformEvent::Focused(focused) = event {
             self.window_focused = *focused;
-            if *focused {
-                let focus_is_valid = self
-                    .focused_bounds
-                    .is_some_and(|bounds| self.focus_order.contains(&bounds));
-                if !focus_is_valid {
-                    let target = self.focus_order.first().copied();
-                    self.focused_bounds = target;
-                    self.pending_focus_request = Some(target);
-                }
-            } else {
+            if !focused {
                 self.pointer_position = None;
                 self.focused_bounds = None;
                 self.pending_focus_request = None;
@@ -962,7 +955,7 @@ mod tests {
     }
 
     #[test]
-    fn first_focusable_node_becomes_the_initial_keyboard_focus() {
+    fn startup_does_not_assign_keyboard_focus_to_the_first_control() {
         let bounds = Rect::new(12.0, 24.0, 320.0, 200.0);
         let mut editor = AccessibilityNode::new(AccessibilityRole::TextField, bounds);
         editor.focusable = true;
@@ -971,8 +964,8 @@ mod tests {
         dispatcher.window_focused = true;
         dispatcher.set_accessibility_nodes(&[editor]);
 
-        assert_eq!(dispatcher.focused_bounds, Some(bounds));
-        assert_eq!(dispatcher.pending_focus_request, Some(Some(bounds)));
+        assert_eq!(dispatcher.focused_bounds, None);
+        assert_eq!(dispatcher.pending_focus_request, None);
     }
 
     #[test]
@@ -992,7 +985,7 @@ mod tests {
     }
 
     #[test]
-    fn initial_focus_waits_until_a_focusable_node_is_painted() {
+    fn later_controls_do_not_acquire_initial_focus() {
         let bounds = Rect::new(0.0, 0.0, 240.0, 160.0);
         let mut editor = AccessibilityNode::new(AccessibilityRole::TextField, bounds);
         editor.focusable = true;
@@ -1003,7 +996,7 @@ mod tests {
         assert_eq!(dispatcher.pending_focus_request, None);
 
         dispatcher.set_accessibility_nodes(&[editor]);
-        assert_eq!(dispatcher.pending_focus_request, Some(Some(bounds)));
+        assert_eq!(dispatcher.pending_focus_request, None);
     }
 
     #[test]
@@ -1114,5 +1107,123 @@ mod focus_modality_regressions {
         );
         assert!(p.visible.get());
         assert!(cx.focus_visible());
+    }
+}
+
+#[cfg(test)]
+mod unfocused_state_tests {
+    use super::*;
+    use crate::accessibility::AccessibilityRole;
+    use crate::{
+        components::TextField, components::TextFieldInteractionState, draw_command::DisplayList,
+        theme::Theme, typography::TextMeasurer, view::PaintContext,
+    };
+    #[test]
+    fn clicking_blank_space_clears_a_real_text_field_across_repaint_and_activation() {
+        let state = TextFieldInteractionState::new();
+        let field = TextField::with_interaction(state.clone());
+        let theme = Theme::LIGHT;
+        let bounds = Rect::new(0., 0., 300., 200.);
+        let control = Rect::new(0., 0., 200., 32.);
+        let mut text = TextMeasurer::new();
+        let mut nodes = vec![];
+        let mut list = DisplayList::new();
+        field.paint(
+            control,
+            &mut PaintContext::new(&mut list, &theme, &theme.typography, &mut text)
+                .with_accessibility_nodes(&mut nodes),
+        );
+        struct Root<'a>(&'a TextField, Rect);
+        impl View for Root<'_> {
+            fn paint(&self, _: Rect, _: &mut PaintContext<'_>) {}
+            fn handle_event(
+                &self,
+                _: Rect,
+                e: &ViewEvent,
+                c: &mut EventContext<'_>,
+            ) -> EventResult {
+                self.0.handle_event(self.1, e, c)
+            }
+        }
+        let root = Root(&field, control);
+        let mut d = EventDispatcher::new();
+        d.set_accessibility_nodes(&nodes);
+        let mut c = EventContext::new(&theme, &theme.typography, &mut text);
+        d.dispatch(&root, bounds, &PlatformEvent::Focused(true), &mut c);
+        d.set_accessibility_nodes(&nodes);
+        assert!(!state.is_focused());
+        for (x, y) in [(10., 10.), (250., 150.)] {
+            d.dispatch(&root, bounds, &PlatformEvent::PointerMoved { x, y }, &mut c);
+            d.dispatch(
+                &root,
+                bounds,
+                &PlatformEvent::PointerButton {
+                    button: PointerButton::Primary,
+                    state: ButtonState::Pressed,
+                },
+                &mut c,
+            );
+            d.dispatch(
+                &root,
+                bounds,
+                &PlatformEvent::PointerButton {
+                    button: PointerButton::Primary,
+                    state: ButtonState::Released,
+                },
+                &mut c,
+            );
+            assert_eq!(state.is_focused(), x < 200.);
+            if x < 200. { d.dispatch(&root,bounds,&PlatformEvent::TextInput {text:"kept".into()},&mut c); assert_eq!(state.value(),"kept"); }
+        }
+        d.set_accessibility_nodes(&nodes);
+        d.dispatch(
+            &root,
+            bounds,
+            &PlatformEvent::TextInput {
+                text: "must not type".into(),
+            },
+            &mut c,
+        );
+        assert_eq!(state.value(), "kept");
+        assert_eq!(d.focused_bounds, None);
+        assert!(!state.is_focused());
+        d.dispatch(&root, bounds, &PlatformEvent::Focused(false), &mut c);
+        d.dispatch(&root, bounds, &PlatformEvent::Focused(true), &mut c);
+        d.set_accessibility_nodes(&nodes);
+        assert_eq!(d.focused_bounds, None);
+        d.dispatch(
+            &root,
+            bounds,
+            &PlatformEvent::KeyPressed {
+                key: Key::Tab,
+                modifiers: KeyModifiers::default(),
+            },
+            &mut c,
+        );
+        assert_eq!(d.focused_bounds, Some(control));
+        assert!(state.is_focused());
+    }
+    #[test]
+    fn disappearing_control_and_modal_restore_do_not_focus_an_unrelated_control() {
+        let a = Rect::new(0., 0., 100., 30.);
+        let b = Rect::new(0., 40., 100., 30.);
+        let mut first = AccessibilityNode::new(AccessibilityRole::Button, a);
+        first.focusable = true;
+        let mut second = AccessibilityNode::new(AccessibilityRole::Button, b);
+        second.focusable = true;
+        let mut d = EventDispatcher::new();
+        d.window_focused = true;
+        d.focused_bounds = Some(a);
+        d.set_accessibility_nodes(&[second.clone()]);
+        assert_eq!(d.focused_bounds, None);
+        assert_eq!(d.pending_focus_request, Some(None));
+        let mut scope =
+            AccessibilityNode::new(AccessibilityRole::Dialog, Rect::new(0., 0., 200., 200.));
+        scope.focus_scope = true;
+        d.set_accessibility_nodes(&[scope, second.clone()]);
+        assert_eq!(d.focused_bounds, Some(b));
+        d.set_accessibility_nodes(&[first, second]);
+        assert_eq!(d.focused_bounds, None);
+        assert_eq!(d.pending_focus_request, Some(None));
     }
 }
