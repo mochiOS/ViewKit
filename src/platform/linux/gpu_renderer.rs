@@ -2,8 +2,9 @@ use std::collections::HashMap;
 use std::mem;
 use std::rc::Rc;
 
+use super::gpu_scene::decode_scene as decode;
 use cosmic_text::{Buffer, FontSystem, SwashCache};
-use mochios_viewkit_gpu_protocol::{VERTEX_STRIDE, decode};
+use mochios_viewkit_gpu_protocol::VERTEX_STRIDE;
 use winit::event_loop::OwnedDisplayHandle;
 use winit::window::Window;
 
@@ -389,7 +390,9 @@ impl Renderer for GpuRenderer {
             self.scene_renderer.invalidate_fonts();
             self.retained_valid = false;
             self.viewport.logical_bounds()
-        } else { dirty_bounds };
+        } else {
+            dirty_bounds
+        };
         let Some((frame, view)) = self.acquire_frame()? else {
             return Ok(());
         };
@@ -520,9 +523,7 @@ impl Renderer for GpuRenderer {
                 bind_group,
             });
         }
-        let vertex_count = decode(&self.scene_bytes)
-            .map_err(|_| GpuRendererError::InvalidScene)?
-            .vertex_count() as usize;
+        let vertex_count = self.scene_renderer.vertex_count();
         self.ensure_vertex_capacity(vertex_count);
         let scene = decode(&self.scene_bytes).map_err(|_| GpuRendererError::InvalidScene)?;
         self.queue

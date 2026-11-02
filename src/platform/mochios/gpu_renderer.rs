@@ -5,10 +5,14 @@ use crate::gpu_clip::{ClipRegion, ClipShape, ClipVertex, clip_polygon, premultip
 use cosmic_text::{CacheKey, SwashContent, SwashImage};
 
 #[cfg(target_os = "linux")]
+use super::encode_scene_header as encode_header;
+#[cfg(target_os = "linux")]
 use super::{ATLAS_HEIGHT, ATLAS_WIDTH};
 #[cfg(not(target_os = "linux"))]
+use mochios_viewkit_gpu_protocol::encode_header;
+#[cfg(not(target_os = "linux"))]
 use mochios_viewkit_gpu_protocol::{ATLAS_HEIGHT, ATLAS_WIDTH};
-use mochios_viewkit_gpu_protocol::{HEADER_LEN, VERTEX_STRIDE, encode_header};
+use mochios_viewkit_gpu_protocol::{HEADER_LEN, VERTEX_STRIDE};
 const CURVE_SEGMENTS: usize = 48;
 #[cfg(not(target_os = "linux"))]
 const IMAGE_RASTER_CACHE_CAPACITY: usize = 128;
@@ -17,7 +21,8 @@ const SVG_RASTER_CACHE_CAPACITY: usize = 128;
 #[cfg(target_os = "linux")]
 const SVG_RASTER_CACHE_CAPACITY: usize = 1024;
 
-#[derive(Clone, Copy)]
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Vertex {
     position: [f32; 3],
     uv: [f32; 2],
@@ -293,7 +298,9 @@ impl GpuSceneRenderer {
         Ok(())
     }
 
-    pub(crate) fn invalidate_fonts(&mut self) { self.clear_atlas_cache(); }
+    pub(crate) fn invalidate_fonts(&mut self) {
+        self.clear_atlas_cache();
+    }
 
     fn clear_atlas_cache(&mut self) {
         self.atlas.clear();
@@ -350,7 +357,7 @@ impl GpuSceneRenderer {
             .and_then(|size| size.checked_add(atlas_bytes))
             .ok_or(MochiOsBackendError::ArithmeticOverflow)?;
         output.clear();
-        output.resize(total, 0);
+        output.resize(HEADER_LEN, 0);
         encode_header(
             output,
             viewport.physical_width,
@@ -367,25 +374,41 @@ impl GpuSceneRenderer {
                 "[ViewKit] GPU scene encoding failed: {error:?}; viewport={}x{}, vertices={vertex_count}",
                 viewport.physical_width, viewport.physical_height
             );
+            #[cfg(target_os = "linux")]
+            if error == mochios_viewkit_gpu_protocol::DecodeError::TooManyVertices {
+                return MochiOsBackendError::TooManyVertices {
+                    vertices: vertex_count,
+                    limit: super::MAX_SCENE_VERTICES,
+                };
+            }
             MochiOsBackendError::InvalidWindowSize
         })?;
-        let mut offset = HEADER_LEN;
-        for vertex in &self.vertices {
-            for value in vertex
-                .position
-                .into_iter()
-                .chain(vertex.uv)
-                .chain(vertex.color)
-            {
-                output[offset..offset + 4].copy_from_slice(&value.to_bits().to_le_bytes());
-                offset += 4;
+        output.reserve(total.saturating_sub(HEADER_LEN));
+        #[cfg(target_endian = "little")]
+        output.extend_from_slice(bytemuck::cast_slice(&self.vertices));
+        #[cfg(target_endian = "big")]
+        {
+            for vertex in &self.vertices {
+                for value in vertex
+                    .position
+                    .into_iter()
+                    .chain(vertex.uv)
+                    .chain(vertex.color)
+                {
+                    output.extend_from_slice(&value.to_bits().to_le_bytes());
+                }
             }
         }
         let atlas_start = atlas_data_y as usize * row_bytes;
-        output[offset..].copy_from_slice(&self.atlas[atlas_start..atlas_start + atlas_bytes]);
+        output.extend_from_slice(&self.atlas[atlas_start..atlas_start + atlas_bytes]);
+        debug_assert_eq!(output.len(), total);
         Ok(())
     }
 
+    #[cfg(target_os = "linux")]
+    pub(crate) fn vertex_count(&self) -> usize {
+        self.vertices.len()
+    }
     fn current_clip(&self) -> Rect {
         self.clips
             .last()
@@ -1576,7 +1599,6 @@ fn ellipse_points(rect: Rect) -> Vec<(f32, f32)> {
         })
         .collect()
 }
-
 
 fn triangulate_polygon(points: &[Point]) -> Vec<[Point; 3]> {
     const EPSILON: f32 = 0.00001;

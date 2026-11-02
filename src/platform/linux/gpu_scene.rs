@@ -13,6 +13,37 @@ use crate::renderer::Viewport;
 use crate::svg::SvgData;
 use crate::theme::Color;
 
+// Host buffers grow on demand; do not use the native IPC receiver's 64K budget.
+// At most 9 MiB of vertex data, independently validated by both encoder and decoder.
+pub(super) const MAX_SCENE_VERTICES: u32 = 262_144;
+pub(super) fn decode_scene(
+    bytes: &[u8],
+) -> Result<mochios_viewkit_gpu_protocol::Scene<'_>, mochios_viewkit_gpu_protocol::DecodeError> {
+    mochios_viewkit_gpu_protocol::decode_with_vertex_limit(bytes, MAX_SCENE_VERTICES)
+}
+#[allow(clippy::too_many_arguments)]
+fn encode_scene_header(
+    output: &mut [u8],
+    width: u32,
+    height: u32,
+    count: u32,
+    aw: u32,
+    ah: u32,
+    ay: u32,
+    adh: u32,
+) -> Result<usize, mochios_viewkit_gpu_protocol::DecodeError> {
+    mochios_viewkit_gpu_protocol::encode_header_with_vertex_limit(
+        output,
+        width,
+        height,
+        count,
+        aw,
+        ah,
+        ay,
+        adh,
+        MAX_SCENE_VERTICES,
+    )
+}
 const TEXT_LAYOUT_CACHE_CAPACITY: usize = 1024;
 
 // Host GPUs can keep a larger glyph/vector cache without changing the native
@@ -26,6 +57,8 @@ pub enum GpuSceneError {
     ArithmeticOverflow,
     #[error("GPU scene exceeded its supported dimensions or atlas capacity")]
     InvalidWindowSize,
+    #[error("GPU scene has {vertices} vertices; host budget is {limit}")]
+    TooManyVertices { vertices: u32, limit: u32 },
 }
 
 type MochiOsBackendError = GpuSceneError;
@@ -100,6 +133,43 @@ mod tests {
     use crate::draw_command::ImageSampling;
     use crate::geometry::Size;
 
+    #[test]
+    fn a_crowded_desktop_above_64k_vertices_uses_the_host_budget() {
+        let viewport = Viewport::new(crate::geometry::Size::new(1920., 1031.), 1920, 1031, 1.0);
+        let mut list = DisplayList::new();
+        for n in 0..100 {
+            list.push(DrawCommand::FillRoundedRect {
+                rect: Rect::new((n % 10) as f32 * 180., (n / 10) as f32 * 90., 160., 80.),
+                radius: 26.5,
+                color: Color::WHITE,
+            });
+        }
+        let mut bytes = vec![];
+        let mut renderer = GpuSceneRenderer::new();
+        renderer
+            .render(
+                viewport,
+                viewport.logical_bounds(),
+                &list,
+                &mut crate::font::create_font_system(),
+                &mut SwashCache::new(),
+                &mut HashMap::new(),
+                false,
+                &mut bytes,
+            )
+            .unwrap();
+        let decoded = decode_scene(&bytes).unwrap();
+        assert!(decoded.vertex_count() > 65_536);
+        assert!(decoded.vertex_count() <= MAX_SCENE_VERTICES);
+        assert!(matches!(
+            mochios_viewkit_gpu_protocol::decode(&bytes),
+            Err(mochios_viewkit_gpu_protocol::DecodeError::TooManyVertices)
+        ));
+        assert_eq!(
+            decoded.vertices.len(),
+            renderer.vertex_count() * mochios_viewkit_gpu_protocol::VERTEX_STRIDE
+        );
+    }
     #[test]
     fn hidpi_keeps_shapes_images_and_vectors_in_the_same_logical_space() {
         let image = ImageData::from_rgba8(2, 2, vec![255; 16]).unwrap();
@@ -390,21 +460,34 @@ mod tests {
         assert!(!crate::continuous_corner::shape(rect, radii).contains(point));
         let mut list = DisplayList::new();
         list.push(DrawCommand::PushRoundedCornersClip { rect, radii });
-        list.push(DrawCommand::FillRect { rect, color: Color::WHITE });
+        list.push(DrawCommand::FillRect {
+            rect,
+            color: Color::WHITE,
+        });
         list.push(DrawCommand::PopClip);
         let bytes = encode(&mut GpuSceneRenderer::new(), &list);
         let decoded = mochios_viewkit_gpu_protocol::decode(&bytes).unwrap();
         assert!(decoded.vertex_count() > 0);
         for triangle in decoded.vertices.chunks_exact(36 * 3) {
-            let p: Vec<_> = triangle.chunks_exact(36).map(|vertex| (
-                (f32::from_le_bytes(vertex[..4].try_into().unwrap()) + 1.0) * 640.0,
-                (f32::from_le_bytes(vertex[4..8].try_into().unwrap()) + 1.0) * 400.0,
-            )).collect();
-            let edges: Vec<_> = (0..3).map(|i| {
-                let (a,b) = (p[i], p[(i+1)%3]);
-                (b.0-a.0)*(point.1-a.1)-(b.1-a.1)*(point.0-a.0)
-            }).collect();
-            assert!(!(edges.iter().all(|v| *v >= 0.0) || edges.iter().all(|v| *v <= 0.0)), "pane background covers its cutout");
+            let p: Vec<_> = triangle
+                .chunks_exact(36)
+                .map(|vertex| {
+                    (
+                        (f32::from_le_bytes(vertex[..4].try_into().unwrap()) + 1.0) * 640.0,
+                        (f32::from_le_bytes(vertex[4..8].try_into().unwrap()) + 1.0) * 400.0,
+                    )
+                })
+                .collect();
+            let edges: Vec<_> = (0..3)
+                .map(|i| {
+                    let (a, b) = (p[i], p[(i + 1) % 3]);
+                    (b.0 - a.0) * (point.1 - a.1) - (b.1 - a.1) * (point.0 - a.0)
+                })
+                .collect();
+            assert!(
+                !(edges.iter().all(|v| *v >= 0.0) || edges.iter().all(|v| *v <= 0.0)),
+                "pane background covers its cutout"
+            );
         }
     }
 }
