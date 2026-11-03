@@ -27,6 +27,13 @@ pub struct ContextMenuRequest {
 }
 
 impl ContextMenuRequest {
+    /// Creates a native menu request with an identity shared with ViewKit's
+    /// built-in menus. Use the returned `request_id` to match its result;
+    /// application-local counters can collide with menus opened by controls.
+    pub fn new(position: Point, items: Vec<ContextMenuItem>) -> Self {
+        Self { request_id: Self::next_id(), position, items }
+    }
+
     pub(crate) fn next_id() -> u64 {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
