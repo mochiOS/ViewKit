@@ -111,6 +111,7 @@ pub struct ListRow {
     title: String,
     custom_content: Option<Rc<dyn View>>,
     subtitle: Option<String>,
+    single_line: bool,
     trailing: Option<String>,
 
     selected: bool,
@@ -135,6 +136,7 @@ impl ListRow {
             title: title.into(),
             custom_content: None,
             subtitle: None,
+            single_line: false,
             trailing: None,
 
             selected: false,
@@ -160,6 +162,13 @@ impl ListRow {
     /// ListRowが管理し、内容には行の前景色が継承されます。
     pub fn content(mut self, content: impl View + 'static) -> Self {
         self.custom_content = Some(Rc::new(content));
+        self
+    }
+
+    /// Keeps the title and subtitle to one truncated line each. The default
+    /// continues to wrap; use this for compact lists of long names or URLs.
+    pub fn single_line(mut self, single_line: bool) -> Self {
+        self.single_line = single_line;
         self
     }
 
@@ -214,7 +223,7 @@ impl ListRow {
             .alignment(StackAlignment::Center)
             .gap(StackGap::Small)
             .child(
-                Text::label(self.title.clone())
+                Text::label(self.title.clone()).single_line(self.single_line)
                     .accessibility_hidden(true)
                     .color(appearance.foreground)
                     .weight(if self.selected { 600 } else { 500 })
@@ -244,7 +253,7 @@ impl ListRow {
 
             if let Some(subtitle) = self.subtitle.as_ref() {
                 subtitle_row = subtitle_row.child(
-                    Text::caption(subtitle.clone())
+                    Text::caption(subtitle.clone()).single_line(self.single_line)
                         .color(appearance.secondary)
                         .layout()
                         .flex_grow(1.0),
@@ -475,5 +484,24 @@ mod tests {
         assert!(commands.commands().iter().any(|command| matches!(
             command, DrawCommand::FillRoundedRect { radius, .. } if *radius > 0.0
         )));
+    }
+}
+
+#[cfg(test)]
+mod compact_text_tests {
+    use super::*;
+    use crate::{theme::Theme,typography::TextMeasurer};
+    #[test]
+    fn compact_rows_truncate_long_names_without_changing_default_wrapping() {
+        for theme in [Theme::LIGHT, Theme::DARK] {
+            let title="A very long saved document title that must stay within the row";
+            let subtitle="https://example.org/a/very/long/document/address";
+            let mut text=TextMeasurer::new();
+            let mut context=MeasureContext {theme:&theme,typography:&theme.typography,text_measurer:&mut text};
+            let constraints=Constraints::loose(Size::new(140.,1000.));
+            let wrapped=ListRow::new(title).subtitle(subtitle).measure(constraints,&mut context);
+            let compact=ListRow::new(title).subtitle(subtitle).single_line(true).measure(constraints,&mut context);
+            assert!(compact.height<wrapped.height);assert!(compact.width<=140.);
+        }
     }
 }
