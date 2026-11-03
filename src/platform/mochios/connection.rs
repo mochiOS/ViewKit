@@ -189,7 +189,7 @@ pub(super) fn ipc_wait_object_handles_raw(
     buf_ptr: *mut u8,
     buf_len: usize,
     handles: &mut mochi_user_platform::ipc::IpcObjectHandles,
-) -> Result<usize, MochiOsBackendError> {
+) -> Result<(u64, usize), MochiOsBackendError> {
     *handles = mochi_user_platform::ipc::IpcObjectHandles::default();
     let msg = syscall_result(syscall::call4(
         syscall::SyscallNumber::IpcRecvObjectHandles,
@@ -198,7 +198,7 @@ pub(super) fn ipc_wait_object_handles_raw(
         handles as *mut mochi_user_platform::ipc::IpcObjectHandles as u64,
         endpoint,
     ))?;
-    Ok((msg & 0xffff_ffff) as usize)
+    Ok((msg >> 32, (msg & 0xffff_ffff) as usize))
 }
 
 pub(super) unsafe fn zero_raw(ptr: *mut u8, len: usize) {
@@ -295,14 +295,14 @@ impl ReceivedHandles {
 }
 
 pub(super) fn try_recv_event()
--> Result<Option<(usize, [u8; EVENT_BUFFER_SIZE], ReceivedHandles)>, MochiOsBackendError> {
+-> Result<Option<(u64, usize, [u8; EVENT_BUFFER_SIZE], ReceivedHandles)>, MochiOsBackendError> {
     let event = core::ptr::addr_of_mut!(EVENT_BUF).cast::<u8>();
     // The handle-aware receive is a strict superset of the legacy receive: it
     // also accepts ordinary messages and reports an empty handle list.  Use it
     // for the first dequeue so a delegated document cannot escape the event
     // loop as an unsupported-handle failure between separate receive attempts.
     let raw_handles = core::ptr::addr_of_mut!(EVENT_OBJECT_HANDLES);
-    let len = match ipc_wait_object_handles_raw(0, event, EVENT_BUFFER_SIZE, unsafe {
+    let (sender, len) = match ipc_wait_object_handles_raw(0, event, EVENT_BUFFER_SIZE, unsafe {
         &mut *raw_handles
     }) {
         Ok(len) => len,
@@ -318,20 +318,21 @@ pub(super) fn try_recv_event()
     unsafe {
         core::ptr::copy_nonoverlapping(event, out.as_mut_ptr(), copy_len);
     }
-    Ok(Some((len, out, handles)))
+    Ok(Some((sender, len, out, handles)))
 }
 
 pub(super) fn read_event_blocking(
     endpoint: u64,
-) -> Result<Option<(usize, [u8; EVENT_BUFFER_SIZE], ReceivedHandles)>, MochiOsBackendError> {
+) -> Result<Option<(u64, usize, [u8; EVENT_BUFFER_SIZE], ReceivedHandles)>, MochiOsBackendError> {
     let event = core::ptr::addr_of_mut!(EVENT_BUF).cast::<u8>();
     let raw_handles = core::ptr::addr_of_mut!(EVENT_OBJECT_HANDLES);
-    let len = match ipc_wait_object_handles_raw(endpoint, event, EVENT_BUFFER_SIZE, unsafe {
-        &mut *raw_handles
-    }) {
-        Ok(len) => len,
-        Err(err) => return Err(err),
-    };
+    let (sender, len) =
+        match ipc_wait_object_handles_raw(endpoint, event, EVENT_BUFFER_SIZE, unsafe {
+            &mut *raw_handles
+        }) {
+            Ok(len) => len,
+            Err(err) => return Err(err),
+        };
     let handles = ReceivedHandles::from_raw(unsafe { *raw_handles })?;
     if len < 16 {
         return Err(MochiOsBackendError::InvalidEvent);
@@ -341,5 +342,5 @@ pub(super) fn read_event_blocking(
     unsafe {
         core::ptr::copy_nonoverlapping(event, out.as_mut_ptr(), copy_len);
     }
-    Ok(Some((len, out, handles)))
+    Ok(Some((sender, len, out, handles)))
 }

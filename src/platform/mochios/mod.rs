@@ -31,6 +31,7 @@ const OP_ACTIVATE_SURFACE: u32 = 11;
 
 mod buffer;
 mod connection;
+mod event_source;
 mod gpu_renderer;
 mod present;
 mod renderer;
@@ -561,7 +562,7 @@ where
             if self.app.should_exit() {
                 break 'event_loop Ok(());
             }
-            while let Some((len, event, handles)) = try_recv_event()? {
+            while let Some((sender, len, event, handles)) = try_recv_event()? {
                 if is_application_reopen_message(len, &event) {
                     if let Some(state) = windows.last() {
                         let _ = simple_token_request(
@@ -572,7 +573,14 @@ where
                     }
                     self.app.reopen();
                 } else {
-                    self.dispatch_mailbox_message(len, event, handles, &mut windows)?;
+                    self.dispatch_mailbox_message(
+                        sender,
+                        compositor,
+                        len,
+                        event,
+                        handles,
+                        &mut windows,
+                    )?;
                 }
                 handled_work = true;
             }
@@ -806,7 +814,7 @@ where
                     let endpoint = windows
                         .first()
                         .map_or(application_endpoint, |state| state.event_endpoint);
-                    if let Some((len, event, handles)) = read_event_blocking(endpoint)? {
+                    if let Some((sender, len, event, handles)) = read_event_blocking(endpoint)? {
                         if is_application_reopen_message(len, &event) {
                             if let Some(state) = windows.last() {
                                 let _ = simple_token_request(
@@ -817,7 +825,14 @@ where
                             }
                             self.app.reopen();
                         } else {
-                            self.dispatch_mailbox_message(len, event, handles, &mut windows)?;
+                            self.dispatch_mailbox_message(
+                                sender,
+                                compositor,
+                                len,
+                                event,
+                                handles,
+                                &mut windows,
+                            )?;
                         }
                     }
                 } else {
@@ -829,12 +844,19 @@ where
 
     fn dispatch_mailbox_message(
         &mut self,
+        sender: u64,
+        compositor: u64,
         len: usize,
         event: [u8; EVENT_BUFFER_SIZE],
         mut handles: ReceivedHandles,
         windows: &mut [MochiWindowState],
     ) -> Result<(), MochiOsBackendError> {
         let message_len = len.min(event.len());
+        // Drop attached owners normally, before any platform callback sees a
+        // forged window event. Numeric surface tokens do not prove a sender.
+        if !event_source::accepts(sender, compositor, &event[..message_len]) {
+            return Ok(());
+        }
         if &event[..message_len] == b"VKUIWAKE00000000" && handles.as_mut_slice().is_empty() {
             self.app.process_ui_notifications();
             return Ok(());
