@@ -263,7 +263,7 @@ impl Tabs {
                     .child(
                         super::Spacer::new()
                             .into_stack_child()
-                            .width(theme.controls.small_height)
+                            .width(theme.controls.small_height + theme.spacing.small)
                             .height(1.0)
                             .flex_grow(0.0)
                             .flex_shrink(0.0),
@@ -277,9 +277,14 @@ impl Tabs {
 
     fn close_bounds(&self, index: usize, b: Rect, theme: &Theme) -> Rect {
         let width = self.width(theme);
-        let size = theme.controls.small_height.min(width).min(b.size.height);
+        let inset = theme.spacing.small.min(width * 0.5);
+        let size = theme
+            .controls
+            .small_height
+            .min((width - inset * 2.0).max(0.0))
+            .min(b.size.height);
         Rect::new(
-            b.origin.x + (index + 1) as f32 * width - size,
+            b.origin.x + (index + 1) as f32 * width - inset - size,
             b.origin.y + (b.size.height - size) * 0.5,
             size,
             size,
@@ -794,7 +799,7 @@ impl SelectedTabContent {
             row = row.child(
                 Spacer::new()
                     .into_stack_child()
-                    .width(theme.controls.small_height)
+                    .width(theme.controls.small_height + theme.spacing.small)
                     .flex_grow(0.0)
                     .flex_shrink(0.0),
             );
@@ -826,6 +831,80 @@ mod tests {
     use crate::state::State;
     use crate::theme::Theme;
     use crate::typography::{TextMeasurer, Typography};
+
+    #[test]
+    fn close_hover_target_is_inset_from_each_tab_edge() {
+        for theme in [Theme::LIGHT, Theme::DARK] {
+            for width in [80., 200.] {
+                for style in 0..3 {
+                    let selection = State::new(0usize);
+                    let closed = Rc::new(std::cell::Cell::new(false));
+                    let callback = closed.clone();
+                    let tabs = Tabs::new(selection.binding())
+                        .item_width(width)
+                        .closable_item(0, "First", move || callback.set(true))
+                        .closable_item(1, "Second", || {});
+                    let tabs = match style {
+                        1 => tabs.document_style(),
+                        2 => tabs.compact_style(),
+                        _ => tabs,
+                    };
+                    let bounds = Rect::new(20., 30., width * 2., theme.tabs.height);
+                    let mut text = TextMeasurer::new();
+                    let mut list = DisplayList::new();
+                    let mut nodes = vec![];
+                    tabs.paint(
+                        bounds,
+                        &mut PaintContext::new(&mut list, &theme, &theme.typography, &mut text)
+                            .with_accessibility_nodes(&mut nodes),
+                    );
+                    for (index, label) in ["Close First", "Close Second"].into_iter().enumerate() {
+                        let close = nodes
+                            .iter()
+                            .find(|n| n.label.as_deref() == Some(label))
+                            .unwrap()
+                            .bounds;
+                        let edge = bounds.origin.x + (index + 1) as f32 * width;
+                        assert!(
+                            (edge - close.origin.x - close.size.width - theme.spacing.small).abs()
+                                < 0.01
+                        );
+                    }
+                    let close = tabs.close_bounds(0, bounds, &theme);
+                    let mut context = EventContext::new(&theme, &theme.typography, &mut text);
+                    for (x, should_close) in [
+                        (bounds.origin.x + width - 1., false),
+                        (close.origin.x + close.size.width * 0.5, true),
+                    ] {
+                        let position = Point::new(x, close.origin.y + close.size.height * 0.5);
+                        tabs.handle_event(
+                            bounds,
+                            &ViewEvent::PointerMoved { position },
+                            &mut context,
+                        );
+                        assert_eq!(tabs.items[0].close_interaction.is_hovered(), should_close);
+                        tabs.handle_event(
+                            bounds,
+                            &ViewEvent::PointerPressed {
+                                position,
+                                button: PointerButton::Primary,
+                            },
+                            &mut context,
+                        );
+                        tabs.handle_event(
+                            bounds,
+                            &ViewEvent::PointerReleased {
+                                position,
+                                button: PointerButton::Primary,
+                            },
+                            &mut context,
+                        );
+                        assert_eq!(closed.get(), should_close);
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn indicator_contour_matches_the_omochi_tab_geometry() {
