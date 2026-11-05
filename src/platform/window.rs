@@ -141,10 +141,11 @@ pub trait PlatformWindow {
 }
 
 pub trait PlatformApplication {
-    /// Returns the broker-issued binding before a window's first frame.
+    /// Returns the current broker-issued binding before presenting a frame.
     fn protected_presentation(&self, _window: WindowId) -> Option<ProtectedPresentation> {
         None
     }
+    fn protected_presentation_failed(&mut self, _window: WindowId) {}
     /// ワーカーから予約されたUI処理を、イベントループの所有スレッドで実行します。
     ///
     /// 処理があればtrueを返します。バックエンドは描画前と待機前に呼びます。

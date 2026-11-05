@@ -344,6 +344,36 @@ struct MochiWindowState {
     pending_pointer_motion: PendingPointerMotion,
     pending_resize: Option<(u32, u32)>,
     close_accepted: bool,
+    protected: Option<crate::platform::ProtectedPresentation>,
+    protected_failed: bool,
+}
+
+fn bind_protected(
+    compositor: u64,
+    surface: u64,
+    binding: crate::platform::ProtectedPresentation,
+) -> Result<(), MochiOsBackendError> {
+    use mochi_user_platform::capability::{
+        consent::{Correlation, Ticket},
+        presentation::Command,
+    };
+    let destination = u32::try_from(compositor).map_err(|_| MochiOsBackendError::InvalidReply)?;
+    connection::syscall_result(mochi_user_platform::presentation::command(
+        destination,
+        Command::Bind {
+            correlation: Correlation {
+                ticket: Ticket {
+                    id: binding.ticket,
+                    challenge: binding.challenge,
+                },
+                display: binding.display,
+            },
+            surface,
+        },
+        None,
+    ))
+    .map(|_| ())
+    .map_err(|error| error.at("protected presentation binding"))
 }
 
 #[derive(Default)]
@@ -421,29 +451,9 @@ where
         let surface = CompositorSurface::create(compositor, event_endpoint, role, width, height)
             .map_err(|error| error.at("surface creation"))?;
         let window = MochiOsWindow::new(id, viewport, compositor, surface.token());
-        if let Some(binding) = self.app.protected_presentation(id) {
-            use mochi_user_platform::capability::{
-                consent::{Correlation, Ticket},
-                presentation::Command,
-            };
-            let destination =
-                u32::try_from(compositor).map_err(|_| MochiOsBackendError::InvalidReply)?;
-            let command = Command::Bind {
-                correlation: Correlation {
-                    ticket: Ticket {
-                        id: binding.ticket,
-                        challenge: binding.challenge,
-                    },
-                    display: binding.display,
-                },
-                surface: surface.token(),
-            };
-            connection::syscall_result(mochi_user_platform::presentation::command(
-                destination,
-                command,
-                None,
-            ))
-            .map_err(|error| error.at("protected presentation binding"))?;
+        let protected = self.app.protected_presentation(id);
+        if let Some(binding) = protected {
+            bind_protected(compositor, surface.token(), binding)?;
         }
         if role == ROLE_TOPLEVEL {
             window
@@ -474,6 +484,8 @@ where
             }
         }
         let state = MochiWindowState {
+            protected,
+            protected_failed: false,
             config,
             event_endpoint,
             surface,
@@ -639,6 +651,27 @@ where
                     let frame_tick_start = perf_tick();
                     let draw_start = perf_counter();
                     let mut dirty_bounds = self.app.draw(&state.window, &mut display_list);
+                    // A running application can enter protected input without
+                    // destroying its window or its other sessions. Bind the
+                    // exact frame containing the question before commit.
+                    let protected = self.app.protected_presentation(state.window.id());
+                    if protected != state.protected {
+                        state.protected = protected;
+                        state.protected_failed = false;
+                        if let Some(binding) = protected {
+                            if bind_protected(compositor, token, binding).is_err() {
+                                state.protected_failed = true;
+                                self.app.protected_presentation_failed(state.window.id());
+                                state.window.request_redraw();
+                            }
+                        }
+                        dirty_bounds = state.window.viewport().logical_bounds();
+                    }
+                    if state.protected_failed {
+                        windows.push(state);
+                        handled_work = true;
+                        continue;
+                    }
                     state
                         .window
                         .set_input_regions(display_list.input_regions())?;

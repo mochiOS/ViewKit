@@ -318,12 +318,18 @@ pub trait App: Sized + 'static {
 
     /// Binds a window to an existing broker-issued presentation request.
     /// The compositor independently checks ownership, focus and scanout.
+    /// The property is read for each frame. Dismiss a retired broker request
+    /// before clearing or replacing its binding; these fields are not grants.
     fn protected_presentation_for_window(
         &self,
         _window: WindowId,
     ) -> Option<crate::platform::ProtectedPresentation> {
         None
     }
+
+    /// A revoked or expired binding could not be installed. Retire the
+    /// question; a rendered frame alone must never authorize its actions.
+    fn protected_presentation_failed(&mut self, _window: WindowId) {}
 
     /// Overrides the system appearance theme for this application.
     ///
