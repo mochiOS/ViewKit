@@ -34,6 +34,7 @@ mod connection;
 mod event_source;
 mod gpu_renderer;
 mod present;
+mod pressed_keys;
 mod renderer;
 mod surface;
 mod window;
@@ -346,6 +347,7 @@ struct MochiWindowState {
     close_accepted: bool,
     protected: Option<crate::platform::ProtectedPresentation>,
     protected_failed: bool,
+    pressed_keys: pressed_keys::PressedKeys<Key>,
 }
 
 fn bind_protected(
@@ -486,6 +488,7 @@ where
         let state = MochiWindowState {
             protected,
             protected_failed: false,
+            pressed_keys: pressed_keys::PressedKeys::new(),
             config,
             event_endpoint,
             surface,
@@ -1332,7 +1335,11 @@ where
                 self.app
                     .handle_event(PlatformEvent::ModifiersChanged { modifiers }, &state.window);
                 if flags & INPUT_FLAG_PRESS != 0 {
-                    if let Some(key) = key_from_wire(a as u16, b as u32) {
+                    if let Some(key) = state.pressed_keys.transition(
+                        a as u16,
+                        key_from_wire(a as u16, b as u32),
+                        true,
+                    ) {
                         self.app.handle_event(
                             PlatformEvent::KeyPressed { key, modifiers },
                             &state.window,
@@ -1342,7 +1349,11 @@ where
                         self.app.handle_event(event, &state.window);
                     }
                 } else if flags & INPUT_FLAG_RELEASE != 0
-                    && let Some(key) = key_from_wire(a as u16, b as u32)
+                    && let Some(key) = state.pressed_keys.transition(
+                        a as u16,
+                        key_from_wire(a as u16, b as u32),
+                        false,
+                    )
                 {
                     self.app
                         .handle_event(PlatformEvent::KeyReleased { key, modifiers }, &state.window);
@@ -1356,6 +1367,7 @@ where
                     .handle_event(PlatformEvent::Focused(true), &state.window);
             }
             EVENT_FOCUS_LOST => {
+                state.pressed_keys.clear();
                 self.app
                     .handle_event(PlatformEvent::Focused(false), &state.window);
             }
