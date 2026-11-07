@@ -1,0 +1,13 @@
+[workspace]
+
+[package]
+name = "viewkit-web"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "Apache-2.0"
+description = "Optional web content integration for ViewKit"
+
+[dependencies]
+viewkit = { path = "../.." }
+url = "2.5.8"
