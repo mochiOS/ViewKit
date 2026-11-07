@@ -28,6 +28,12 @@ The changes do not introduce new spacing values, colors, fonts, control shapes
 or animation parameters. Use the shared metrics and the same resolved frames
 for painting, input and scroll viewports in custom layouts.
 
+Use `List` and `ListRow` for collections whose rows follow their content and
+the standard minimum height. Pass real artwork through `ListRow::leading_view`
+and an accessory through `trailing_symbol`; the row owns icon dimensions,
+padding, text layout, selection and hit testing. Application artwork can use
+the ordinary Image or Svg view without rebuilding the row's HStack.
+
 Native transparent surfaces can register extra pointer targets with
 `DisplayList::add_input_region`. This is input metadata, not a transparent
 paint layer: it changes neither pixels nor layout. Supply final presented,

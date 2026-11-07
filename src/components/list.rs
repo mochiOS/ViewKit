@@ -121,6 +121,8 @@ pub struct ListRow {
     on_select: Option<Callback>,
     icon: Option<SymbolName>,
     leading_avatar: Option<String>,
+    leading_view: Option<Rc<dyn View>>,
+    trailing_symbol: Option<SymbolName>,
     status_marker: bool,
     edges: Option<(bool, bool)>,
 }
@@ -146,6 +148,8 @@ impl ListRow {
             on_select: None,
             icon: None,
             leading_avatar: None,
+            leading_view: None,
+            trailing_symbol: None,
             status_marker: false,
             edges: None,
         }
@@ -185,12 +189,29 @@ impl ListRow {
     pub fn icon(mut self, icon: SymbolName) -> Self {
         self.icon = Some(icon);
         self.leading_avatar = None;
+        self.leading_view = None;
         self
     }
 
     pub fn leading_avatar(mut self, initials: impl Into<String>) -> Self {
         self.leading_avatar = Some(initials.into());
         self.icon = None;
+        self.leading_view = None;
+        self
+    }
+
+    /// 実画像などを標準の先頭アイコン領域に配置します。
+    /// 寸法・余白・ラベル配置はListRowが管理します。
+    pub fn leading_view(mut self, view: impl View + 'static) -> Self {
+        self.leading_view = Some(Rc::new(view));
+        self.icon = None;
+        self.leading_avatar = None;
+        self
+    }
+
+    /// 行末に標準寸法と前景色のシンボルを表示します。
+    pub fn trailing_symbol(mut self, symbol: SymbolName) -> Self {
+        self.trailing_symbol = Some(symbol);
         self
     }
 
@@ -280,7 +301,12 @@ impl ListRow {
             .alignment(StackAlignment::Center)
             .gap(StackGap::Medium);
 
-        if let Some(initials) = self.leading_avatar.as_ref() {
+        if let Some(leading) = self.leading_view.as_ref() {
+            row = row.child(Rc::clone(leading).frame(
+                theme.layout.list_leading_size,
+                theme.layout.list_leading_size,
+            ));
+        } else if let Some(initials) = self.leading_avatar.as_ref() {
             row = row.child(Avatar::new(initials.clone()));
         } else if let Some(icon) = self.icon {
             row = row.child(
@@ -295,6 +321,14 @@ impl ListRow {
         }
 
         row = row.child(labels.layout().flex_grow(1.0));
+
+        if let Some(symbol) = self.trailing_symbol {
+            row = row.child(
+                Icon::new(symbol)
+                    .size(theme.layout.compact_icon_size)
+                    .color(appearance.secondary),
+            );
+        }
 
         Padding::all(theme.list.row_padding).content(row)
     }
@@ -395,6 +429,64 @@ mod tests {
     use super::*;
     use crate::draw_command::DisplayList;
     use crate::typography::{TextMeasurer, Typography};
+
+    #[test]
+    fn leading_artwork_uses_standard_row_metrics_and_remains_a_row_click_target() {
+        struct Artwork(Rc<RefCell<Vec<Rect>>>);
+        impl View for Artwork {
+            fn measure(&self, c: Constraints, _: &mut MeasureContext<'_>) -> Size {
+                c.constrain(Size::new(512.0, 512.0))
+            }
+            fn paint(&self, bounds: Rect, _: &mut PaintContext<'_>) {
+                self.0.borrow_mut().push(bounds);
+            }
+        }
+        for mut theme in [Theme::LIGHT, Theme::DARK] {
+            theme.layout.list_leading_size = 40.0;
+            theme.list.row_padding = 13.0;
+            let artwork = Rc::new(RefCell::new(Vec::new()));
+            let clicked = Rc::new(std::cell::Cell::new(false));
+            let selected = clicked.clone();
+            let row = ListRow::new("Application")
+                .leading_view(Artwork(artwork.clone()))
+                .subtitle("Purpose and developer")
+                .trailing_symbol(SymbolName::ChevronRight)
+                .selected(true)
+                .on_select(move || selected.set(true));
+            let bounds = Rect::new(20.0, 30.0, 360.0, 90.0);
+            let mut commands = DisplayList::new();
+            let mut text = TextMeasurer::new();
+            row.paint(
+                bounds,
+                &mut PaintContext::new(&mut commands, &theme, &theme.typography, &mut text),
+            );
+            let actual = artwork.borrow()[0];
+            assert_eq!(actual.size, Size::new(40.0, 40.0));
+            assert_eq!(actual.origin.x, bounds.origin.x + theme.list.row_padding);
+            assert!(commands.commands().iter().any(|command| matches!(command,
+                DrawCommand::DrawText { command } if command.text == "Application"
+                    && command.bounds.origin.x >= actual.origin.x + actual.size.width
+                    && command.color == theme.list.selected_foreground)));
+            let position = crate::geometry::Point::new(
+                actual.origin.x + actual.size.width * 0.5,
+                actual.origin.y + actual.size.height * 0.5,
+            );
+            let mut context = EventContext::new(&theme, &theme.typography, &mut text);
+            for event in [
+                ViewEvent::PointerPressed {
+                    position,
+                    button: crate::platform::PointerButton::Primary,
+                },
+                ViewEvent::PointerReleased {
+                    position,
+                    button: crate::platform::PointerButton::Primary,
+                },
+            ] {
+                row.handle_event(bounds, &event, &mut context);
+            }
+            assert!(clicked.get());
+        }
+    }
 
     #[test]
     fn custom_row_content_inherits_selection_colour_and_keeps_native_clicks() {
