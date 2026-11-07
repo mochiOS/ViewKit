@@ -122,6 +122,12 @@ pub trait PlatformWindow {
     /// Requests that this window become the frontmost key window.
     fn activate(&self) {}
 
+    /// Temporarily gives a privileged panel keyboard ownership, or releases
+    /// its existing capture. Unsupported acquisition fails closed.
+    fn set_keyboard_capture(&self, captured: bool) -> bool {
+        !captured
+    }
+
     fn viewport(&self) -> Viewport;
 
     fn set_cursor(&self, cursor: CursorIcon) {

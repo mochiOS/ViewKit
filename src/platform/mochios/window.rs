@@ -123,6 +123,23 @@ impl PlatformWindow for MochiOsWindow {
         let _ = simple_token_request(self.compositor, OP_ACTIVATE_SURFACE, self.surface);
     }
 
+    fn set_keyboard_capture(&self, captured: bool) -> bool {
+        let mut request = [0u8; 16];
+        request[..4].copy_from_slice(&OP_SET_KEYBOARD_CAPTURE.to_le_bytes());
+        request[4..12].copy_from_slice(&self.surface.to_le_bytes());
+        request[12..].copy_from_slice(&u32::from(captured).to_le_bytes());
+        let mut reply = [0u8; 16];
+        ipc_call_raw(
+            self.compositor,
+            request.as_ptr(),
+            request.len(),
+            reply.as_mut_ptr(),
+            reply.len(),
+        )
+        .and_then(|len| status_from_raw(reply.as_ptr(), len))
+        .is_ok()
+    }
+
     fn viewport(&self) -> Viewport {
         self.viewport.get()
     }

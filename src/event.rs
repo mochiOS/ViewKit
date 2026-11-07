@@ -120,6 +120,9 @@ pub enum ViewEvent {
         focused: bool,
     },
 
+    /// The platform refused a temporary keyboard capture request.
+    KeyboardCaptureDenied,
+
     ContextMenuResult {
         request_id: u64,
         command_id: Option<u32>,
@@ -159,6 +162,7 @@ impl ViewEvent {
             | Self::TextInput { .. }
             | Self::FileDragExited
             | Self::FocusChanged { .. }
+            | Self::KeyboardCaptureDenied
             | Self::KeyboardFocusRequested { .. }
             | Self::FocusVisibilityChanged { .. }
             | Self::ContextMenuResult { .. }
@@ -202,6 +206,7 @@ impl ViewEvent {
                 | Self::ArrowLeft
                 | Self::ArrowRight
                 | Self::FocusChanged { .. }
+                | Self::KeyboardCaptureDenied
                 | Self::ContextMenuResult { .. }
                 | Self::SelectLeft
                 | Self::SelectRight
@@ -270,6 +275,7 @@ pub struct EventContext<'a> {
     cursor_icon: Option<CursorIcon>,
     context_menu_request: Option<ContextMenuRequest>,
     keyboard_focus_request: Option<Option<Rect>>,
+    keyboard_capture_request: Option<bool>,
     focus_visible: bool,
     modifiers: KeyModifiers,
     pointer_press_intercepted: bool,
@@ -302,6 +308,7 @@ impl<'a> EventContext<'a> {
             cursor_icon: None,
             context_menu_request: None,
             keyboard_focus_request: None,
+            keyboard_capture_request: None,
             focus_visible: true,
             modifiers: KeyModifiers::default(),
             pointer_press_intercepted: false,
@@ -412,6 +419,17 @@ impl<'a> EventContext<'a> {
 
     pub fn clear_keyboard_focus(&mut self) {
         self.keyboard_focus_request = Some(None);
+    }
+
+    /// Requests temporary platform keyboard ownership for a shell panel.
+    /// The platform verifies authority and may emit `KeyboardCaptureDenied`.
+    /// Release when the panel closes; focus preemption also cancels capture.
+    pub fn set_keyboard_capture(&mut self, captured: bool) {
+        self.keyboard_capture_request = Some(captured);
+    }
+
+    pub(crate) fn take_keyboard_capture_request(&mut self) -> Option<bool> {
+        self.keyboard_capture_request.take()
     }
 
     pub(crate) fn intercept_pointer_press(&mut self) {

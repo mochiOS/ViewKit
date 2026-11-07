@@ -38,3 +38,25 @@ commit rights for that surface; targets cannot escape its bounds, override
 higher stacking layers, or intercept protected maximized window controls.
 An empty list restores alpha-based panel input. Linux preview drawing transport
 is unchanged; the host view must implement the matching click dispatch itself.
+
+A shell panel that accepts text must request platform keyboard ownership as
+well as focusing its local control. Use `EventContext::set_keyboard_capture(true)`
+on opening and `set_keyboard_capture(false)` on every closing path. The runtime
+applies the request to the originating window and sends `KeyboardCaptureDenied`
+to its view tree if acquisition fails. Close the panel on denial or focus loss.
+Ordinary Dock and menu interaction does not request capture.
+
+On mochiOS, the compositor grants this only to an owned, visible Panel surface
+with `FOCUS_CONTROL`, established when an authorized overlay client creates it.
+Protected presentations, secure overlays and system modals block acquisition
+and global shell shortcuts. Process modality is checked too. Release restores
+the previous surface by its token; closing that surface falls back to a live
+application. Preemption cancels the capture so a delayed release cannot steal
+the new window's focus. Destroying the panel also releases its capture.
+
+The internal compositor request is `OP_SET_KEYBOARD_CAPTURE` (13): exactly 16
+bytes containing a little-endian u32 opcode, u64 surface token and u32 capture
+flag (0 or 1). The reply uses the existing status format. The native backend
+owns this protocol; applications use EventContext. No kernel API is added.
+The Linux host backend accepts capture only while its shared preview window
+already has host focus. Backends without this facility reject acquisition.

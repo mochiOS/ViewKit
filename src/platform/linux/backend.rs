@@ -66,6 +66,12 @@ impl PlatformWindow for WinitWindow<'_> {
         viewport_from_window(self.inner)
     }
 
+    fn set_keyboard_capture(&self, captured: bool) -> bool {
+        // Host preview content shares this window's existing event stream.
+        // Never claim keyboard ownership while another host window is active.
+        !captured || self.inner.has_focus()
+    }
+
     fn set_cursor(&self, cursor: CursorIcon) {
         let cursor = match cursor {
             CursorIcon::Default => WinitCursorIcon::Default,

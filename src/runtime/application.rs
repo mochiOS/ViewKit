@@ -777,6 +777,21 @@ where
                 commands.extend(context.take_command_requests());
             }
 
+            if let Some(captured) = context.take_keyboard_capture_request() {
+                if !window.set_keyboard_capture(captured) && captured {
+                    root.handle_event(
+                        viewport.logical_bounds(),
+                        &crate::event::ViewEvent::KeyboardCaptureDenied,
+                        &mut context,
+                    );
+                    // A denied panel may close itself. Apply its release,
+                    // but never recursively retry an acquisition here.
+                    if context.take_keyboard_capture_request() == Some(false) {
+                        window.set_keyboard_capture(false);
+                    }
+                }
+            }
+
             (
                 context.redraw_request(),
                 context.cursor_icon(),
@@ -1335,6 +1350,72 @@ mod tests {
     fn component_redraw_stays_regional_without_state_change() {
         let region = RedrawRequest::Region(Rect::new(10.0, 20.0, 30.0, 40.0));
         assert_eq!(redraw_after_event(false, region), region);
+    }
+
+    #[test]
+    fn keyboard_capture_denial_reaches_the_view_and_applies_its_release_once() {
+        struct CaptureView(Rc<Cell<bool>>);
+        impl View for CaptureView {
+            fn measure(&self, c: Constraints, _: &mut MeasureContext<'_>) -> crate::geometry::Size {
+                c.maximum
+            }
+            fn paint(&self, _: Rect, _: &mut PaintContext<'_>) {}
+            fn handle_event(
+                &self,
+                _: Rect,
+                event: &crate::event::ViewEvent,
+                c: &mut EventContext<'_>,
+            ) -> crate::event::EventResult {
+                match event {
+                    crate::event::ViewEvent::KeyPressed {
+                        key: Key::Space, ..
+                    } => c.set_keyboard_capture(true),
+                    crate::event::ViewEvent::KeyboardCaptureDenied => {
+                        self.0.set(true);
+                        c.set_keyboard_capture(false);
+                    }
+                    _ => {}
+                }
+                crate::event::EventResult::Consumed
+            }
+        }
+        struct CaptureApp(Rc<Cell<bool>>);
+        impl App for CaptureApp {
+            type Body = CaptureView;
+            fn new() -> Self {
+                unreachable!()
+            }
+            fn body(&self, _: &ViewContext) -> Self::Body {
+                CaptureView(self.0.clone())
+            }
+        }
+        struct CaptureWindow(RefCell<Vec<bool>>);
+        impl PlatformWindow for CaptureWindow {
+            fn id(&self) -> WindowId {
+                WindowId::PRIMARY
+            }
+            fn request_redraw(&self) {}
+            fn set_title(&self, _: &str) {}
+            fn viewport(&self) -> Viewport {
+                TestWindow(WindowId::PRIMARY).viewport()
+            }
+            fn set_keyboard_capture(&self, captured: bool) -> bool {
+                self.0.borrow_mut().push(captured);
+                !captured
+            }
+        }
+        let denied = Rc::new(Cell::new(false));
+        let mut runtime = ApplicationRuntime::new(CaptureApp(denied.clone()));
+        let window = CaptureWindow(RefCell::new(Vec::new()));
+        runtime.handle_event(
+            PlatformEvent::KeyPressed {
+                key: Key::Space,
+                modifiers: Default::default(),
+            },
+            &window,
+        );
+        assert!(denied.get());
+        assert_eq!(*window.0.borrow(), [true, false]);
     }
 
     #[test]
