@@ -1,8 +1,8 @@
 //! ViewKitのレイアウト型とui_layout-rsとの接続を定義
 
 use ui_layout::{
-    AlignItems, Display, FlexDirection, ItemStyle, JustifyContent, LayoutNode, Length, SizeStyle,
-    Style,
+    AlignItems, Display, FlexDirection, InnerDisplay, ItemStyle, JustifyContent, LayoutNode,
+    Length, LengthOrAuto, OuterDisplay, SizeStyle, Style,
 };
 
 use crate::event::{EventContext, EventResult, ViewEvent};
@@ -20,15 +20,15 @@ pub enum LayoutLength {
 
 impl LayoutLength {
     #[allow(unused)]
-    fn to_ui_length(self) -> Length {
+    fn to_ui_length(self) -> LengthOrAuto {
         match self {
-            Self::Auto => Length::Auto,
+            Self::Auto => LengthOrAuto::Auto,
 
             Self::Fixed(value) => {
                 if value.is_finite() {
-                    Length::Px(value.max(0.0))
+                    LengthOrAuto::Length(Length::Px(value.max(0.0)))
                 } else {
-                    Length::Px(0.0)
+                    LengthOrAuto::Length(Length::Px(0.0))
                 }
             }
         }
@@ -301,15 +301,15 @@ impl StackChild {
         if matches!(self.kind, StackChildKind::Divider { .. }) {
             match direction {
                 StackDirection::Vertical => {
-                    width = Length::Px(available_size.width.max(0.0));
+                    width = LengthOrAuto::Length(Length::Px(available_size.width.max(0.0)));
 
-                    height = Length::Px(theme.divider.thickness.max(0.0));
+                    height = LengthOrAuto::Length(Length::Px(theme.divider.thickness.max(0.0)));
                 }
 
                 StackDirection::Horizontal => {
-                    width = Length::Px(theme.divider.thickness.max(0.0));
+                    width = LengthOrAuto::Length(Length::Px(theme.divider.thickness.max(0.0)));
 
-                    height = Length::Px(available_size.height.max(0.0));
+                    height = LengthOrAuto::Length(Length::Px(available_size.height.max(0.0)));
                 }
             }
         }
@@ -321,7 +321,10 @@ impl StackChild {
         };
 
         LayoutNode::new(Style {
-            display: Display::Block,
+            display: Display::OutsideInner {
+                outer: OuterDisplay::Block,
+                inner: InnerDisplay::Flow,
+            },
 
             size: SizeStyle {
                 width,
@@ -337,6 +340,8 @@ impl StackChild {
                 flex_basis,
 
                 align_self: None,
+
+                justify_self: None,
             },
 
             ..Style::default()
@@ -403,13 +408,13 @@ impl StackChild {
 
             match direction {
                 StackDirection::Vertical => {
-                    width = Length::Px(bounds.size.width.max(0.0));
-                    height = Length::Px(thickness);
+                    width = LengthOrAuto::Length(Length::Px(bounds.size.width.max(0.0)));
+                    height = LengthOrAuto::Length(Length::Px(thickness));
                 }
 
                 StackDirection::Horizontal => {
-                    width = Length::Px(thickness);
-                    height = Length::Px(bounds.size.height.max(0.0));
+                    width = LengthOrAuto::Length(Length::Px(thickness));
+                    height = LengthOrAuto::Length(Length::Px(bounds.size.height.max(0.0)));
                 }
             }
         }
@@ -420,7 +425,10 @@ impl StackChild {
         };
 
         LayoutNode::new(Style {
-            display: Display::Block,
+            display: Display::OutsideInner {
+                outer: OuterDisplay::Block,
+                inner: InnerDisplay::Flow,
+            },
 
             size: SizeStyle {
                 width,
@@ -434,6 +442,7 @@ impl StackChild {
                 flex_shrink: self.flex_shrink.max(0.0),
                 flex_basis,
                 align_self: None,
+                justify_self: None,
             },
 
             ..Default::default()
@@ -633,7 +642,7 @@ pub(crate) fn paint_stack(
 }
 
 pub fn border_box(node: &LayoutNode, parent_origin: Point) -> Option<Rect> {
-    let box_model = node.layout_boxes.iter().next()?;
+    let box_model = node.layout_box.iter().next()?;
 
     let rect = box_model.border_box;
 
@@ -1031,18 +1040,18 @@ fn sanitize_length(value: f32) -> f32 {
 }
 
 #[allow(unused)]
-fn measured_ui_length(length: LayoutLength, measured: f32) -> Length {
+fn measured_ui_length(length: LayoutLength, measured: f32) -> LengthOrAuto {
     match length {
-        LayoutLength::Fixed(value) => Length::Px(sanitize_length(value)),
+        LayoutLength::Fixed(value) => LengthOrAuto::Length(Length::Px(sanitize_length(value))),
 
         LayoutLength::Auto => {
             let measured = sanitize_length(measured);
 
             if measured > 0.0 {
-                Length::Px(measured)
+                LengthOrAuto::Length(Length::Px(measured))
             } else {
                 // 固有サイズを持たないやつはAuto
-                Length::Auto
+                LengthOrAuto::Auto
             }
         }
     }
