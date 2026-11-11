@@ -17,13 +17,13 @@ pub struct Layer {
 /// Contact and ambient layers for the working window; contained in the existing 20px damage margin.
 pub const ACTIVE: [Layer; 2] = [
     Layer {
-        alpha: 16,
+        alpha: 20,
         offset_y: 1,
         blur_radius: 3,
         spread: 0,
     },
     Layer {
-        alpha: 28,
+        alpha: 32,
         offset_y: 5,
         blur_radius: 14,
         spread: 0,
@@ -38,6 +38,8 @@ pub const INACTIVE: [Layer; 1] = [Layer {
 }];
 /// Outer edge coverage for the default light window material.
 pub const BORDER_ALPHA: u8 = 24;
+/// Inactive windows retain a quieter edge against adjacent content.
+pub const INACTIVE_BORDER_ALPHA: u8 = 16;
 
 /// Shared desktop surface corner setback, in logical pixels.
 pub const CORNER_RADIUS: f32 = 26.5;
