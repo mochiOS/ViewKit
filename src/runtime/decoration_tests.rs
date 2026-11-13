@@ -176,3 +176,229 @@ fn removing_a_titlebar_field_clears_its_real_focus_without_touching_other_compon
     assert!(!runtime.app.field.is_focused());
     assert_eq!(window.calls.get(), 1);
 }
+
+struct DragCaptionApp {
+    clicks: Rc<Cell<usize>>,
+    button: crate::components::ButtonInteractionState,
+    tabs: crate::components::TabsInteractionState,
+    selection: State<usize>,
+}
+impl App for DragCaptionApp {
+    type Body = Rectangle;
+    fn new() -> Self {
+        Self {
+            clicks: Rc::new(Cell::new(0)),
+            button: Default::default(),
+            tabs: Default::default(),
+            selection: State::new(0),
+        }
+    }
+    fn window(&self) -> crate::app::WindowOptions {
+        let button_clicks = self.clicks.clone();
+        let tab_clicks = self.clicks.clone();
+        let content = HStack::new()
+            .child(
+                Button::with_interaction_and_label(self.button.clone(), "Action")
+                    .on_click(move || button_clicks.set(button_clicks.get() + 1)),
+            )
+            .child(
+                crate::components::Tabs::with_interaction(
+                    self.selection.binding(),
+                    self.tabs.clone(),
+                )
+                .item(0, "First")
+                .item(1, "Second")
+                .on_selected_activate(move || tab_clicks.set(tab_clicks.get() + 1)),
+            );
+        crate::app::WindowOptions::new("Drag caption").titlebar(
+            TitleBar::new()
+                .height(44.0)
+                .center(crate::components::DragRegion::new(content).including_controls()),
+        )
+    }
+    fn body(&self, _: &crate::app::ViewContext) -> Rectangle {
+        Rectangle::new()
+    }
+}
+struct DragCaptionWindow {
+    base: DecorationWindow,
+    event_serial: Cell<u64>,
+    held_serial: Cell<u64>,
+    moves: Cell<usize>,
+}
+impl PlatformWindow for DragCaptionWindow {
+    fn id(&self) -> WindowId {
+        WindowId::PRIMARY
+    }
+    fn viewport(&self) -> Viewport {
+        self.base.viewport()
+    }
+    fn request_redraw(&self) {}
+    fn set_title(&self, _: &str) {}
+    fn input_serial(&self) -> u64 {
+        self.event_serial.get()
+    }
+    fn configure_decoration(
+        &self,
+        config: DecorationConfig,
+    ) -> Result<DecorationLayout, crate::decoration::DecorationError> {
+        self.base.configure_decoration(config)
+    }
+    fn decoration_layout(&self) -> Option<DecorationLayout> {
+        self.base.decoration_layout()
+    }
+    fn begin_window_interaction(
+        &self,
+        serial: u64,
+        operation: crate::decoration::WindowInteraction,
+    ) -> bool {
+        if serial == 0 || serial != self.held_serial.replace(0) {
+            return false;
+        }
+        assert_eq!(operation, crate::decoration::WindowInteraction::Move);
+        self.moves.set(self.moves.get() + 1);
+        true
+    }
+}
+#[test]
+fn dragging_caption_buttons_and_tabs_moves_the_window_without_clicking_them() {
+    for label in ["Action", "First"] {
+        let mut runtime = ApplicationRuntime::new(DragCaptionApp::new());
+        let window = DragCaptionWindow {
+            base: DecorationWindow::new(),
+            event_serial: Cell::new(0),
+            held_serial: Cell::new(0),
+            moves: Cell::new(0),
+        };
+        runtime.draw(&window, &mut DisplayList::new());
+        let rect = runtime.windows[&WindowId::PRIMARY]
+            .accessibility_nodes
+            .iter()
+            .find(|n| n.label.as_deref() == Some(label))
+            .unwrap()
+            .bounds;
+        let point = Point::new(
+            rect.origin.x + rect.size.width / 2.0,
+            rect.origin.y + rect.size.height / 2.0,
+        );
+        let press = PlatformEvent::PointerButton {
+            button: PointerButton::Primary,
+            state: ButtonState::Pressed,
+        };
+        let release = PlatformEvent::PointerButton {
+            button: PointerButton::Primary,
+            state: ButtonState::Released,
+        };
+        runtime.handle_event(
+            PlatformEvent::PointerMoved {
+                x: point.x,
+                y: point.y,
+            },
+            &window,
+        );
+        window.event_serial.set(73);
+        window.held_serial.set(73);
+        runtime.handle_event(press.clone(), &window);
+        window.event_serial.set(0);
+        runtime.handle_event(
+            PlatformEvent::PointerMoved {
+                x: point.x + 0.5,
+                y: point.y,
+            },
+            &window,
+        );
+        assert_eq!(window.moves.get(), 0);
+        window.held_serial.set(0);
+        runtime.handle_event(release.clone(), &window);
+        assert_eq!(runtime.app.clicks.get(), 1, "normal click on {label}");
+        runtime.draw(&window, &mut DisplayList::new());
+        runtime.handle_event(
+            PlatformEvent::PointerMoved {
+                x: point.x,
+                y: point.y,
+            },
+            &window,
+        );
+        window.event_serial.set(74);
+        window.held_serial.set(74);
+        runtime.handle_event(press, &window);
+        window.event_serial.set(0);
+        runtime.handle_event(
+            PlatformEvent::PointerMoved {
+                x: point.x + 20.0,
+                y: point.y,
+            },
+            &window,
+        );
+        assert_eq!(window.moves.get(), 1, "drag on {label}");
+        runtime.handle_event(
+            PlatformEvent::PointerMoved {
+                x: point.x,
+                y: point.y,
+            },
+            &window,
+        );
+        runtime.handle_event(release, &window);
+        assert_eq!(
+            runtime.app.clicks.get(),
+            1,
+            "release after dragging must not click {label}"
+        );
+        assert_eq!(window.moves.get(), 1);
+        assert!(
+            runtime.windows[&WindowId::PRIMARY]
+                .pending_window_drag
+                .is_none()
+        );
+    }
+}
+#[test]
+fn released_or_unfocused_caption_presses_cannot_start_a_later_move() {
+    for finish in [
+        PlatformEvent::Focused(false),
+        PlatformEvent::PointerButton {
+            button: PointerButton::Primary,
+            state: ButtonState::Released,
+        },
+    ] {
+        let mut runtime = ApplicationRuntime::new(DragCaptionApp::new());
+        let window = DragCaptionWindow {
+            base: DecorationWindow::new(),
+            event_serial: Cell::new(73),
+            held_serial: Cell::new(73),
+            moves: Cell::new(0),
+        };
+        runtime.draw(&window, &mut DisplayList::new());
+        let rect = runtime.windows[&WindowId::PRIMARY]
+            .accessibility_nodes
+            .iter()
+            .find(|n| n.label.as_deref() == Some("Action"))
+            .unwrap()
+            .bounds;
+        let x = rect.origin.x + rect.size.width / 2.0;
+        let y = rect.origin.y + rect.size.height / 2.0;
+        runtime.handle_event(PlatformEvent::PointerMoved { x, y }, &window);
+        runtime.handle_event(
+            PlatformEvent::PointerButton {
+                button: PointerButton::Primary,
+                state: ButtonState::Pressed,
+            },
+            &window,
+        );
+        assert!(
+            runtime.windows[&WindowId::PRIMARY]
+                .pending_window_drag
+                .is_some()
+        );
+        window.event_serial.set(0);
+        window.held_serial.set(0);
+        runtime.handle_event(finish, &window);
+        runtime.handle_event(PlatformEvent::PointerMoved { x: x + 50.0, y }, &window);
+        assert_eq!(window.moves.get(), 0);
+        assert!(
+            runtime.windows[&WindowId::PRIMARY]
+                .pending_window_drag
+                .is_none()
+        );
+    }
+}

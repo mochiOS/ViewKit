@@ -291,6 +291,7 @@ pub struct EventContext<'a> {
     modifiers: KeyModifiers,
     pointer_press_intercepted: bool,
     pub(crate) input_serial: u64,
+    pub(crate) window_move_on_drag: bool,
     window_interaction: core::cell::Cell<Option<(u64, crate::decoration::WindowInteraction)>>,
     command_requests: Vec<CommandId>,
     command_statuses: &'a [CommandStatus],
@@ -323,6 +324,17 @@ impl<'a> EventContext<'a> {
     /// Returns false when no active token is present or it was already used.
     pub fn request_window_move(&mut self) -> bool {
         self.request_window_interaction(crate::decoration::WindowInteraction::Move)
+    }
+
+    /// Arms a move for the current authenticated press. The runtime waits for
+    /// pointer motion beyond the drag threshold, preserving ordinary clicks.
+    /// Returns false without a valid press or if another gesture already used it.
+    pub fn request_window_move_on_drag(&mut self) -> bool {
+        if !self.request_window_move() {
+            return false;
+        }
+        self.window_move_on_drag = true;
+        true
     }
 
     /// Requests an input-authorized resize. The platform also enforces the
@@ -372,6 +384,7 @@ impl<'a> EventContext<'a> {
             modifiers: KeyModifiers::default(),
             pointer_press_intercepted: false,
             input_serial: 0,
+            window_move_on_drag: false,
             window_interaction: core::cell::Cell::new(None),
             command_requests: Vec::new(),
             command_statuses: &[],

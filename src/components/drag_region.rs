@@ -11,11 +11,22 @@ use crate::{
 /// The platform independently validates a one-use, active input token.
 pub struct DragRegion<V> {
     content: V,
+    including_controls: bool,
 }
 impl<V: View> DragRegion<V> {
     /// Wraps an ordinary view without changing its layout or state identity.
     pub fn new(content: V) -> Self {
-        Self { content }
+        Self {
+            content,
+            including_controls: false,
+        }
+    }
+    /// Keeps normal clicks, but moves the window when a primary press is dragged,
+    /// including presses on buttons or tabs. The runtime cancels child tracking
+    /// at the drag threshold so releasing after a move cannot activate a control.
+    pub fn including_controls(mut self) -> Self {
+        self.including_controls = true;
+        self
     }
 }
 /// Wraps a view in a window drag region using the usual ViewKit event tree.
@@ -31,6 +42,13 @@ impl<V: View> View for DragRegion<V> {
     }
     fn handle_event(&self, b: Rect, e: &ViewEvent, cx: &mut EventContext<'_>) -> EventResult {
         let result = self.content.handle_event(b, e, cx);
+        if self.including_controls {
+            if matches!(e, ViewEvent::PointerPressed { position, button: PointerButton::Primary } if b.contains(*position))
+            {
+                cx.request_window_move_on_drag();
+            }
+            return result;
+        }
         if result.is_consumed() {
             return result;
         }

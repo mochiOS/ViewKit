@@ -8,6 +8,7 @@ pub(super) struct MochiOsWindow {
     surface: u64,
     input_regions: std::cell::RefCell<Vec<Rect>>,
     pub(super) input_serial: Cell<u64>,
+    pub(super) press_serial: Cell<u64>,
     pub(super) decoration_layout: Cell<crate::decoration::DecorationLayout>,
 }
 
@@ -26,6 +27,7 @@ impl MochiOsWindow {
             surface,
             input_regions: std::cell::RefCell::new(Vec::new()),
             input_serial: Cell::new(0),
+            press_serial: Cell::new(0),
             decoration_layout: Cell::new(crate::decoration::DecorationLayout::default()),
         }
     }
@@ -167,7 +169,7 @@ impl PlatformWindow for MochiOsWindow {
         serial: u64,
         operation: crate::decoration::WindowInteraction,
     ) -> bool {
-        if serial == 0 || self.input_serial.replace(0) != serial {
+        if serial == 0 || self.press_serial.replace(0) != serial {
             return false;
         }
         let mut request = [0u8; 28];

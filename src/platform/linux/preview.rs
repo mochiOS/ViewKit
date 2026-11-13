@@ -337,6 +337,7 @@ struct PreviewWindow {
     cursor: Cell<CursorIcon>,
     decoration: Cell<crate::decoration::DecorationLayout>,
     input: Cell<u64>,
+    press_serial: Cell<u64>,
     pending: RefCell<Vec<Packet>>,
 }
 
@@ -353,6 +354,7 @@ impl PreviewWindow {
             cursor: Cell::new(CursorIcon::Default),
             decoration: Cell::new(crate::decoration::DecorationLayout::default()),
             input: Cell::new(0),
+            press_serial: Cell::new(0),
             pending: RefCell::new(Vec::new()),
         }
     }
@@ -397,7 +399,7 @@ impl PlatformWindow for PreviewWindow {
         serial: u64,
         op: crate::decoration::WindowInteraction,
     ) -> bool {
-        if serial == 0 || self.input.replace(0) != serial {
+        if serial == 0 || self.press_serial.replace(0) != serial {
             return false;
         }
         let edge = match op {
@@ -492,6 +494,15 @@ pub(crate) fn run<A: PlatformApplication>(
                                     0
                                 },
                             );
+                            if matches!(
+                                event,
+                                PlatformEvent::PointerButton {
+                                    button: crate::platform::PointerButton::Primary,
+                                    ..
+                                }
+                            ) {
+                                window.press_serial.set(window.input.get());
+                            }
                             app.handle_event(event, window);
                             window.input.set(0);
                         }
@@ -504,6 +515,15 @@ pub(crate) fn run<A: PlatformApplication>(
                     let Some(window) = windows.get_mut(&id) else {
                         continue;
                     };
+                    if matches!(
+                        event,
+                        PlatformEvent::PointerButton {
+                            button: crate::platform::PointerButton::Primary,
+                            ..
+                        } | PlatformEvent::Focused(false)
+                    ) {
+                        window.press_serial.set(0);
+                    }
                     if matches!(event, PlatformEvent::CloseRequested) {
                         if app.should_close_window(window) {
                             windows.remove(&id);

@@ -184,6 +184,7 @@ where
 struct WindowRuntime<Body> {
     root: Option<crate::components::DecoratedRoot<Body>>,
     root_invalid: bool,
+    pending_window_drag: Option<(u64, Point)>,
     decoration_config: Option<(crate::decoration::DecorationConfig, f64)>,
     decoration_layout: crate::decoration::DecorationLayout,
     retired_roots: Vec<(crate::components::DecoratedRoot<Body>, Rect)>,
@@ -284,6 +285,7 @@ impl<Body> WindowRuntime<Body> {
         Self {
             root: None,
             root_invalid: false,
+            pending_window_drag: None,
             decoration_config: None,
             decoration_layout: crate::decoration::DecorationLayout::default(),
             retired_roots: Vec::new(),
@@ -828,6 +830,9 @@ where
         }
 
         if alert_window {
+            if let Some(state) = self.windows.get_mut(&window_id) {
+                state.pending_window_drag = None;
+            }
             self.handle_alert_event(window_id, &event, window);
             return;
         }
@@ -893,6 +898,42 @@ where
                 &self.theme.typography,
                 &mut state.text_measurer,
             );
+            // A deferred move retains only the authenticated press, never an
+            // application-created token. Release/focus loss invalidate it.
+            let release = matches!(
+                event,
+                PlatformEvent::PointerButton {
+                    button: PointerButton::Primary,
+                    state: ButtonState::Released
+                }
+            );
+            let cancel = matches!(event, PlatformEvent::Focused(false));
+            if release || cancel {
+                state.pending_window_drag = None;
+            }
+            if let (Some((serial, origin)), PlatformEvent::PointerMoved { x, y }) =
+                (state.pending_window_drag, &event)
+            {
+                if (*x - origin.x).hypot(*y - origin.y) >= self.theme.spacing.small {
+                    state.pending_window_drag = None;
+                    if window.begin_window_interaction(
+                        serial,
+                        crate::decoration::WindowInteraction::Move,
+                    ) {
+                        root.handle_event(
+                            viewport.logical_bounds(),
+                            &crate::event::ViewEvent::FocusChanged { focused: false },
+                            &mut context,
+                        );
+                        root.handle_event(
+                            viewport.logical_bounds(),
+                            &crate::event::ViewEvent::PointerLeft,
+                            &mut context,
+                        );
+                        context.request_redraw();
+                    }
+                }
+            }
             context.input_serial = window.input_serial();
             context.set_pane_container(Some(viewport.logical_bounds()));
             context.set_command_context(
@@ -905,7 +946,15 @@ where
                 .dispatch(root, viewport.logical_bounds(), &event, &mut context);
 
             if let Some((serial, operation)) = context.take_window_interaction() {
-                window.begin_window_interaction(serial, operation);
+                if context.window_move_on_drag {
+                    state.pending_window_drag = state
+                        .event_dispatcher
+                        .pointer_position()
+                        .map(|position| (serial, position));
+                } else {
+                    state.pending_window_drag = None;
+                    window.begin_window_interaction(serial, operation);
+                }
             }
 
             let mut commands = context.take_command_requests();

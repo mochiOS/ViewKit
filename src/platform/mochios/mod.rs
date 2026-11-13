@@ -1297,6 +1297,9 @@ where
             EVENT_POINTER_BUTTON => {
                 let button_id = (c & 0xffff) as u16;
                 let flags = c >> 16;
+                if button_id == 1 && flags & u32::from(INPUT_FLAG_RELEASE) != 0 {
+                    state.window.press_serial.set(0);
+                }
                 // Motion notifications are best-effort, while button messages
                 // carry the authoritative local pointer position.
                 self.app.handle_event(
@@ -1336,6 +1339,12 @@ where
                         0
                     },
                 );
+                if button == PointerButton::Primary {
+                    state
+                        .window
+                        .press_serial
+                        .set(state.window.input_serial.get());
+                }
                 self.app.handle_event(
                     PlatformEvent::PointerButton {
                         button,
@@ -1392,6 +1401,7 @@ where
                     .handle_event(PlatformEvent::Focused(true), &state.window);
             }
             EVENT_FOCUS_LOST => {
+                state.window.press_serial.set(0);
                 state.pressed_keys.clear();
                 self.app
                     .handle_event(PlatformEvent::Focused(false), &state.window);
