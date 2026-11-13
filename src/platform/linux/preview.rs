@@ -366,11 +366,17 @@ impl PlatformWindow for PreviewWindow {
         let integrated = config.mode == crate::decoration::DecorationMode::Integrated;
         let layout = crate::decoration::DecorationLayout {
             height: if integrated {
-                config.height.max(40.0)
+                config
+                    .height
+                    .max(crate::decoration::metrics::TITLE_BAR_HEIGHT as f32)
             } else {
                 0.0
             },
-            controls_width: if integrated { 112.0 } else { 0.0 },
+            controls_width: if integrated {
+                crate::decoration::metrics::CONTROLS_WIDTH as f32
+            } else {
+                0.0
+            },
             state: self.decoration.get().state,
         };
         self.decoration.set(layout);

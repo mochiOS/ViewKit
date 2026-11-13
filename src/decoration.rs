@@ -1,6 +1,9 @@
 //! Window chrome shared by the application runtime and platform backends.
 use crate::{geometry::Rect, theme::Color};
 
+/// Shared logical dimensions and physical-pixel conversion for window chrome.
+pub use mochios_viewkit_gpu_protocol::window_decoration as metrics;
+
 /// Selects system chrome or a ViewKit title bar with system-owned controls.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]

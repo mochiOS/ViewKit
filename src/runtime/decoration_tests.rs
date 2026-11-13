@@ -91,8 +91,10 @@ impl PlatformWindow for DecorationWindow {
     ) -> Result<DecorationLayout, crate::decoration::DecorationError> {
         self.calls.set(self.calls.get() + 1);
         let layout = DecorationLayout {
-            height: config.height.max(40.0),
-            controls_width: 112.0,
+            height: config
+                .height
+                .max(crate::decoration::metrics::TITLE_BAR_HEIGHT as f32),
+            controls_width: crate::decoration::metrics::CONTROLS_WIDTH as f32,
             state: self.layout.get().state,
         };
         self.layout.set(layout);

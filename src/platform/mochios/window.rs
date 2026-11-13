@@ -136,7 +136,8 @@ impl PlatformWindow for MochiOsWindow {
             | (u32::from(c.blue) << 8)
             | u32::from(c.alpha);
         request[20..24].copy_from_slice(&packed.to_le_bytes());
-        request[24..28].copy_from_slice(&((scale * 1024.0).round() as u32).to_le_bytes());
+        request[24..28]
+            .copy_from_slice(&((scale * metrics::SCALE_UNIT as f32).round() as u32).to_le_bytes());
         request[28..32].copy_from_slice(
             &(u32::from(config.separator) | (u32::from(config.resizable) << 1)).to_le_bytes(),
         );

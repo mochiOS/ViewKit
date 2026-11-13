@@ -455,7 +455,7 @@ where
             .map(|bar| bar.config(&self.theme))
             .unwrap_or(crate::decoration::DecorationConfig {
                 mode: options.decoration(),
-                height: 40.0,
+                height: crate::decoration::metrics::TITLE_BAR_HEIGHT as f32,
                 background: self.theme.shell.title_bar_background,
                 separator: true,
                 resizable: options.is_resizable(),

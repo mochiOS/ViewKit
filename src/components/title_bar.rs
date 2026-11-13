@@ -38,7 +38,7 @@ impl TitleBar {
     /// Creates a title bar using the system's minimum height and background.
     pub fn new() -> Self {
         Self {
-            height: 40.0,
+            height: crate::decoration::metrics::TITLE_BAR_HEIGHT as f32,
             background: RectangleColor::SubtleSurface,
             separator: true,
             slots: [None, None, None],

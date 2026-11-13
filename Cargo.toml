@@ -13,7 +13,7 @@ build = "build.rs"
 
 [dependencies]
 mochios-fonts = { git = "https://github.com/mochiOS/fonts", rev = "233cb947ed6b10e175b0c6570611eb5605f112e1" }
-mochios-viewkit-gpu-protocol = { version = "0.1.0", git = "https://github.com/mochiOS/syscalls", package = "mochios-viewkit-gpu-protocol" }
+mochios-viewkit-gpu-protocol = { version = "0.1.0", git = "https://github.com/mochiOS/syscalls", rev = "3194d92f2491ef5d256fe7551058226006e3261c", package = "mochios-viewkit-gpu-protocol" }
 cosmic-text = { version = "0.19.0", default-features = false, features = ["std", "swash"] }
 unicode-script = "0.5.8"
 unicode-segmentation = "1.13.3"
