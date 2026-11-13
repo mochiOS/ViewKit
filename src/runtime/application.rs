@@ -182,7 +182,11 @@ where
 }
 
 struct WindowRuntime<Body> {
-    root: Option<Body>,
+    root: Option<crate::components::DecoratedRoot<Body>>,
+    root_invalid: bool,
+    decoration_config: Option<(crate::decoration::DecorationConfig, f64)>,
+    decoration_layout: crate::decoration::DecorationLayout,
+    retired_roots: Vec<(crate::components::DecoratedRoot<Body>, Rect)>,
     alert: Option<RuntimeAlert>,
     viewport: Option<Viewport>,
     text_measurer: TextMeasurer,
@@ -279,6 +283,10 @@ impl<Body> WindowRuntime<Body> {
         text_measurer.set_font_scale(appearance.font_scale());
         Self {
             root: None,
+            root_invalid: false,
+            decoration_config: None,
+            decoration_layout: crate::decoration::DecorationLayout::default(),
+            retired_roots: Vec::new(),
             alert: None,
             viewport: None,
             text_measurer,
@@ -408,6 +416,80 @@ where
             .insert(id, WindowRuntime::new(title, &self.appearance));
     }
 
+    fn sync_decoration(&mut self, window: &dyn PlatformWindow) {
+        let id = window.id();
+        self.ensure_window(id);
+        let state = &self.windows[&id];
+        if state.root.is_some()
+            && !state.root_invalid
+            && state.viewport == Some(window.viewport())
+            && !crate::state::has_state_changed()
+        {
+            if let Some(layout) = window.decoration_layout() {
+                if layout != state.decoration_layout {
+                    let state = self.windows.get_mut(&id).unwrap();
+                    state.decoration_layout = layout;
+                    state.root_invalid = true;
+                    state.pending_redraw = RedrawRequest::Full;
+                    self.app.decoration_changed(id, layout);
+                }
+            }
+            return;
+        }
+        self.theme = self.app.theme().unwrap_or_else(|| self.appearance.theme());
+        Theme::set_current(self.theme);
+        if self.windows[&id].alert.is_some() {
+            return;
+        }
+        let options = self.app.window_for(id);
+        if options.is_fullscreen() || options.is_system_modal() || options.is_secure_overlay() {
+            return;
+        }
+        if let Err(error) = options.validate() {
+            eprintln!("[ViewKit] {error}");
+            return;
+        }
+        let mut config = options
+            .titlebar
+            .as_ref()
+            .map(|bar| bar.config(&self.theme))
+            .unwrap_or(crate::decoration::DecorationConfig {
+                mode: options.decoration(),
+                height: 40.0,
+                background: self.theme.shell.title_bar_background,
+                separator: true,
+                resizable: options.is_resizable(),
+            });
+        config.resizable = options.is_resizable();
+        let key = (config, window.viewport().scale_factor);
+        if self.windows[&id].decoration_config == Some(key) {
+            if let Some(layout) = window.decoration_layout() {
+                let state = self.windows.get_mut(&id).unwrap();
+                if layout != state.decoration_layout {
+                    state.decoration_layout = layout;
+                    state.root_invalid = true;
+                    state.pending_redraw = RedrawRequest::Full;
+                    self.app.decoration_changed(id, layout);
+                }
+            }
+            return;
+        }
+        match window.configure_decoration(config) {
+            Ok(layout) => {
+                let state = self.windows.get_mut(&id).unwrap();
+                state.decoration_config = Some(key);
+                state.decoration_layout = layout;
+                state.root_invalid = true;
+                state.pending_redraw = RedrawRequest::Full;
+                self.app.decoration_changed(id, layout);
+            }
+            Err(error) => {
+                self.windows.get_mut(&id).unwrap().decoration_config = Some(key);
+                self.app.decoration_failed(id, error);
+            }
+        }
+    }
+
     fn rebuild_root(&mut self, id: WindowId, viewport: Viewport) {
         self.rebuild_root_with_redraw(id, viewport, RedrawRequest::Full);
     }
@@ -429,12 +511,61 @@ where
             state.pending_redraw = redraw;
             return;
         }
+        let options = self.app.window_for(id);
+        if let Err(error) = options.validate() {
+            self.app.decoration_failed(id, error);
+            return;
+        }
+        let integrated = options.decoration() == crate::decoration::DecorationMode::Integrated;
+        let titlebar = if options.is_fullscreen()
+            || options.is_system_modal()
+            || options.is_secure_overlay()
+        {
+            None
+        } else {
+            options
+                .titlebar
+                .or_else(|| integrated.then(crate::components::TitleBar::new))
+        };
         let context = ViewContext::new(viewport);
         self.theme = self.app.theme().unwrap_or_else(|| self.appearance.theme());
         Theme::set_current(self.theme);
         let root = self.app.body_for(id, &context);
         let state = self.windows.get_mut(&id).expect("window was ensured");
-        state.root = Some(root);
+        if let Some(old) = state.root.take() {
+            let old_bounds = state
+                .viewport
+                .map_or(viewport.logical_bounds(), |v| v.logical_bounds());
+            // Keep the last painted tree until reconciliation. An event burst
+            // must not cancel a surviving drag just because many transient
+            // trees were constructed before the next frame.
+            if state.retired_roots.len() == 64 {
+                let (old, bounds) = state.retired_roots.remove(1);
+                let mut cx = EventContext::new(
+                    &self.theme,
+                    &self.theme.typography,
+                    &mut state.text_measurer,
+                );
+                old.handle_event(
+                    bounds,
+                    &crate::event::ViewEvent::ReconcileComponents {
+                        retained: state
+                            .accessibility_nodes
+                            .iter()
+                            .filter_map(|node| node.identity)
+                            .collect(),
+                    },
+                    &mut cx,
+                );
+            }
+            state.retired_roots.push((old, old_bounds));
+        }
+        state.root = Some(crate::components::DecoratedRoot {
+            body: root,
+            titlebar,
+            layout: state.decoration_layout,
+        });
+        state.root_invalid = false;
         state.viewport = Some(viewport);
         state.pending_redraw = redraw;
 
@@ -444,7 +575,9 @@ where
     fn ensure_root(&mut self, id: WindowId, viewport: Viewport) {
         self.ensure_window(id);
         let state = self.windows.get(&id).expect("window was ensured");
-        if (state.root.is_none() && state.alert.is_none()) || state.viewport != Some(viewport) {
+        if ((state.root.is_none() || state.root_invalid) && state.alert.is_none())
+            || state.viewport != Some(viewport)
+        {
             self.rebuild_root(id, viewport);
         }
     }
@@ -454,7 +587,7 @@ where
             if id == current {
                 continue;
             }
-            state.root = None;
+            state.root_invalid = true;
             state.pending_redraw = RedrawRequest::Full;
             self.pending_window_commands
                 .push(PlatformWindowCommand::Redraw { id });
@@ -466,7 +599,10 @@ impl<A> PlatformApplication for ApplicationRuntime<A>
 where
     A: App,
 {
-    fn protected_presentation(&self, window: WindowId) -> Option<crate::platform::ProtectedPresentation> {
+    fn protected_presentation(
+        &self,
+        window: WindowId,
+    ) -> Option<crate::platform::ProtectedPresentation> {
         self.app.protected_presentation_for_window(window)
     }
     fn protected_presentation_failed(&mut self, window: WindowId) {
@@ -480,9 +616,10 @@ where
             return false;
         }
         for (&id, state) in &mut self.windows {
-            state.root = None;
+            state.root_invalid = true;
             state.pending_redraw = RedrawRequest::Full;
-            self.pending_window_commands.push(PlatformWindowCommand::Redraw { id });
+            self.pending_window_commands
+                .push(PlatformWindowCommand::Redraw { id });
         }
         true
     }
@@ -504,7 +641,7 @@ where
         let handled = self.app.handle_platform_message(message);
         if handled && take_state_changed() {
             for (&id, state) in &mut self.windows {
-                state.root = None;
+                state.root_invalid = true;
                 state.pending_redraw = RedrawRequest::Full;
                 self.pending_window_commands
                     .push(PlatformWindowCommand::Redraw { id });
@@ -523,7 +660,7 @@ where
             .handle_platform_message_with_handles(message, handles);
         if handled && take_state_changed() {
             for (&id, state) in &mut self.windows {
-                state.root = None;
+                state.root_invalid = true;
                 state.pending_redraw = RedrawRequest::Full;
                 self.pending_window_commands
                     .push(PlatformWindowCommand::Redraw { id });
@@ -550,6 +687,10 @@ where
         for request in requests {
             match request {
                 WindowRequest::Open(id) => {
+                    if let Err(error) = self.app.window_for(id).validate() {
+                        request_alert_window("Cannot Open Window", error.to_string(), || {});
+                        continue;
+                    }
                     self.ensure_window(id);
                     self.pending_window_commands
                         .push(PlatformWindowCommand::Open {
@@ -631,6 +772,7 @@ where
     }
 
     fn handle_event(&mut self, mut event: PlatformEvent, window: &dyn PlatformWindow) {
+        self.sync_decoration(window);
         let window_id = window.id();
         let alert_window = self
             .windows
@@ -751,6 +893,7 @@ where
                 &self.theme.typography,
                 &mut state.text_measurer,
             );
+            context.input_serial = window.input_serial();
             context.set_pane_container(Some(viewport.logical_bounds()));
             context.set_command_context(
                 &state.command_statuses,
@@ -760,6 +903,10 @@ where
             state
                 .event_dispatcher
                 .dispatch(root, viewport.logical_bounds(), &event, &mut context);
+
+            if let Some((serial, operation)) = context.take_window_interaction() {
+                window.begin_window_interaction(serial, operation);
+            }
 
             let mut commands = context.take_command_requests();
             let mut dispatched = 0usize;
@@ -839,6 +986,7 @@ where
     }
 
     fn draw(&mut self, window: &dyn PlatformWindow, display_list: &mut DisplayList) -> Rect {
+        self.sync_decoration(window);
         let window_id = window.id();
         let viewport = window.viewport();
         self.ensure_root(window_id, viewport);
@@ -901,6 +1049,25 @@ where
         state
             .event_dispatcher
             .set_accessibility_nodes(&state.accessibility_nodes);
+        if !state.retired_roots.is_empty() {
+            let retained = state
+                .accessibility_nodes
+                .iter()
+                .filter_map(|n| n.identity)
+                .collect::<Vec<_>>();
+            let mut cx = EventContext::new(
+                &self.theme,
+                &self.theme.typography,
+                &mut state.text_measurer,
+            );
+            let event = crate::event::ViewEvent::ReconcileComponents { retained };
+            for (root, bounds) in state.retired_roots.drain(..) {
+                root.handle_event(bounds, &event, &mut cx);
+            }
+            if cx.take_keyboard_capture_request() == Some(false) {
+                window.set_keyboard_capture(false);
+            }
+        }
         window.update_accessibility(&state.accessibility_nodes);
 
         dirty_bounds
@@ -930,7 +1097,7 @@ where
         Theme::set_current(self.theme);
         for (&id, state) in &mut self.windows {
             state.text_measurer.set_font_scale(font_scale);
-            state.root = None;
+            state.root_invalid = true;
             state.pending_redraw = RedrawRequest::Full;
             self.pending_window_commands
                 .push(PlatformWindowCommand::Redraw { id });
@@ -956,9 +1123,10 @@ where
         // A close guard may present an asynchronous confirmation. Rebuild it
         // without removing windows or spinning on the rejected quit request.
         for (&id, state) in &mut self.windows {
-            state.root = None;
+            state.root_invalid = true;
             state.pending_redraw = RedrawRequest::Full;
-            self.pending_window_commands.push(PlatformWindowCommand::Redraw { id });
+            self.pending_window_commands
+                .push(PlatformWindowCommand::Redraw { id });
         }
         false
     }
@@ -1250,6 +1418,7 @@ where
 {
     let app = A::new();
     let options = app.window_for(WindowId::PRIMARY);
+    options.validate()?;
 
     let runtime = ApplicationRuntime::new(app);
 
@@ -1261,6 +1430,9 @@ where
             crate::platform::linux::preview::run(runtime, window_config(options), &socket)
                 .map_err(crate::platform::linux::LinuxBackendError::Preview)?;
             return Ok(());
+        }
+        if options.decoration() == crate::decoration::DecorationMode::Integrated {
+            return Err(crate::decoration::DecorationError::Unsupported.into());
         }
         let backend = LinuxBackend::new(runtime, window_config(options));
 
@@ -1284,6 +1456,9 @@ where
     {
         use crate::platform::windows::WindowsBackend;
 
+        if options.decoration() == crate::decoration::DecorationMode::Integrated {
+            return Err(crate::decoration::DecorationError::Unsupported.into());
+        }
         let backend = WindowsBackend::new(runtime, window_config(options));
 
         backend.run()?;
@@ -1314,6 +1489,9 @@ fn window_config(options: crate::app::WindowOptions) -> WindowConfig {
 /// ViewKitアプリケーションの起動中に発生するエラーです。
 #[derive(Debug, thiserror::Error)]
 pub enum ViewKitError {
+    /// Invalid or unsupported window decoration configuration.
+    #[error(transparent)]
+    Decoration(#[from] crate::decoration::DecorationError),
     #[cfg(target_os = "linux")]
     #[error(transparent)]
     Linux(#[from] crate::platform::linux::LinuxBackendError),
@@ -1959,3 +2137,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "decoration_tests.rs"]
+mod decoration_tests;

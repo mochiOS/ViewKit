@@ -7,8 +7,8 @@ pub mod command;
 pub mod components;
 pub mod continuous_corner;
 mod contour;
-pub mod draw_command;
 pub mod dispatch;
+pub mod draw_command;
 pub mod edge_insets;
 pub mod event;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -35,3 +35,6 @@ pub use runtime::{
     request_close_key_window, request_close_window, request_document_confirmation_window,
     request_exit, request_new_window, run,
 };
+
+/// Platform-protected window decoration configuration and gestures.
+pub mod decoration;

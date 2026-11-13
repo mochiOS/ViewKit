@@ -120,6 +120,7 @@ fn surface_token_from_event(event: &[u8], len: usize) -> Option<u64> {
             | EVENT_CONFIGURE
             | EVENT_POINTER_SCROLL
             | EVENT_APPEARANCE_CHANGED
+            | 15
     ) {
         16
     } else {
@@ -911,14 +912,14 @@ where
             return Ok(());
         }
 
-        let target = surface_token_from_event(&event, message_len)
-            .and_then(|token| {
-                windows
-                    .iter()
-                    .position(|state| state.surface.token() == token)
-            })
-            .or_else(|| (windows.len() == 1).then_some(0))
-            .or_else(|| windows.iter().position(|state| state.config.fullscreen));
+        let target = match surface_token_from_event(&event, message_len) {
+            Some(token) => windows
+                .iter()
+                .position(|state| state.surface.token() == token),
+            None => (windows.len() == 1)
+                .then_some(0)
+                .or_else(|| windows.iter().position(|state| state.config.fullscreen)),
+        };
         let Some(target) = target else {
             return Ok(());
         };
@@ -952,8 +953,7 @@ where
             return Ok(());
         }
 
-        let mut core_event = [0u8; 32];
-        core_event.copy_from_slice(&event[..32]);
+        let core_event = event_source::core_event(&event[..message_len]);
         if len >= 12 && Self::queue_compositor_pointer_motion(state, core_event) {
             self.metrics.input_events = self.metrics.input_events.saturating_add(1);
             self.metrics.coalesced_pointer_events =
@@ -1265,6 +1265,22 @@ where
         let logical_y = b as f32 / scale;
 
         match kind {
+            15 => {
+                state
+                    .window
+                    .decoration_layout
+                    .set(crate::decoration::DecorationLayout {
+                        height: a as f32 / scale,
+                        controls_width: b as f32 / scale,
+                        state: crate::decoration::WindowState::from_raw(c).unwrap_or_default(),
+                    });
+                self.app.handle_event(
+                    PlatformEvent::Resized {
+                        viewport: state.window.viewport(),
+                    },
+                    &state.window,
+                );
+            }
             EVENT_POINTER_ENTER | EVENT_POINTER_MOTION => {
                 self.app.handle_event(
                     PlatformEvent::PointerMoved {
@@ -1313,6 +1329,13 @@ where
                 } else {
                     Self::toggle_button_state(state, button_id)
                 };
+                state.window.input_serial.set(
+                    if button == PointerButton::Primary && button_state == ButtonState::Pressed {
+                        u64::from_le_bytes(event[24..32].try_into().unwrap())
+                    } else {
+                        0
+                    },
+                );
                 self.app.handle_event(
                     PlatformEvent::PointerButton {
                         button,
@@ -1320,6 +1343,7 @@ where
                     },
                     &state.window,
                 );
+                state.window.input_serial.set(0);
             }
             EVENT_POINTER_SCROLL => {
                 self.app.handle_event(

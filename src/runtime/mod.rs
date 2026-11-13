@@ -26,3 +26,6 @@ pub use node::*;
 pub use runtime::*;
 pub use state::*;
 pub use view_mode::*;
+
+/// Input-authorized window operation used by AppCore.
+pub use crate::decoration::begin_window_interaction;

@@ -114,6 +114,7 @@ impl Default for TextEditorInteractionInner {
 
 #[derive(Clone, Default)]
 pub struct TextEditorInteractionState {
+    identity: crate::accessibility::AccessibilityIdentity,
     inner: Rc<RefCell<TextEditorInteractionInner>>,
 }
 
@@ -986,6 +987,7 @@ impl View for TextEditor {
         node.enabled = self.enabled;
         node.focusable = true;
         node.focused = focused;
+        node.identity = Some(self.interaction.identity);
         context.record_accessibility(node);
 
         Rectangle::new()
@@ -1193,6 +1195,14 @@ impl View for TextEditor {
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
+        if let ViewEvent::ReconcileComponents { retained } = event {
+            if !retained.contains(&self.interaction.identity) {
+                self.handle_event(bounds, &ViewEvent::PointerLeft, context);
+                self.handle_event(bounds, &ViewEvent::FocusChanged { focused: false }, context);
+            }
+            return EventResult::Ignored;
+        }
+
         if self.read_only && self.interaction.is_focused() {
             let edits = match event {
                 ViewEvent::TextInput { .. } | ViewEvent::Backspace | ViewEvent::Delete => true,

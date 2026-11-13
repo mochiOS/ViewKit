@@ -31,7 +31,11 @@ impl ContextMenuRequest {
     /// built-in menus. Use the returned `request_id` to match its result;
     /// application-local counters can collide with menus opened by controls.
     pub fn new(position: Point, items: Vec<ContextMenuItem>) -> Self {
-        Self { request_id: Self::next_id(), position, items }
+        Self {
+            request_id: Self::next_id(),
+            position,
+            items,
+        }
     }
 
     pub(crate) fn next_id() -> u64 {
@@ -43,6 +47,11 @@ impl ContextMenuRequest {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ViewEvent {
+    /// Runtime lifecycle notification to old view trees after a rebuild.
+    /// Identified components absent from the new tree release interaction.
+    ReconcileComponents {
+        retained: Vec<crate::accessibility::AccessibilityIdentity>,
+    },
     PointerMoved {
         position: Point,
     },
@@ -155,7 +164,8 @@ impl ViewEvent {
                 *position
             }
 
-            Self::PointerLeft
+            Self::ReconcileComponents { .. }
+            | Self::PointerLeft
             | Self::ModifiersChanged { .. }
             | Self::KeyPressed { .. }
             | Self::KeyReleased { .. }
@@ -190,7 +200,8 @@ impl ViewEvent {
     pub fn requires_broadcast(&self) -> bool {
         matches!(
             self,
-            Self::PointerMoved { .. }
+            Self::ReconcileComponents { .. }
+                | Self::PointerMoved { .. }
                 | Self::PointerReleased { .. }
                 | Self::PointerFocusRequested { .. }
                 | Self::KeyboardFocusRequested { .. }
@@ -279,6 +290,8 @@ pub struct EventContext<'a> {
     focus_visible: bool,
     modifiers: KeyModifiers,
     pointer_press_intercepted: bool,
+    pub(crate) input_serial: u64,
+    window_interaction: core::cell::Cell<Option<(u64, crate::decoration::WindowInteraction)>>,
     command_requests: Vec<CommandId>,
     command_statuses: &'a [CommandStatus],
     command_target: Option<Point>,
@@ -293,6 +306,52 @@ impl<'a> EventContext<'a> {
 
     pub(crate) fn set_pane_container(&mut self, bounds: Option<Rect>) -> Option<Rect> {
         std::mem::replace(&mut self.pane_container, bounds)
+    }
+
+    /// Borrows authorization for this dispatch's actual primary press.
+    /// The token cannot outlive the event context or be constructed by apps.
+    pub fn window_interaction_token(
+        &self,
+    ) -> Option<crate::decoration::WindowInteractionToken<'_>> {
+        (self.input_serial != 0).then_some(crate::decoration::WindowInteractionToken {
+            serial: self.input_serial,
+            request: &self.window_interaction,
+        })
+    }
+
+    /// Requests a move only while handling an authenticated primary press.
+    /// Returns false when no active token is present or it was already used.
+    pub fn request_window_move(&mut self) -> bool {
+        self.request_window_interaction(crate::decoration::WindowInteraction::Move)
+    }
+
+    /// Requests an input-authorized resize. The platform also enforces the
+    /// window's resizable property and consumes the press token once.
+    pub fn request_window_resize(&mut self, edge: crate::decoration::ResizeEdge) -> bool {
+        self.request_window_interaction(crate::decoration::WindowInteraction::Resize(edge))
+    }
+
+    fn request_window_interaction(
+        &mut self,
+        interaction: crate::decoration::WindowInteraction,
+    ) -> bool {
+        if self.input_serial == 0 || self.window_interaction.get().is_some() {
+            return false;
+        }
+        self.window_interaction
+            .set(Some((self.input_serial, interaction)));
+        self.input_serial = 0;
+        true
+    }
+
+    pub(crate) fn take_window_interaction(
+        &mut self,
+    ) -> Option<(u64, crate::decoration::WindowInteraction)> {
+        let request = self.window_interaction.take();
+        if request.is_some() {
+            self.input_serial = 0;
+        }
+        request
     }
 
     pub fn new(
@@ -312,6 +371,8 @@ impl<'a> EventContext<'a> {
             focus_visible: true,
             modifiers: KeyModifiers::default(),
             pointer_press_intercepted: false,
+            input_serial: 0,
+            window_interaction: core::cell::Cell::new(None),
             command_requests: Vec::new(),
             command_statuses: &[],
             command_target: None,
@@ -460,6 +521,8 @@ pub struct EventDispatcher {
     pointer_position: Option<Point>,
     focus_order: Vec<Rect>,
     focused_bounds: Option<Rect>,
+    focused_identity: Option<crate::accessibility::AccessibilityIdentity>,
+    focus_nodes: Vec<(Rect, Option<crate::accessibility::AccessibilityIdentity>)>,
     focus_scopes: Vec<FocusScopeState>,
     pending_focus_request: Option<Option<Rect>>,
     window_focused: bool,
@@ -495,6 +558,20 @@ impl EventDispatcher {
     /// 消えたコントロールから別のコントロールへ自動で移動しません。
     /// ダイアログのフォーカス範囲への移動と明示的な要求は別に扱います。
     pub fn set_accessibility_nodes(&mut self, nodes: &[AccessibilityNode]) {
+        let previous_identity = self.focused_identity;
+        let previous_scopes = self
+            .focus_scopes
+            .iter()
+            .map(|s| s.bounds)
+            .collect::<Vec<_>>();
+        self.focus_nodes.clear();
+        self.focus_nodes.extend(
+            nodes
+                .iter()
+                .filter(|n| n.focusable && n.enabled)
+                .map(|n| (n.bounds, n.identity)),
+        );
+
         let scope_entries: Vec<(usize, Rect)> = nodes
             .iter()
             .enumerate()
@@ -537,6 +614,12 @@ impl EventDispatcher {
                 restore_focus: self.focused_bounds,
             });
             self.focused_bounds = target;
+            self.focused_identity = target.and_then(|b| {
+                self.focus_nodes
+                    .iter()
+                    .find_map(|(n, id)| (*n == b).then_some(*id))
+                    .flatten()
+            });
             self.pending_focus_request = Some(target);
         }
 
@@ -553,11 +636,36 @@ impl EventDispatcher {
         );
 
         if !self.window_focused {
+            self.focused_identity = None;
             self.focused_bounds = None;
             self.pending_focus_request = None;
             return;
         }
 
+        if previous_scopes
+            == self
+                .focus_scopes
+                .iter()
+                .map(|s| s.bounds)
+                .collect::<Vec<_>>()
+        {
+            if let Some(id) = previous_identity {
+                let next = self
+                    .focus_nodes
+                    .iter()
+                    .find_map(|(b, i)| (*i == Some(id)).then_some(*b));
+                if next != self.focused_bounds {
+                    self.focused_bounds = next;
+                    self.pending_focus_request = Some(next);
+                }
+            }
+        }
+        self.focused_identity = self.focused_bounds.and_then(|b| {
+            self.focus_nodes
+                .iter()
+                .find_map(|(n, id)| (*n == b).then_some(*id))
+                .flatten()
+        });
         // None is an intentional state (startup, blank click, or explicit clear).
         // A disappearing control loses focus; it must not select a sibling.
         if self
@@ -612,6 +720,7 @@ impl EventDispatcher {
             if !focused {
                 self.pointer_position = None;
                 self.focused_bounds = None;
+                self.focused_identity = None;
                 self.pending_focus_request = None;
             }
         }
@@ -654,6 +763,12 @@ impl EventDispatcher {
             ));
             let target = self.next_focus(modifiers.shift());
             self.focused_bounds = target;
+            self.focused_identity = target.and_then(|b| {
+                self.focus_nodes
+                    .iter()
+                    .find_map(|(n, id)| (*n == b).then_some(*id))
+                    .flatten()
+            });
             return result.merge(root.handle_event(
                 bounds,
                 &ViewEvent::KeyboardFocusRequested { bounds: target },
@@ -692,6 +807,12 @@ impl EventDispatcher {
                 .copied()
                 .find(|bounds| bounds.contains(position));
             self.focused_bounds = target;
+            self.focused_identity = target.and_then(|b| {
+                self.focus_nodes
+                    .iter()
+                    .find_map(|(n, id)| (*n == b).then_some(*id))
+                    .flatten()
+            });
             result = result.merge(root.handle_event(
                 bounds,
                 &ViewEvent::KeyboardFocusRequested { bounds: target },
@@ -708,6 +829,12 @@ impl EventDispatcher {
         if let Some(requested) = context.take_keyboard_focus_request() {
             let target = requested.filter(|bounds| self.focus_order.contains(bounds));
             self.focused_bounds = target;
+            self.focused_identity = target.and_then(|b| {
+                self.focus_nodes
+                    .iter()
+                    .find_map(|(n, id)| (*n == b).then_some(*id))
+                    .flatten()
+            });
             result = result.merge(root.handle_event(
                 bounds,
                 &ViewEvent::KeyboardFocusRequested { bounds: target },
@@ -1198,7 +1325,17 @@ mod unfocused_state_tests {
                 &mut c,
             );
             assert_eq!(state.is_focused(), x < 200.);
-            if x < 200. { d.dispatch(&root,bounds,&PlatformEvent::TextInput {text:"kept".into()},&mut c); assert_eq!(state.value(),"kept"); }
+            if x < 200. {
+                d.dispatch(
+                    &root,
+                    bounds,
+                    &PlatformEvent::TextInput {
+                        text: "kept".into(),
+                    },
+                    &mut c,
+                );
+                assert_eq!(state.value(), "kept");
+            }
         }
         d.set_accessibility_nodes(&nodes);
         d.dispatch(
@@ -1250,5 +1387,41 @@ mod unfocused_state_tests {
         d.set_accessibility_nodes(&[first, second]);
         assert_eq!(d.focused_bounds, None);
         assert_eq!(d.pending_focus_request, Some(None));
+    }
+}
+
+#[cfg(test)]
+mod identified_focus_tests {
+    use super::*;
+    #[test]
+    fn focused_identity_follows_reorder_and_is_not_transferred_to_a_replacement() {
+        let a = Rect::new(0.0, 0.0, 100.0, 40.0);
+        let b = Rect::new(100.0, 0.0, 100.0, 40.0);
+        let mut first =
+            AccessibilityNode::new(crate::accessibility::AccessibilityRole::TextField, a);
+        first.identity =
+            Some(crate::accessibility::AccessibilityIdentity::Component { id: 1, element: 0 });
+        first.focusable = true;
+        let mut second = first.clone();
+        second.identity =
+            Some(crate::accessibility::AccessibilityIdentity::Component { id: 2, element: 0 });
+        second.bounds = b;
+        let mut d = EventDispatcher::new();
+        d.window_focused = true;
+        d.focused_bounds = Some(a);
+        d.focused_identity =
+            Some(crate::accessibility::AccessibilityIdentity::Component { id: 1, element: 0 });
+        first.bounds = b;
+        second.bounds = a;
+        d.set_accessibility_nodes(&[first, second.clone()]);
+        assert_eq!(d.focused_bounds, Some(b));
+        assert_eq!(
+            d.focused_identity,
+            Some(crate::accessibility::AccessibilityIdentity::Component { id: 1, element: 0 })
+        );
+        second.bounds = b;
+        d.set_accessibility_nodes(&[second]);
+        assert_eq!(d.focused_bounds, None);
+        assert_eq!(d.focused_identity, None);
     }
 }

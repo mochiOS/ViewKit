@@ -495,6 +495,14 @@ impl View for Switch {
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
+        if let ViewEvent::ReconcileComponents { retained } = event {
+            if !retained.contains(&self.interaction_state.button.identity()) {
+                self.handle_event(bounds, &ViewEvent::PointerLeft, context);
+                self.handle_event(bounds, &ViewEvent::FocusChanged { focused: false }, context);
+            }
+            return EventResult::Ignored;
+        }
+
         let button_result = self
             .button(context.theme)
             .handle_event(bounds, event, context);

@@ -113,6 +113,39 @@ impl Default for WindowConfig {
 }
 
 pub trait PlatformWindow {
+    /// Negotiates chrome only when mode, dimensions, scale or theme changes.
+    /// Unsupported integrated chrome fails closed, preserving system controls.
+    fn configure_decoration(
+        &self,
+        config: crate::decoration::DecorationConfig,
+    ) -> Result<crate::decoration::DecorationLayout, crate::decoration::DecorationError> {
+        if config.mode == crate::decoration::DecorationMode::System {
+            Ok(crate::decoration::DecorationLayout::default())
+        } else {
+            Err(crate::decoration::DecorationError::Unsupported)
+        }
+    }
+
+    /// Current platform geometry, updated by state or scale notifications.
+    fn decoration_layout(&self) -> Option<crate::decoration::DecorationLayout> {
+        None
+    }
+
+    /// Returns the token for the primary press currently being dispatched.
+    /// Backends must clear it immediately after dispatch, including releases.
+    fn input_serial(&self) -> u64 {
+        0
+    }
+
+    /// Starts a gesture after validating the current platform input token.
+    fn begin_window_interaction(
+        &self,
+        _serial: u64,
+        _operation: crate::decoration::WindowInteraction,
+    ) -> bool {
+        false
+    }
+
     fn id(&self) -> WindowId;
 
     fn request_redraw(&self);

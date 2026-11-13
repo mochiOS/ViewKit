@@ -27,6 +27,24 @@ const IO_BUDGET: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub enum Packet {
+    Decoration {
+        id: u64,
+        config: crate::decoration::DecorationConfig,
+    },
+    DecorationLayout {
+        id: u64,
+        layout: crate::decoration::DecorationLayout,
+    },
+    Input {
+        id: u64,
+        serial: u64,
+        event: PlatformEvent,
+    },
+    WindowInteraction {
+        id: u64,
+        serial: u64,
+        edge: u32,
+    },
     Open {
         id: u64,
         config: WindowConfig,
@@ -317,6 +335,9 @@ struct PreviewWindow {
     title: RefCell<String>,
     sent_title: String,
     cursor: Cell<CursorIcon>,
+    decoration: Cell<crate::decoration::DecorationLayout>,
+    input: Cell<u64>,
+    pending: RefCell<Vec<Packet>>,
 }
 
 impl PreviewWindow {
@@ -330,11 +351,60 @@ impl PreviewWindow {
             title: RefCell::new(config.title.clone()),
             sent_title: config.title.clone(),
             cursor: Cell::new(CursorIcon::Default),
+            decoration: Cell::new(crate::decoration::DecorationLayout::default()),
+            input: Cell::new(0),
+            pending: RefCell::new(Vec::new()),
         }
     }
 }
 
 impl PlatformWindow for PreviewWindow {
+    fn configure_decoration(
+        &self,
+        config: crate::decoration::DecorationConfig,
+    ) -> Result<crate::decoration::DecorationLayout, crate::decoration::DecorationError> {
+        let integrated = config.mode == crate::decoration::DecorationMode::Integrated;
+        let layout = crate::decoration::DecorationLayout {
+            height: if integrated {
+                config.height.max(40.0)
+            } else {
+                0.0
+            },
+            controls_width: if integrated { 112.0 } else { 0.0 },
+            state: self.decoration.get().state,
+        };
+        self.decoration.set(layout);
+        self.pending.borrow_mut().push(Packet::Decoration {
+            id: self.id.raw(),
+            config,
+        });
+        Ok(layout)
+    }
+    fn decoration_layout(&self) -> Option<crate::decoration::DecorationLayout> {
+        Some(self.decoration.get())
+    }
+    fn input_serial(&self) -> u64 {
+        self.input.get()
+    }
+    fn begin_window_interaction(
+        &self,
+        serial: u64,
+        op: crate::decoration::WindowInteraction,
+    ) -> bool {
+        if serial == 0 || self.input.replace(0) != serial {
+            return false;
+        }
+        let edge = match op {
+            crate::decoration::WindowInteraction::Move => 0,
+            crate::decoration::WindowInteraction::Resize(e) => e as u32,
+        };
+        self.pending.borrow_mut().push(Packet::WindowInteraction {
+            id: self.id.raw(),
+            serial,
+            edge,
+        });
+        true
+    }
     fn id(&self) -> WindowId {
         self.id
     }
@@ -386,6 +456,41 @@ pub(crate) fn run<A: PlatformApplication>(
         }
         for packet in connection.poll()? {
             match packet {
+                Packet::DecorationLayout { id, layout } => {
+                    if let Some(id) = WindowId::from_raw(id) {
+                        if let Some(window) = windows.get(&id) {
+                            window.decoration.set(layout);
+                            window.request_redraw();
+                            app.handle_event(
+                                PlatformEvent::Resized {
+                                    viewport: window.viewport,
+                                },
+                                window,
+                            );
+                        }
+                    }
+                }
+                Packet::Input { id, serial, event } => {
+                    if let Some(id) = WindowId::from_raw(id) {
+                        if let Some(window) = windows.get(&id) {
+                            window.input.set(
+                                if matches!(
+                                    event,
+                                    PlatformEvent::PointerButton {
+                                        button: crate::platform::PointerButton::Primary,
+                                        state: crate::platform::ButtonState::Pressed
+                                    }
+                                ) {
+                                    serial
+                                } else {
+                                    0
+                                },
+                            );
+                            app.handle_event(event, window);
+                            window.input.set(0);
+                        }
+                    }
+                }
                 Packet::Event { id, event } => {
                     let Some(id) = WindowId::from_raw(id) else {
                         continue;
@@ -445,6 +550,9 @@ pub(crate) fn run<A: PlatformApplication>(
         }
         let now = Instant::now();
         for (&id, window) in &mut windows {
+            for packet in window.pending.borrow_mut().drain(..) {
+                connection.send(packet)?;
+            }
             if app
                 .next_redraw_at(id)
                 .is_some_and(|deadline| deadline <= now)
@@ -455,6 +563,9 @@ pub(crate) fn run<A: PlatformApplication>(
                 let mut list = DisplayList::new();
                 app.handle_event(PlatformEvent::RedrawRequested, window);
                 let dirty = app.draw(window, &mut list);
+                for packet in window.pending.borrow_mut().drain(..) {
+                    connection.send(packet)?;
+                }
                 if !dirty.is_empty() {
                     connection.send(Packet::Frame {
                         id: id.raw(),

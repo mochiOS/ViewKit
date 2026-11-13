@@ -3,7 +3,7 @@ use super::{
     BorderStyle, Button, ButtonInteractionState, ButtonStyle, Rectangle, RectangleColor, Text,
     ZStackAlignment,
 };
-use crate::accessibility::{AccessibilityNode, AccessibilityRole};
+use crate::accessibility::{AccessibilityIdentity, AccessibilityNode, AccessibilityRole};
 use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Point, Rect, Size};
@@ -25,6 +25,7 @@ struct SegmentedItem {
 
 #[derive(Clone)]
 pub struct SegmentedControlInteractionState {
+    identity: AccessibilityIdentity,
     indicator_shape: OmochiShape,
     selection_motion: MagneticSelectionMotion,
     items: Rc<RefCell<Vec<ButtonInteractionState>>>,
@@ -33,6 +34,7 @@ pub struct SegmentedControlInteractionState {
 impl SegmentedControlInteractionState {
     pub fn new() -> Self {
         Self {
+            identity: AccessibilityIdentity::default(),
             indicator_shape: OmochiShape::displacement(OmochiPreset::SelectionIndicator),
             selection_motion: MagneticSelectionMotion::default(),
             items: Rc::new(RefCell::new(Vec::new())),
@@ -278,6 +280,7 @@ impl View for SegmentedControl {
         }
 
         let mut node = AccessibilityNode::new(AccessibilityRole::RadioGroup, bounds);
+        node.identity = Some(self.interaction_state.identity);
         node.label = self.accessibility_label.clone();
         node.enabled = self.enabled;
         context.record_accessibility(node);
@@ -403,6 +406,14 @@ impl View for SegmentedControl {
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
+        if let ViewEvent::ReconcileComponents { retained } = event {
+            if !retained.contains(&self.interaction_state.identity) {
+                self.interaction_state
+                    .selection_motion
+                    .cancel(bounds.origin.x);
+                self.interaction_state.indicator_shape.reset();
+            }
+        }
         let inset = context.theme().layout.segmented_control_inset;
         let segment_bounds = self.segment_bounds(bounds, inset);
         let centers = self.segment_centers(&segment_bounds);
@@ -655,5 +666,48 @@ mod tests {
         assert_eq!(command.bounds.size.width, 100.0);
         assert_eq!(command.bounds.size.height, 18.0);
         assert_eq!(command.bounds.origin.y, bounds.origin.y + 8.0);
+    }
+}
+
+#[cfg(test)]
+mod drag_lifecycle_tests {
+    use super::*;
+    use crate::{state::State, theme::Theme, typography::TextMeasurer};
+    #[test]
+    fn removal_cancels_drag_but_retained_identity_preserves_it() {
+        let selection = State::new(0usize);
+        let interaction = SegmentedControlInteractionState::new();
+        let view = SegmentedControl::with_interaction(selection.binding(), interaction.clone())
+            .item(0, "First")
+            .item(1, "Second");
+        let theme = Theme::LIGHT;
+        let mut text = TextMeasurer::new();
+        let mut cx = EventContext::new(&theme, &theme.typography, &mut text);
+        let bounds = Rect::new(0.0, 0.0, 320.0, 44.0);
+        view.handle_event(
+            bounds,
+            &ViewEvent::PointerPressed {
+                position: Point::new(30.0, 12.0),
+                button: PointerButton::Primary,
+            },
+            &mut cx,
+        );
+        assert!(interaction.selection_motion.is_dragging());
+        view.handle_event(
+            bounds,
+            &ViewEvent::ReconcileComponents {
+                retained: vec![interaction.identity],
+            },
+            &mut cx,
+        );
+        assert!(interaction.selection_motion.is_dragging());
+        view.handle_event(
+            bounds,
+            &ViewEvent::ReconcileComponents {
+                retained: Vec::new(),
+            },
+            &mut cx,
+        );
+        assert!(!interaction.selection_motion.is_dragging());
     }
 }

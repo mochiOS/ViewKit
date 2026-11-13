@@ -24,6 +24,10 @@ pub struct IconButtonInteractionState {
 }
 
 impl IconButtonInteractionState {
+    pub(crate) fn identity(&self) -> crate::accessibility::AccessibilityIdentity {
+        self.button.identity()
+    }
+
     pub fn new() -> Self {
         Self {
             button: ButtonInteractionState::new(),

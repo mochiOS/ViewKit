@@ -10,14 +10,17 @@ use std::{
     rc::Rc,
 };
 
+#[derive(Clone)]
 struct OptionItem {
     label: String,
     enabled: bool,
-    callback: RefCell<Box<dyn FnMut()>>,
+    callback: Rc<RefCell<Box<dyn FnMut()>>>,
 }
 
 /// A native symbol-only command menu with a visible hover target and an
-/// accessible label. Retain the instance across paints while its menu is open.
+/// accessible label. Clones share interaction and open-menu state; retain a
+/// base instance in the application and clone it during ordinary view rebuilds.
+#[derive(Clone)]
 pub struct MenuButton {
     label: String,
     symbol: SymbolName,
@@ -26,7 +29,8 @@ pub struct MenuButton {
     interaction: IconButtonInteractionState,
     clicked: Rc<Cell<bool>>,
     options: Vec<OptionItem>,
-    request: Cell<Option<u64>>,
+    request: Rc<Cell<Option<u64>>>,
+    active_options: Rc<RefCell<Vec<OptionItem>>>,
 }
 impl MenuButton {
     /// Creates a command menu using the shared icon-button appearance.
@@ -39,7 +43,8 @@ impl MenuButton {
             interaction: IconButtonInteractionState::new(),
             clicked: Rc::new(Cell::new(false)),
             options: vec![],
-            request: Cell::new(None),
+            request: Rc::new(Cell::new(None)),
+            active_options: Rc::new(RefCell::new(Vec::new())),
         }
     }
     /// Selects a standard native control size.
@@ -57,7 +62,7 @@ impl MenuButton {
         self.options.push(OptionItem {
             label: label.into(),
             enabled: true,
-            callback: RefCell::new(Box::new(callback)),
+            callback: Rc::new(RefCell::new(Box::new(callback))),
         });
         self
     }
@@ -66,7 +71,7 @@ impl MenuButton {
         self.options.push(OptionItem {
             label: label.into(),
             enabled: false,
-            callback: RefCell::new(Box::new(|| {})),
+            callback: Rc::new(RefCell::new(Box::new(|| {}))),
         });
         self
     }
@@ -87,6 +92,13 @@ impl View for MenuButton {
         self.button().paint(b, c);
     }
     fn handle_event(&self, b: Rect, e: &ViewEvent, c: &mut EventContext<'_>) -> EventResult {
+        if let ViewEvent::ReconcileComponents { retained } = e {
+            if !retained.contains(&self.interaction.identity()) {
+                self.request.set(None);
+                self.active_options.borrow_mut().clear();
+            }
+            return self.button().handle_event(b, e, c);
+        }
         if let ViewEvent::ContextMenuResult {
             request_id,
             command_id,
@@ -94,10 +106,11 @@ impl View for MenuButton {
         {
             if self.request.get() == Some(*request_id) {
                 self.request.set(None);
+                let options = core::mem::take(&mut *self.active_options.borrow_mut());
                 if self.enabled {
                     if let Some(option) = command_id
                         .and_then(|id| id.checked_sub(1))
-                        .and_then(|i| self.options.get(i as usize))
+                        .and_then(|i| options.get(i as usize))
                         .filter(|o| o.enabled)
                     {
                         (option.callback.borrow_mut())();
@@ -111,6 +124,7 @@ impl View for MenuButton {
         if self.clicked.replace(false) && self.enabled && !self.options.is_empty() {
             let id = ContextMenuRequest::next_id();
             self.request.set(Some(id));
+            self.active_options.replace(self.options.clone());
             c.show_context_menu(ContextMenuRequest {
                 request_id: id,
                 position: Point::new(b.origin.x, b.origin.y + b.size.height),
@@ -237,5 +251,55 @@ mod tests {
         menu.handle_event(b, &result, &mut c);
         menu.handle_event(b, &result, &mut c);
         assert_eq!(count.get(), 1);
+    }
+}
+
+#[cfg(test)]
+mod rebuild_tests {
+    use super::*;
+    use crate::{
+        platform::{Key, KeyModifiers},
+        theme::Theme,
+        typography::TextMeasurer,
+    };
+    #[test]
+    fn a_rebuilt_menu_dispatches_the_action_actually_shown_to_the_user() {
+        let first = Rc::new(Cell::new(0));
+        let replacement = Rc::new(Cell::new(0));
+        let base = MenuButton::new("Window", SymbolName::More);
+        let calls = first.clone();
+        let shown = base
+            .clone()
+            .option("Original", move || calls.set(calls.get() + 1));
+        let theme = Theme::LIGHT;
+        let mut text = TextMeasurer::new();
+        let mut cx = EventContext::new(&theme, &theme.typography, &mut text);
+        let b = Rect::new(0.0, 0.0, 24.0, 24.0);
+        shown.handle_event(
+            b,
+            &ViewEvent::KeyboardFocusRequested { bounds: Some(b) },
+            &mut cx,
+        );
+        shown.handle_event(
+            b,
+            &ViewEvent::KeyPressed {
+                key: Key::Enter,
+                modifiers: KeyModifiers::default(),
+            },
+            &mut cx,
+        );
+        let request = cx.take_context_menu_request().unwrap();
+        let calls = replacement.clone();
+        let rebuilt = base
+            .clone()
+            .option("Replacement", move || calls.set(calls.get() + 1));
+        let result = ViewEvent::ContextMenuResult {
+            request_id: request.request_id,
+            command_id: Some(1),
+        };
+        rebuilt.handle_event(b, &result, &mut cx);
+        rebuilt.handle_event(b, &result, &mut cx);
+        assert_eq!(first.get(), 1);
+        assert_eq!(replacement.get(), 0);
     }
 }

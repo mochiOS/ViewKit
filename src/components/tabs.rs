@@ -1,4 +1,4 @@
-use crate::accessibility::{AccessibilityNode, AccessibilityRole};
+use crate::accessibility::{AccessibilityIdentity, AccessibilityNode, AccessibilityRole};
 use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Point, Rect, Size};
@@ -29,6 +29,7 @@ const INDICATOR_DEFORMATION_ALLOWANCE: f32 = 34.0;
 
 #[derive(Clone)]
 pub struct TabsInteractionState {
+    identity: AccessibilityIdentity,
     indicator_shape: OmochiShape,
     selection_motion: MagneticSelectionMotion,
     items: Rc<RefCell<BTreeMap<usize, (ButtonInteractionState, ButtonInteractionState)>>>,
@@ -38,6 +39,7 @@ pub struct TabsInteractionState {
 impl TabsInteractionState {
     pub fn new() -> Self {
         Self {
+            identity: AccessibilityIdentity::default(),
             indicator_shape: OmochiShape::displacement(OmochiPreset::SelectionIndicator),
             selection_motion: MagneticSelectionMotion::default(),
             items: Rc::new(RefCell::new(BTreeMap::new())),
@@ -448,6 +450,7 @@ impl View for Tabs {
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
         let mut node = AccessibilityNode::new(AccessibilityRole::TabList, bounds);
+        node.identity = Some(self.interaction_state.identity);
         node.label = self.accessibility_label.clone();
         node.enabled = self.enabled;
         context.record_accessibility(node);
@@ -604,6 +607,15 @@ impl View for Tabs {
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
+        if let ViewEvent::ReconcileComponents { retained } = event {
+            if !retained.contains(&self.interaction_state.identity) {
+                self.interaction_state
+                    .selection_motion
+                    .cancel(bounds.origin.x);
+                self.interaction_state.indicator_shape.reset();
+                self.interaction_state.activation_origin.set(None);
+            }
+        }
         let stack = self.stack(context.theme);
         let strip_height = (context.theme().tabs.height - self.tongue(context.theme()))
             .min(bounds.size.height)
@@ -1462,5 +1474,89 @@ mod compact_activation_tests {
             |(x, y)| expected.push(Point::new(x, y)),
         );
         assert_eq!(points, expected);
+    }
+}
+
+#[cfg(test)]
+mod decoration_identity_tests {
+    use super::*;
+    use crate::{draw_command::DisplayList, state::State, typography::TextMeasurer};
+    #[test]
+    fn standard_tab_identities_follow_values_when_tabs_reorder() {
+        let selected = State::new(1);
+        let interaction = TabsInteractionState::new();
+        let theme = Theme::LIGHT;
+        let mut text = TextMeasurer::new();
+        let mut identities = |tabs: Tabs| {
+            let mut list = DisplayList::new();
+            let mut nodes = Vec::new();
+            tabs.paint(
+                Rect::new(0.0, 0.0, 640.0, 44.0),
+                &mut PaintContext::new(&mut list, &theme, &theme.typography, &mut text)
+                    .with_accessibility_nodes(&mut nodes),
+            );
+            nodes
+                .into_iter()
+                .filter(|n| n.role == AccessibilityRole::Tab)
+                .map(|n| (n.label, n.identity))
+                .collect::<Vec<_>>()
+        };
+        let old = identities(
+            Tabs::with_interaction(selected.binding(), interaction.clone())
+                .item(1, "First")
+                .item(2, "Second"),
+        );
+        let new = identities(
+            Tabs::with_interaction(selected.binding(), interaction)
+                .item(2, "Second")
+                .item(1, "First"),
+        );
+        assert_eq!(old.len(), 2);
+        assert!(old.iter().all(|(_, id)| id.is_some()));
+        assert_eq!(old[0], new[1]);
+        assert_eq!(old[1], new[0]);
+    }
+}
+
+#[cfg(test)]
+mod drag_lifecycle_tests {
+    use super::*;
+    use crate::{state::State, theme::Theme, typography::TextMeasurer};
+    #[test]
+    fn removal_cancels_drag_but_retained_identity_preserves_it() {
+        let selection = State::new(0usize);
+        let interaction = TabsInteractionState::new();
+        let view = Tabs::with_interaction(selection.binding(), interaction.clone())
+            .item(0, "First")
+            .item(1, "Second");
+        let theme = Theme::LIGHT;
+        let mut text = TextMeasurer::new();
+        let mut cx = EventContext::new(&theme, &theme.typography, &mut text);
+        let bounds = Rect::new(0.0, 0.0, 320.0, 44.0);
+        view.handle_event(
+            bounds,
+            &ViewEvent::PointerPressed {
+                position: Point::new(30.0, 12.0),
+                button: PointerButton::Primary,
+            },
+            &mut cx,
+        );
+        assert!(interaction.selection_motion.is_dragging());
+        view.handle_event(
+            bounds,
+            &ViewEvent::ReconcileComponents {
+                retained: vec![interaction.identity],
+            },
+            &mut cx,
+        );
+        assert!(interaction.selection_motion.is_dragging());
+        view.handle_event(
+            bounds,
+            &ViewEvent::ReconcileComponents {
+                retained: Vec::new(),
+            },
+            &mut cx,
+        );
+        assert!(!interaction.selection_motion.is_dragging());
     }
 }

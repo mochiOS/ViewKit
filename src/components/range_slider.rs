@@ -24,6 +24,7 @@ struct RangeInteraction {
 
 #[derive(Clone)]
 pub struct RangeSliderInteractionState {
+    identity: crate::accessibility::AccessibilityIdentity,
     inner: Rc<RefCell<RangeInteraction>>,
     lower_shape: OmochiShape,
     upper_shape: OmochiShape,
@@ -32,6 +33,7 @@ pub struct RangeSliderInteractionState {
 impl RangeSliderInteractionState {
     pub fn new() -> Self {
         Self {
+            identity: crate::accessibility::next_interaction_identity(),
             inner: Rc::new(RefCell::new(RangeInteraction::default())),
             lower_shape: OmochiShape::velocity(OmochiPreset::Thumb),
             upper_shape: OmochiShape::velocity(OmochiPreset::Thumb),
@@ -281,6 +283,7 @@ impl View for RangeSlider {
         group.enabled = self.enabled;
         group.focusable = true;
         group.focused = self.interaction.inner.borrow().focused;
+        group.identity = Some(self.interaction.identity);
         context.record_accessibility(group);
         for (name, value, thumb) in [
             ("Minimum", self.lower_value(), lower),
@@ -381,6 +384,14 @@ impl View for RangeSlider {
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
+        if let ViewEvent::ReconcileComponents { retained } = event {
+            if !retained.contains(&self.interaction.identity) {
+                self.handle_event(bounds, &ViewEvent::PointerLeft, context);
+                self.handle_event(bounds, &ViewEvent::FocusChanged { focused: false }, context);
+            }
+            return EventResult::Ignored;
+        }
+
         if !self.enabled {
             return EventResult::Ignored;
         }

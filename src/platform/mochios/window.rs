@@ -7,6 +7,8 @@ pub(super) struct MochiOsWindow {
     compositor: u64,
     surface: u64,
     input_regions: std::cell::RefCell<Vec<Rect>>,
+    pub(super) input_serial: Cell<u64>,
+    pub(super) decoration_layout: Cell<crate::decoration::DecorationLayout>,
 }
 
 impl MochiOsWindow {
@@ -23,6 +25,8 @@ impl MochiOsWindow {
             compositor,
             surface,
             input_regions: std::cell::RefCell::new(Vec::new()),
+            input_serial: Cell::new(0),
+            decoration_layout: Cell::new(crate::decoration::DecorationLayout::default()),
         }
     }
 
@@ -107,6 +111,84 @@ impl MochiOsWindow {
 }
 
 impl PlatformWindow for MochiOsWindow {
+    fn decoration_layout(&self) -> Option<crate::decoration::DecorationLayout> {
+        Some(self.decoration_layout.get())
+    }
+    fn input_serial(&self) -> u64 {
+        self.input_serial.get()
+    }
+    fn configure_decoration(
+        &self,
+        config: crate::decoration::DecorationConfig,
+    ) -> Result<crate::decoration::DecorationLayout, crate::decoration::DecorationError> {
+        use crate::decoration::*;
+        let scale = self.viewport.get().scale_factor as f32;
+        let mut request = [0u8; 32];
+        let mut reply = [0u8; 16];
+        request[..4].copy_from_slice(&14u32.to_le_bytes());
+        request[4..12].copy_from_slice(&self.surface.to_le_bytes());
+        request[12..16]
+            .copy_from_slice(&(u32::from(config.mode == DecorationMode::Integrated)).to_le_bytes());
+        request[16..20].copy_from_slice(&((config.height * scale).ceil() as u32).to_le_bytes());
+        let c = config.background;
+        let packed = (u32::from(c.red) << 24)
+            | (u32::from(c.green) << 16)
+            | (u32::from(c.blue) << 8)
+            | u32::from(c.alpha);
+        request[20..24].copy_from_slice(&packed.to_le_bytes());
+        request[24..28].copy_from_slice(&((scale * 1024.0).round() as u32).to_le_bytes());
+        request[28..32].copy_from_slice(
+            &(u32::from(config.separator) | (u32::from(config.resizable) << 1)).to_le_bytes(),
+        );
+        let len = ipc_call_raw(
+            self.compositor,
+            request.as_ptr(),
+            request.len(),
+            reply.as_mut_ptr(),
+            reply.len(),
+        )
+        .map_err(|_| DecorationError::Rejected)?;
+        status_from_raw(reply.as_ptr(), len).map_err(|_| DecorationError::Rejected)?;
+        if len != 16 {
+            return Err(DecorationError::Rejected);
+        }
+        let layout = DecorationLayout {
+            height: u32::from_le_bytes(reply[4..8].try_into().unwrap()) as f32 / scale,
+            controls_width: u32::from_le_bytes(reply[8..12].try_into().unwrap()) as f32 / scale,
+            state: WindowState::from_raw(u32::from_le_bytes(reply[12..16].try_into().unwrap()))
+                .ok_or(DecorationError::Rejected)?,
+        };
+        self.decoration_layout.set(layout);
+        Ok(layout)
+    }
+    fn begin_window_interaction(
+        &self,
+        serial: u64,
+        operation: crate::decoration::WindowInteraction,
+    ) -> bool {
+        if serial == 0 || self.input_serial.replace(0) != serial {
+            return false;
+        }
+        let mut request = [0u8; 28];
+        let mut reply = [0u8; 16];
+        let (opcode, edge) = match operation {
+            crate::decoration::WindowInteraction::Move => (105u32, 0u32),
+            crate::decoration::WindowInteraction::Resize(edge) => (106, edge as u32),
+        };
+        request[..4].copy_from_slice(&opcode.to_le_bytes());
+        request[4..12].copy_from_slice(&self.surface.to_le_bytes());
+        request[12..20].copy_from_slice(&serial.to_le_bytes());
+        request[20..24].copy_from_slice(&edge.to_le_bytes());
+        ipc_call_raw(
+            self.compositor,
+            request.as_ptr(),
+            request.len(),
+            reply.as_mut_ptr(),
+            reply.len(),
+        )
+        .is_ok_and(|len| status_from_raw(reply.as_ptr(), len).is_ok())
+    }
+
     fn id(&self) -> crate::app::WindowId {
         self.id
     }

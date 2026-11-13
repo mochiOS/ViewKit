@@ -206,6 +206,7 @@ struct ButtonInteractionInner {
 
 #[derive(Clone)]
 pub struct ButtonInteractionState {
+    identity: crate::accessibility::AccessibilityIdentity,
     inner: Rc<RefCell<ButtonInteractionInner>>,
     omochi: OmochiShape,
 }
@@ -213,6 +214,7 @@ pub struct ButtonInteractionState {
 impl Default for ButtonInteractionState {
     fn default() -> Self {
         Self {
+            identity: crate::accessibility::next_interaction_identity(),
             inner: Rc::new(RefCell::new(ButtonInteractionInner {
                 enabled: true,
 
@@ -224,6 +226,10 @@ impl Default for ButtonInteractionState {
 }
 
 impl ButtonInteractionState {
+    pub(crate) fn identity(&self) -> crate::accessibility::AccessibilityIdentity {
+        self.identity
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -655,6 +661,7 @@ impl View for Button {
             .or_else(|| self.label.clone());
         accessibility.value = self.accessibility_value.clone();
         accessibility.enabled = self.enabled;
+        accessibility.identity = Some(self.interaction.identity);
         accessibility.focusable = true;
         accessibility.focused = self.interaction.inner.borrow().focused;
         accessibility.checked = self.accessibility_checked;
@@ -898,6 +905,14 @@ impl View for Button {
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
+        if let ViewEvent::ReconcileComponents { retained } = event {
+            if !retained.contains(&self.interaction.identity) {
+                self.handle_event(bounds, &ViewEvent::PointerLeft, context);
+                self.handle_event(bounds, &ViewEvent::FocusChanged { focused: false }, context);
+            }
+            return EventResult::Ignored;
+        }
+
         let enabled_changed = self.interaction.set_enabled(self.enabled);
 
         if enabled_changed {
@@ -1776,7 +1791,10 @@ mod compatibility_tests {
 #[cfg(test)]
 mod transparent_omochi_tests {
     use super::*;
-    use crate::{draw_command::DisplayList, geometry::Point, platform::PointerButton, typography::TextMeasurer};
+    use crate::{
+        draw_command::DisplayList, geometry::Point, platform::PointerButton,
+        typography::TextMeasurer,
+    };
     use std::{cell::Cell, rc::Rc};
 
     #[test]
@@ -1785,25 +1803,47 @@ mod transparent_omochi_tests {
             for width in [44.0, 320.0] {
                 let clicked = Rc::new(Cell::new(false));
                 let callback = clicked.clone();
-                let button = Button::new("").style(ButtonStyle::Ghost).focus_ring(false)
+                let button = Button::new("")
+                    .style(ButtonStyle::Ghost)
+                    .focus_ring(false)
                     .on_click(move || callback.set(true));
                 let bounds = Rect::new(0.0, 0.0, width, 44.0);
                 let position = Point::new(width * 0.5, 22.0);
                 let mut text = TextMeasurer::new();
                 let mut context = EventContext::new(&theme, &theme.typography, &mut text);
-                for event in [ViewEvent::PointerPressed { position, button: PointerButton::Primary },
-                    ViewEvent::PointerReleased { position, button: PointerButton::Primary }] {
+                for event in [
+                    ViewEvent::PointerPressed {
+                        position,
+                        button: PointerButton::Primary,
+                    },
+                    ViewEvent::PointerReleased {
+                        position,
+                        button: PointerButton::Primary,
+                    },
+                ] {
                     button.handle_event(bounds, &event, &mut context);
                     let mut list = DisplayList::new();
-                    button.paint(bounds, &mut PaintContext::new(&mut list, &theme, &theme.typography, &mut TextMeasurer::new()));
+                    button.paint(
+                        bounds,
+                        &mut PaintContext::new(
+                            &mut list,
+                            &theme,
+                            &theme.typography,
+                            &mut TextMeasurer::new(),
+                        ),
+                    );
                     let mut count = 0;
                     for command in list.commands() {
                         let color = match command {
-                            DrawCommand::FillPolygon { color, .. } | DrawCommand::FillRoundedRect { color, .. } => color,
+                            DrawCommand::FillPolygon { color, .. }
+                            | DrawCommand::FillRoundedRect { color, .. } => color,
                             _ => continue,
                         };
                         count += 1;
-                        assert!(color.alpha <= theme.button.ghost.pressed.background.alpha, "transparent chrome became opaque: {color:?}");
+                        assert!(
+                            color.alpha <= theme.button.ghost.pressed.background.alpha,
+                            "transparent chrome became opaque: {color:?}"
+                        );
                     }
                     assert!(count > 0);
                 }

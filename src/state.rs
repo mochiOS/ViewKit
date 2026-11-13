@@ -15,6 +15,10 @@ fn mark_changed() {
     STATE_CHANGED.set(true);
 }
 
+pub(crate) fn has_state_changed() -> bool {
+    STATE_CHANGED.with(Cell::get)
+}
+
 /// 状態が変更されたか確認し、変更フラグを解除します。
 pub(crate) fn take_state_changed() -> bool {
     STATE_CHANGED.replace(false)

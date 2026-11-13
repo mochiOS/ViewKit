@@ -28,3 +28,7 @@ pub use crate::svg::{SvgData, SvgError};
 pub use crate::theme::{Color, ControlSize, CornerRadius, FigmaTokens, ShadowStyle, Theme};
 pub use crate::typography::{TextAlignment, TextRole};
 pub use crate::view::View;
+
+pub use crate::decoration::{
+    DecorationError, DecorationLayout, DecorationMode, ResizeEdge, WindowState,
+};

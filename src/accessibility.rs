@@ -29,8 +29,28 @@ pub enum AccessibilityRole {
     Tooltip,
 }
 
+/// Stable identity used to preserve focus across ordinary tree rebuilds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AccessibilityIdentity {
+    /// Application-keyed component and its local accessibility element.
+    Component {
+        /// Stable ComponentInstanceId value supplied by the application.
+        id: u64,
+        /// Element index within that component; zero identifies its root.
+        element: u64,
+    },
+    /// Identity of a retained standard InteractionState, allocated by ViewKit.
+    Interaction(u64),
+}
+pub(crate) fn next_interaction_identity() -> AccessibilityIdentity {
+    static NEXT: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(1);
+    AccessibilityIdentity::Interaction(NEXT.fetch_add(1, core::sync::atomic::Ordering::Relaxed))
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct AccessibilityNode {
+    /// Stable component identity for preserving focus across layout changes.
+    pub identity: Option<AccessibilityIdentity>,
     pub role: AccessibilityRole,
     pub bounds: Rect,
     pub label: Option<String>,
@@ -53,6 +73,7 @@ pub struct AccessibilityNode {
 impl AccessibilityNode {
     pub const fn new(role: AccessibilityRole, bounds: Rect) -> Self {
         Self {
+            identity: None,
             role,
             bounds,
             label: None,
@@ -68,5 +89,11 @@ impl AccessibilityNode {
             invalid: false,
             focus_scope: false,
         }
+    }
+}
+
+impl Default for AccessibilityIdentity {
+    fn default() -> Self {
+        next_interaction_identity()
     }
 }

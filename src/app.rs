@@ -78,6 +78,8 @@ pub struct WindowOptions {
     pub(crate) fullscreen: bool,
     pub(crate) secure_overlay: bool,
     pub(crate) system_modal: bool,
+    pub(crate) decoration: Option<crate::decoration::DecorationMode>,
+    pub(crate) titlebar: Option<crate::components::TitleBar>,
 }
 
 impl WindowOptions {
@@ -94,6 +96,8 @@ impl WindowOptions {
             fullscreen: false,
             secure_overlay: false,
             system_modal: false,
+            decoration: None,
+            titlebar: None,
         }
     }
 
@@ -153,6 +157,44 @@ impl WindowOptions {
             self.fullscreen = false;
         }
         self
+    }
+
+    /// Selects system or integrated chrome. An explicit System selection
+    /// conflicts with `titlebar`, regardless of builder call order.
+    #[must_use]
+    pub fn decoration_mode(mut self, mode: crate::decoration::DecorationMode) -> Self {
+        self.decoration = Some(mode);
+        self
+    }
+
+    /// Places normal ViewKit components in the title bar. This implicitly
+    /// selects Integrated unless an explicit System selection conflicts.
+    #[must_use]
+    pub fn titlebar(mut self, bar: crate::components::TitleBar) -> Self {
+        self.titlebar = Some(bar);
+        self
+    }
+
+    /// Returns the effective mode; fullscreen is a separate property.
+    pub fn decoration(&self) -> crate::decoration::DecorationMode {
+        self.decoration.unwrap_or(if self.titlebar.is_some() {
+            crate::decoration::DecorationMode::Integrated
+        } else {
+            crate::decoration::DecorationMode::System
+        })
+    }
+
+    /// Validates decoration settings before a native window is created.
+    /// Returns ConflictingMode for explicit System with a title bar, or
+    /// InvalidHeight for a non-finite or out-of-range title bar height.
+    pub fn validate(&self) -> Result<(), crate::decoration::DecorationError> {
+        if let Some(bar) = &self.titlebar {
+            if self.decoration == Some(crate::decoration::DecorationMode::System) {
+                return Err(crate::decoration::DecorationError::ConflictingMode);
+            }
+            bar.validate()?;
+        }
+        Ok(())
     }
 
     /// ウィンドウのタイトルを返します。
@@ -314,6 +356,22 @@ pub trait App: Sized + 'static {
     /// Existing single-window apps can continue implementing [`Self::window`].
     fn window_for(&self, _window: WindowId) -> WindowOptions {
         self.window()
+    }
+
+    /// Receives the platform's protected control geometry and window state.
+    /// Called on negotiation or actual state/scale changes, never for an
+    /// ordinary title bar component update with unchanged chrome properties.
+    fn decoration_changed(
+        &mut self,
+        _window: WindowId,
+        _layout: crate::decoration::DecorationLayout,
+    ) {
+    }
+
+    /// Reports a failed decoration negotiation. The previous protected chrome
+    /// remains in effect. Change the window options before retrying.
+    fn decoration_failed(&mut self, _window: WindowId, error: crate::decoration::DecorationError) {
+        eprintln!("[ViewKit] decoration: {error}");
     }
 
     /// Binds a window to an existing broker-issued presentation request.

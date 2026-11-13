@@ -66,6 +66,7 @@ struct ScrollStateInner {
 
 #[derive(Clone, Default)]
 pub struct ScrollState {
+    identity: crate::accessibility::AccessibilityIdentity,
     inner: Rc<RefCell<ScrollStateInner>>,
 }
 
@@ -571,6 +572,13 @@ impl View for Scroll {
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
+        let mut node = crate::accessibility::AccessibilityNode::new(
+            crate::accessibility::AccessibilityRole::Group,
+            bounds,
+        );
+        node.identity = Some(self.state.identity);
+        context.record_accessibility(node);
+
         if bounds.size.width <= 0.0 || bounds.size.height <= 0.0 {
             return;
         }
@@ -620,6 +628,16 @@ impl View for Scroll {
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
+        if let ViewEvent::ReconcileComponents { retained } = event {
+            if !retained.contains(&self.state.identity) {
+                self.state.end_vertical_drag();
+            }
+            if let Some(content) = &self.content {
+                return content.handle_event(bounds, event, context);
+            }
+            return EventResult::Ignored;
+        }
+
         if bounds.size.width <= 0.0 || bounds.size.height <= 0.0 {
             return EventResult::Ignored;
         }

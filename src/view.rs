@@ -160,6 +160,36 @@ impl<'a> PaintContext<'a> {
         self.viewport_bounds
     }
 
+    /// Paints an identified component using the ordinary accessibility tree.
+    /// Nested identities remain independent when keyed collections reorder.
+    pub fn with_component_identity(
+        &mut self,
+        id: u64,
+        bounds: Rect,
+        paint: impl FnOnce(&mut Self),
+    ) {
+        let mut group =
+            AccessibilityNode::new(crate::accessibility::AccessibilityRole::Group, bounds);
+        group.identity =
+            Some(crate::accessibility::AccessibilityIdentity::Component { id, element: 0 });
+        self.record_accessibility(group);
+        let start = self
+            .accessibility_nodes
+            .as_ref()
+            .map_or(0, |nodes| nodes.len());
+        paint(self);
+        if let Some(nodes) = self.accessibility_nodes.as_deref_mut() {
+            for (index, node) in nodes[start..].iter_mut().enumerate() {
+                if node.identity.is_none() {
+                    node.identity = Some(crate::accessibility::AccessibilityIdentity::Component {
+                        id,
+                        element: index as u64 + 1,
+                    });
+                }
+            }
+        }
+    }
+
     /// Publishes a command's current availability for menu validation.
     pub fn record_command_status(&mut self, status: CommandStatus) {
         if let Some(statuses) = self.command_statuses.as_deref_mut() {
@@ -181,6 +211,9 @@ impl<'a> PaintContext<'a> {
     }
 
     pub fn record_accessibility(&mut self, node: AccessibilityNode) {
+        if node.bounds.is_empty() {
+            return;
+        }
         if let Some(nodes) = self.accessibility_nodes.as_deref_mut() {
             nodes.push(node);
         }

@@ -36,6 +36,7 @@ struct SliderMetrics {
 }
 #[derive(Clone)]
 pub struct SliderInteractionState {
+    identity: crate::accessibility::AccessibilityIdentity,
     inner: Rc<RefCell<SliderInteractionInner>>,
     thumb_shape: OmochiShape,
 }
@@ -43,6 +44,7 @@ pub struct SliderInteractionState {
 impl Default for SliderInteractionState {
     fn default() -> Self {
         Self {
+            identity: crate::accessibility::next_interaction_identity(),
             inner: Rc::new(RefCell::new(SliderInteractionInner {
                 enabled: true,
 
@@ -414,6 +416,7 @@ impl View for Slider {
         accessibility.enabled = self.enabled;
         accessibility.focusable = true;
         accessibility.focused = self.interaction.inner.borrow().focused;
+        accessibility.identity = Some(self.interaction.identity);
         context.record_accessibility(accessibility);
 
         if let Some(label) = self.label.as_ref() {
@@ -581,6 +584,14 @@ impl View for Slider {
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
+        if let ViewEvent::ReconcileComponents { retained } = event {
+            if !retained.contains(&self.interaction.identity) {
+                self.handle_event(bounds, &ViewEvent::PointerLeft, context);
+                self.handle_event(bounds, &ViewEvent::FocusChanged { focused: false }, context);
+            }
+            return EventResult::Ignored;
+        }
+
         if self.style == SliderStyle::VerticalLevel {
             return self.handle_level_event(bounds, event, context);
         }
@@ -950,4 +961,37 @@ fn with_opacity(color: Color, opacity: f32) -> Color {
     };
 
     color.with_alpha((color.alpha as f32 * opacity).round() as u8)
+}
+
+#[cfg(test)]
+mod reconciliation_tests {
+    use super::*;
+    use crate::{state::State, theme::Theme, typography::TextMeasurer};
+    #[test]
+    fn removing_a_slider_releases_its_drag_but_an_ordinary_rebuild_does_not() {
+        let value = State::new(0.5);
+        let interaction = SliderInteractionState::new();
+        interaction.inner.borrow_mut().dragging = true;
+        let slider = Slider::with_interaction(value.binding(), interaction.clone());
+        let theme = Theme::LIGHT;
+        let mut text = TextMeasurer::new();
+        let mut cx = EventContext::new(&theme, &theme.typography, &mut text);
+        let bounds = Rect::new(0.0, 0.0, 300.0, 40.0);
+        slider.handle_event(
+            bounds,
+            &ViewEvent::ReconcileComponents {
+                retained: vec![interaction.identity],
+            },
+            &mut cx,
+        );
+        assert!(interaction.is_dragging());
+        slider.handle_event(
+            bounds,
+            &ViewEvent::ReconcileComponents {
+                retained: Vec::new(),
+            },
+            &mut cx,
+        );
+        assert!(!interaction.is_dragging());
+    }
 }

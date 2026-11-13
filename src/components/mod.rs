@@ -1326,3 +1326,12 @@ ffi_components! {
         ))
     };
 }
+
+mod drag_region;
+mod title_bar;
+pub use drag_region::{DragRegion, drag_region};
+pub(crate) use title_bar::DecoratedRoot;
+pub use title_bar::TitleBar;
+
+mod identified;
+pub use identified::Identified;

@@ -60,12 +60,14 @@ impl core::fmt::Debug for TextFieldInteractionInner {
 
 #[derive(Clone)]
 pub struct TextFieldInteractionState {
+    identity: crate::accessibility::AccessibilityIdentity,
     inner: Rc<RefCell<TextFieldInteractionInner>>,
 }
 
 impl Default for TextFieldInteractionState {
     fn default() -> Self {
         Self {
+            identity: crate::accessibility::next_interaction_identity(),
             inner: Rc::new(RefCell::new(TextFieldInteractionInner {
                 enabled: true,
 
@@ -614,26 +616,47 @@ pub struct TextFieldLabel {
     size: TextFieldSize,
 }
 
-fn field_text_line(bounds: Rect, style: crate::typography::TextStyle, scale: f32, offset: f32) -> Rect {
+fn field_text_line(
+    bounds: Rect,
+    style: crate::typography::TextStyle,
+    scale: f32,
+    offset: f32,
+) -> Rect {
     let font_size = super::text::resolved_font_size(style.size) * scale;
     let height = super::text::resolved_line_height(font_size, style.line_height * scale);
-    Rect::new(bounds.origin.x, bounds.origin.y + (bounds.size.height - height) * 0.5 + offset,
-        bounds.size.width, height)
+    Rect::new(
+        bounds.origin.x,
+        bounds.origin.y + (bounds.size.height - height) * 0.5 + offset,
+        bounds.size.width,
+        height,
+    )
 }
 
 impl View for TextFieldLabel {
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
-        let text = Text::styled(&self.label, self.size.text_role()).single_line(true)
+        let text = Text::styled(&self.label, self.size.text_role())
+            .single_line(true)
             .measure(constraints, context);
-        constraints.constrain(Size::new(text.width, text.height.max(self.size.height(context.theme))))
+        constraints.constrain(Size::new(
+            text.width,
+            text.height.max(self.size.height(context.theme)),
+        ))
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
-        let text = field_text_line(bounds, self.size.text_style(context.typography),
-            context.text_measurer.font_scale(), context.theme.text_field.text_offset_y);
-        context.display_list.push(DrawCommand::PushClip { rect: bounds });
-        Text::styled(&self.label, self.size.text_role()).single_line(true)
-            .tone(super::TextTone::Secondary).paint(text, context);
+        let text = field_text_line(
+            bounds,
+            self.size.text_style(context.typography),
+            context.text_measurer.font_scale(),
+            context.theme.text_field.text_offset_y,
+        );
+        context
+            .display_list
+            .push(DrawCommand::PushClip { rect: bounds });
+        Text::styled(&self.label, self.size.text_role())
+            .single_line(true)
+            .tone(super::TextTone::Secondary)
+            .paint(text, context);
         context.display_list.push(DrawCommand::PopClip);
     }
 }
@@ -921,7 +944,10 @@ impl TextField {
     /// Creates an external label with the same font and vertical text position
     /// as this field. Give both views row bounds with the same y and height.
     pub fn label(&self, label: impl Into<String>) -> TextFieldLabel {
-        TextFieldLabel { label: label.into(), size: self.size }
+        TextFieldLabel {
+            label: label.into(),
+            size: self.size,
+        }
     }
 
     fn geometry(
@@ -956,12 +982,17 @@ impl TextField {
         };
         let style = self.size.text_style(typography);
         let font_size = super::text::resolved_font_size(style.size) * font_scale;
-        let text = field_text_line(Rect::new(
-            bounds.origin.x + padding + leading,
-            bounds.origin.y,
-            (available - leading).max(0.0),
-            bounds.size.height,
-        ), style, font_scale, theme.text_field.text_offset_y);
+        let text = field_text_line(
+            Rect::new(
+                bounds.origin.x + padding + leading,
+                bounds.origin.y,
+                (available - leading).max(0.0),
+                bounds.size.height,
+            ),
+            style,
+            font_scale,
+            theme.text_field.text_offset_y,
+        );
         let line_height = text.size.height;
         let top = text
             .origin
@@ -1076,6 +1107,7 @@ impl View for TextField {
         accessibility.focusable = true;
         accessibility.focused = focused;
         accessibility.invalid = self.invalid;
+        accessibility.identity = Some(self.interaction.identity);
         context.record_accessibility(accessibility);
 
         let radius = self.radius.unwrap_or(context.theme.text_field.radius);
@@ -1439,6 +1471,14 @@ impl View for TextField {
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
+        if let ViewEvent::ReconcileComponents { retained } = event {
+            if !retained.contains(&self.interaction.identity) {
+                self.handle_event(bounds, &ViewEvent::PointerLeft, context);
+                self.handle_event(bounds, &ViewEvent::FocusChanged { focused: false }, context);
+            }
+            return EventResult::Ignored;
+        }
+
         let radius = self
             .radius
             .unwrap_or(context.theme.text_field.radius)
