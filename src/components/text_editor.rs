@@ -148,6 +148,92 @@ impl TextEditorInteractionState {
         inner.initialized = true;
     }
 
+    /// 選択範囲をUTF-8バイト位置で返します。未選択時は空のカーソル範囲です。
+    /// @since 27.0-dp.1
+    pub fn selection(&self) -> Range<usize> {
+        let inner = self.inner.borrow();
+        selection_range(&inner).unwrap_or(inner.cursor..inner.cursor)
+    }
+
+    /// UTF-8バイト範囲を選択し、カーソルを終点へ移動します。
+    /// 不正な境界は直前の文字境界へ丸めます。フォーカスは変更しません。
+    /// @since 27.0-dp.1
+    pub fn set_selection(&self, range: Range<usize>) {
+        let mut inner = self.inner.borrow_mut();
+        let boundary = |mut offset: usize| {
+            offset = offset.min(inner.value.len());
+            while !inner.value.is_char_boundary(offset) {
+                offset -= 1;
+            }
+            offset
+        };
+        let start = boundary(range.start);
+        let end = boundary(range.end);
+        inner.cursor = end;
+        inner.selection_anchor = (start != end).then_some(start);
+        inner.reveal_caret = true;
+    }
+
+    /// 表示内容のスクロール位置を論理ピクセルで返します。
+    /// @since 27.0-dp.1
+    pub fn scroll_offset(&self) -> crate::geometry::Point {
+        let inner = self.inner.borrow();
+        crate::geometry::Point::new(inner.scroll_x, inner.scroll_y)
+    }
+
+    /// 外部Documentの更新を反映し、選択位置・スクロール・フォーカスを維持します。
+    /// 更新範囲の後にある位置は差分に追従します。古いローカルUndo履歴は破棄します。
+    /// 同一内容では何も変更せず、on_changeも呼びません。
+    /// @since 27.0-dp.1
+    pub fn synchronize_value(&self, value: impl Into<String>) {
+        let value = normalize_newlines(value.into());
+        let mut inner = self.inner.borrow_mut();
+        if value == inner.value {
+            return;
+        }
+        let old = &inner.value;
+        let mut prefix = old
+            .bytes()
+            .zip(value.bytes())
+            .take_while(|(a, b)| a == b)
+            .count();
+        while !old.is_char_boundary(prefix) || !value.is_char_boundary(prefix) {
+            prefix -= 1;
+        }
+        let mut suffix = old[prefix..]
+            .bytes()
+            .rev()
+            .zip(value[prefix..].bytes().rev())
+            .take_while(|(a, b)| a == b)
+            .count();
+        while !old.is_char_boundary(old.len() - suffix)
+            || !value.is_char_boundary(value.len() - suffix)
+        {
+            suffix -= 1;
+        }
+        let old_end = old.len() - suffix;
+        let new_end = value.len() - suffix;
+        let translate = |offset: usize| {
+            if offset <= prefix {
+                offset
+            } else if offset >= old_end {
+                new_end + offset - old_end
+            } else {
+                new_end
+            }
+        };
+        inner.cursor = translate(inner.cursor);
+        inner.selection_anchor = inner.selection_anchor.map(translate);
+        inner.value = value;
+        inner.revision = inner.revision.wrapping_add(1);
+        inner.undo.clear();
+        inner.redo.clear();
+        inner.last_edit_kind = None;
+        inner.selecting = false;
+        inner.input_method = InputMethodState::default();
+        update_statistics(&mut inner);
+    }
+
     pub fn is_focused(&self) -> bool {
         self.inner.borrow().focused
     }
@@ -429,9 +515,21 @@ enum InputMethodAction {
     Synchronize,
 }
 
+/// テキストのUTF-8バイト範囲に適用する表示色。無効・重複範囲は描画時に無視します。
+/// Documentの内容、選択、入力処理には影響しません。
+/// @since 27.0-dp.1
+#[derive(Clone, Debug)]
+pub struct TextStyleSpan {
+    /// 色を適用するUTF-8バイト範囲。
+    pub range: Range<usize>,
+    /// 現在のテーマから解決した文字色。
+    pub color: crate::theme::Color,
+}
+
 pub struct TextEditor {
     interaction: TextEditorInteractionState,
     binding: Option<Binding<String>>,
+    style_spans: Vec<TextStyleSpan>,
     placeholder: String,
     enabled: bool,
     read_only: bool,
@@ -449,6 +547,7 @@ impl TextEditor {
         Self {
             interaction,
             binding: Some(binding),
+            style_spans: Vec::new(),
             placeholder: String::new(),
             enabled: true,
             read_only: false,
@@ -464,6 +563,7 @@ impl TextEditor {
         Self {
             interaction,
             binding: None,
+            style_spans: Vec::new(),
             placeholder: String::new(),
             enabled: true,
             read_only: false,
@@ -478,6 +578,15 @@ impl TextEditor {
     pub fn value(self, value: impl Into<String>) -> Self {
         self.interaction
             .initialize(normalize_newlines(value.into()));
+        self
+    }
+
+    /// 昇順かつ非重複の文字色範囲を指定します。既定では単色で描画します。
+    /// 可視行だけを描画し、IME・選択背景・テキスト計測は標準エディタと共有します。
+    /// @since 27.0-dp.1
+    pub fn style_spans(mut self, mut spans: Vec<TextStyleSpan>) -> Self {
+        spans.sort_by_key(|span| span.range.start);
+        self.style_spans = spans;
         self
     }
 
@@ -1080,19 +1189,55 @@ impl View for TextEditor {
         } else if !value.is_empty() {
             for line_index in visible_lines.clone() {
                 let range = &lines[line_index];
-                self.text(value[range.clone()].to_owned())
-                    .color(context.theme.colors.text_primary)
-                    .accessibility_hidden(true)
-                    .paint(
-                        Rect::new(
-                            content.origin.x - scroll_x,
-                            content.origin.y + line_index as f32 * line_height - scroll_y,
-                            (line_widths[line_index] + context.theme.text_field.caret_width)
-                                .max(content.size.width),
-                            line_height,
-                        ),
-                        context,
-                    );
+                let mut runs = Vec::new();
+                let mut offset = range.start;
+                let start_span = self
+                    .style_spans
+                    .partition_point(|span| span.range.end <= range.start);
+                for span in self.style_spans[start_span..]
+                    .iter()
+                    .take_while(|span| span.range.start < range.end)
+                {
+                    let start = span.range.start.max(range.start);
+                    let end = span.range.end.min(range.end);
+                    if start < offset
+                        || start >= end
+                        || !value.is_char_boundary(start)
+                        || !value.is_char_boundary(end)
+                    {
+                        continue;
+                    }
+                    if start > offset {
+                        runs.push((offset..start, context.theme.colors.text_primary));
+                    }
+                    runs.push((start..end, span.color));
+                    offset = end;
+                }
+                if offset < range.end {
+                    runs.push((offset..range.end, context.theme.colors.text_primary));
+                }
+                for (run, color) in runs {
+                    let x = self
+                        .text(&value[range.start..run.start])
+                        .measure_unbounded_with_typography(
+                            context.text_measurer,
+                            context.typography,
+                        )
+                        .width;
+                    self.text(value[run].to_owned())
+                        .color(color)
+                        .accessibility_hidden(true)
+                        .paint(
+                            Rect::new(
+                                content.origin.x + x - scroll_x,
+                                content.origin.y + line_index as f32 * line_height - scroll_y,
+                                (line_widths[line_index] + context.theme.text_field.caret_width)
+                                    .max(content.size.width),
+                                line_height,
+                            ),
+                            context,
+                        );
+                }
             }
         }
 
@@ -2433,5 +2578,32 @@ mod tests {
             context.redraw_request(),
             crate::event::RedrawRequest::Region(bounds)
         );
+    }
+}
+
+#[cfg(test)]
+mod external_document_tests {
+    use super::*;
+    #[test]
+    fn synchronized_changes_preserve_focus_and_translate_selection() {
+        let state = TextEditorInteractionState::new();
+        state.set_value("a😀b");
+        state.set_selection(5..6);
+        state.focus();
+        state.synchronize_value("prefix a😀b");
+        assert_eq!(state.selection(), 12..13);
+        assert!(state.is_focused());
+        let revision = state.revision();
+        state.synchronize_value("prefix a😀b");
+        assert_eq!(state.revision(), revision);
+        state.synchronize_value("x");
+        assert_eq!(state.selection(), 1..1);
+    }
+    #[test]
+    fn invalid_selection_rounds_to_unicode_boundary() {
+        let state = TextEditorInteractionState::new();
+        state.set_value("😀");
+        state.set_selection(2..3);
+        assert_eq!(state.selection(), 0..0);
     }
 }
