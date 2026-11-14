@@ -1,0 +1,25 @@
+{
+  "format": 1,
+  "steps": [
+    "$(MOCHIOS_CARGO) --manifest-path $(PROJECT)/Cargo.toml --lib",
+    "mkdir -p $(MMAKE_OUT)/components",
+    "touch $(MMAKE_OUT)/components/viewkit.stamp"
+  ],
+  "package": {
+    "name": "viewkit",
+    "version": "0.1.0",
+    "target": "x86_64-mochios",
+    "abi": "mochios-1"
+  },
+  "artifact": "out/mdp/viewkit.tar.mdp",
+  "exports": [
+    {
+      "source": "$(RUST_TARGET_DIR)/x86_64-unknown-mochios/release/libviewkit.rlib",
+      "area": "sdk-framework",
+      "destination": "libviewkit.rlib"
+    }
+  ],
+  "bindings": {
+    "SOURCE_VIEWKIT": "$(PROJECT)"
+  }
+}

@@ -1,0 +1,7 @@
+format = 1
+
+[build]
+command = ["mdp", "pipeline", "--recipe", "mdp.recipe.json"]
+requires = ["native-sdk-context", "fonts"]
+sources = []
+artifact = "out/mdp/viewkit.tar.mdp"
