@@ -64,6 +64,8 @@ pub(super) fn render_display_list(
 ) -> Result<Color, MochiOsBackendError> {
     let width = viewport.physical_width;
     let height = viewport.physical_height;
+    let contents_valid = pixmap.as_ref().is_some_and(|p| p.width() == width && p.height() == height);
+    let dirty_bounds = crate::renderer::raster_damage(viewport, dirty_bounds, contents_valid);
     let pixmap = reusable_pixmap(pixmap, width, height)?;
     let mut clear_color = Color::BLACK;
 

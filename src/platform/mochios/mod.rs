@@ -714,7 +714,11 @@ where
                             &mut state.gpu_scene,
                         ) {
                             Ok(()) => gpu_scene = Some(state.gpu_scene.as_slice()),
-                            Err(_) => {
+                            Err(error) => {
+                                perf_log(&format!("viewkit/mochios renderer-switch gpu->cpu reason={error:?} physical={}x{} scale={} full-repaint=true\n",
+                                    state.window.width(), state.window.height(), state.window.viewport().scale_factor));
+                                dirty_bounds = crate::renderer::raster_damage(state.window.viewport(), dirty_bounds, false);
+                                state.pixmap = None;
                                 state.gpu_enabled = false;
                                 state.shared_buffer = SharedBuffer::new(
                                     state.window.width() as usize,

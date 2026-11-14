@@ -40,3 +40,22 @@ pub trait Renderer {
     fn render(&mut self, display_list: &DisplayList, dirty_bounds: Rect)
     -> Result<(), Self::Error>;
 }
+
+/// CPU pixels are valid only after the entire backing store has been drawn.
+/// A renderer switch or allocation must never inherit a GPU damage rectangle.
+pub(crate) fn raster_damage(viewport: Viewport, dirty: Rect, contents_valid: bool) -> Rect {
+    let full = viewport.logical_bounds();
+    if contents_valid { dirty.intersection(full).unwrap_or(full) } else { full }
+}
+
+#[cfg(test)]
+mod damage_tests {
+    use super::*;
+    #[test]
+    fn first_cpu_frame_replaces_partial_gpu_damage() {
+        let viewport = Viewport::new(Size::new(100., 80.), 200, 160, 2.);
+        let dirty = Rect::new(20., 20., 4., 4.);
+        assert_eq!(raster_damage(viewport, dirty, false), viewport.logical_bounds());
+        assert_eq!(raster_damage(viewport, dirty, true), dirty);
+    }
+}
