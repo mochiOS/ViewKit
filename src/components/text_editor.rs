@@ -536,6 +536,8 @@ pub struct TextEditor {
     monospaced: bool,
     font_size: Option<f32>,
     line_wrap: bool,
+    current_line: bool,
+    indent_guides: Option<usize>,
     bordered: bool,
     on_change: Option<RefCell<Box<dyn FnMut(&str)>>>,
 }
@@ -554,6 +556,8 @@ impl TextEditor {
             monospaced: false,
             font_size: None,
             line_wrap: false,
+            current_line: false,
+            indent_guides: None,
             bordered: false,
             on_change: None,
         }
@@ -570,6 +574,8 @@ impl TextEditor {
             monospaced: false,
             font_size: None,
             line_wrap: false,
+            current_line: false,
+            indent_guides: None,
             bordered: false,
             on_change: None,
         }
@@ -622,6 +628,21 @@ impl TextEditor {
     /// Wraps long logical lines to the available editor width.
     pub fn line_wrap(mut self, line_wrap: bool) -> Self {
         self.line_wrap = line_wrap;
+        self
+    }
+
+    /// Highlights the caret's visual line while focused. Selection is painted
+    /// above this background, using the ordinary editor selection treatment.
+    pub fn highlight_current_line(mut self, enabled: bool) -> Self {
+        self.current_line = enabled;
+        self
+    }
+
+    /// Shows guides at indentation boundaries in monospaced, unwrapped text.
+    /// Zero disables guides. Tabs advance to the next boundary, never one column.
+    /// Only visible lines are visited; document storage and input are unchanged.
+    pub fn indent_guides(mut self, columns: usize) -> Self {
+        self.indent_guides = (columns > 0 && columns <= 16).then_some(columns);
         self
     }
 
@@ -1120,6 +1141,59 @@ impl View for TextEditor {
         context
             .display_list
             .push(DrawCommand::PushClip { rect: content });
+        if self.current_line && focused {
+            context.display_list.push(DrawCommand::FillRect {
+                rect: Rect::new(
+                    content.origin.x,
+                    content.origin.y + cursor_line as f32 * line_height - scroll_y,
+                    content.size.width,
+                    line_height,
+                ),
+                color: context.theme.colors.surface_subtle,
+            });
+        }
+        if let Some(columns) = self
+            .indent_guides
+            .filter(|_| self.monospaced && !self.line_wrap)
+        {
+            let advance = self
+                .text(" ")
+                .measure_unbounded_with_typography(context.text_measurer, context.typography)
+                .width;
+            for index in visible_lines.clone() {
+                let line = &value[lines[index].clone()];
+                let indentation =
+                    line.chars()
+                        .take_while(|c| matches!(c, ' ' | '\t'))
+                        .fold(0, |col, c| {
+                            if c == '\t' {
+                                (col / columns + 1) * columns
+                            } else {
+                                col + 1
+                            }
+                        });
+                // Horizontal scrolling must not turn a long whitespace prefix
+                // into millions of offscreen guide commands.
+                let first =
+                    (((scroll_x / advance.max(1.0)).floor() as usize / columns) + 1) * columns;
+                let last = (((scroll_x + content.size.width) / advance.max(1.0)).ceil() as usize)
+                    .min(indentation);
+                for column in (first..=last).step_by(columns) {
+                    let x = content.origin.x + column as f32 * advance - scroll_x;
+                    if x >= content.origin.x && x < content.origin.x + content.size.width {
+                        context.display_list.push(DrawCommand::FillRect {
+                            rect: Rect::new(
+                                x,
+                                content.origin.y + index as f32 * line_height - scroll_y,
+                                1.0 / context.text_measurer.font_scale().max(1.0),
+                                line_height,
+                            ),
+                            color: context.theme.colors.border,
+                        });
+                    }
+                }
+            }
+        }
         if let Some(selection) = selection.as_ref() {
             for line_index in visible_lines.clone() {
                 let range = &lines[line_index];
@@ -2375,6 +2449,41 @@ fn caret_state(interaction: &TextEditorInteractionState, now: Instant) -> (bool,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn code_adornments_keep_native_text_selection_and_ime_state() {
+        let theme = Theme::LIGHT;
+        let input = TextEditorInteractionState::new();
+        input.set_value("fn main() {\n    work();\n}");
+        input.set_selection(16..20);
+        let editor = TextEditor::with_interaction(input.clone())
+            .monospaced(true)
+            .highlight_current_line(true)
+            .indent_guides(4);
+        let bounds = Rect::new(0., 0., 400., 200.);
+        let mut text = TextMeasurer::new();
+        let mut cx = EventContext::new(&theme, &theme.typography, &mut text);
+        editor.handle_event(
+            bounds,
+            &ViewEvent::KeyboardFocusRequested {
+                bounds: Some(bounds),
+            },
+            &mut cx,
+        );
+        let selected = input.selection();
+        let mut display = crate::draw_command::DisplayList::new();
+        editor.paint(
+            bounds,
+            &mut PaintContext::new(&mut display, &theme, &theme.typography, &mut text),
+        );
+        assert_eq!(input.selection(), selected);
+        assert!(display.commands().iter().any(
+            |c| matches!(c, DrawCommand::FillRect { color, .. } if *color == theme.colors.border)
+        ));
+        assert!(display.commands().iter().any(|c| matches!(c, DrawCommand::FillRect { color, .. } if *color == theme.colors.surface_subtle)));
+        assert_eq!(input.value(), "fn main() {\n    work();\n}");
+    }
+
     use crate::theme::Theme;
     use crate::typography::{TextMeasurer, Typography};
 

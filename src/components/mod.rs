@@ -18,6 +18,7 @@ mod ellipse;
 mod file_drop_target;
 mod form;
 mod group;
+mod help;
 mod hstack;
 mod icon;
 mod icon_button;
@@ -91,6 +92,7 @@ pub use content_area::ContentArea;
 pub use context_menu::ContextMenu;
 pub use ellipse::{Ellipse, EllipseColor};
 pub use file_drop_target::{FileDropInteractionState, FileDropTarget};
+pub use help::{Help, HelpHost, HelpState};
 #[allow(deprecated)]
 pub use icon::IconName;
 pub use icon::{Icon, SymbolName};

@@ -7,7 +7,7 @@ use crate::geometry::{Point, Rect, Size};
 use crate::layout::{IntoStackChild, StackAlignment, StackGap, ViewExt};
 use crate::platform::{Key, PointerButton};
 use crate::state::Binding;
-use crate::theme::{Color, CornerRadius, ShadowStyle, Theme};
+use crate::theme::{Color, ControlSize, CornerRadius, ShadowStyle, Theme};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 use std::time::{Duration, Instant};
 use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
@@ -21,6 +21,8 @@ use super::{
 struct TabItem {
     value: usize,
     label: String,
+    symbol: Option<SymbolName>,
+    modified: bool,
     enabled: bool,
     interaction: ButtonInteractionState,
     close: Option<Rc<RefCell<Box<dyn FnMut()>>>>,
@@ -41,6 +43,12 @@ pub struct TabsInteractionState {
 }
 
 impl TabsInteractionState {
+    /// Current visual document order, using stable item values rather than indices.
+    /// Values are reconciled when the rebuilt tab strip is painted.
+    pub fn ordered_values(&self) -> Vec<usize> {
+        self.document_order.borrow().clone()
+    }
+
     pub fn new() -> Self {
         Self {
             identity: AccessibilityIdentity::default(),
@@ -69,6 +77,8 @@ pub struct Tabs {
     item_width: Option<f32>,
     document_style: bool,
     compact_style: bool,
+    size: Option<ControlSize>,
+    hover_close: bool,
     selected_content: Option<Rc<dyn View>>,
     on_selected_activate: Option<Rc<RefCell<Box<dyn FnMut()>>>>,
 }
@@ -91,9 +101,58 @@ impl Tabs {
             item_width: None,
             document_style: false,
             compact_style: false,
+            size: None,
+            hover_close: false,
             selected_content: None,
             on_selected_activate: None,
         }
+    }
+
+    /// Uses standard control density. Omit this to retain the theme's tab height.
+    /// Geometry, input and the animated selection surface use the same height.
+    pub fn size(mut self, size: ControlSize) -> Self {
+        self.size = Some(size);
+        self
+    }
+
+    /// Reveals close controls on hover or keyboard focus. Modified documents
+    /// keep a dot in the reserved slot; entering that slot reveals Close.
+    pub fn close_on_hover(mut self, enabled: bool) -> Self {
+        self.hover_close = enabled;
+        self
+    }
+
+    /// Adds an installed VK Symbol to an existing tab without changing its ID.
+    pub fn item_symbol(mut self, value: usize, symbol: SymbolName) -> Self {
+        if let Some(item) = self.items.iter_mut().find(|item| item.value == value) {
+            item.symbol = Some(symbol);
+        }
+        self
+    }
+
+    /// Indicates unsaved content independently of the accessible file name.
+    pub fn item_modified(mut self, value: usize, modified: bool) -> Self {
+        if let Some(item) = self.items.iter_mut().find(|item| item.value == value) {
+            item.modified = modified;
+        }
+        self
+    }
+
+    fn height(&self, theme: &Theme) -> f32 {
+        match self.size {
+            Some(ControlSize::Small) => theme.controls.small_height,
+            Some(ControlSize::Medium) => theme.controls.height,
+            Some(ControlSize::Large) => theme.controls.large_height,
+            None => theme.tabs.height,
+        }
+    }
+
+    fn show_close(&self, item: &TabItem) -> bool {
+        !self.hover_close
+            || item.interaction.is_hovered()
+            || item.interaction.is_focused()
+            || item.close_interaction.is_hovered()
+            || item.close_interaction.is_focused()
     }
 
     /// タブ1枚の幅を指定します。不正な値は標準幅へ戻します。
@@ -183,6 +242,8 @@ impl Tabs {
         self.items.push(TabItem {
             value,
             label: label.into(),
+            symbol: None,
+            modified: false,
             enabled: true,
             interaction,
             close_interaction,
@@ -203,6 +264,8 @@ impl Tabs {
         self.items.push(TabItem {
             value,
             label: label.into(),
+            symbol: None,
+            modified: false,
             enabled: false,
             interaction,
             close_interaction,
@@ -255,7 +318,11 @@ impl Tabs {
             .alignment(ZStackAlignment::Center)
             .enabled(enabled)
             .accessibility_role(AccessibilityRole::Tab)
-            .accessibility_label(item.label.clone())
+            .accessibility_label(if item.modified {
+                format!("{}, modified", item.label)
+            } else {
+                item.label.clone()
+            })
             .accessibility_selected(selected);
         let text = Text::label(item.label.clone())
             .accessibility_hidden(true)
@@ -264,6 +331,17 @@ impl Tabs {
             .alignment(crate::typography::TextAlignment::Center)
             .color(foreground)
             .single_line(true);
+        let mut label = HStack::new()
+            .gap(StackGap::Small)
+            .alignment(StackAlignment::Center);
+        if let Some(symbol) = item.symbol {
+            label = label.child(
+                Icon::new(symbol)
+                    .size(theme.layout.compact_icon_size)
+                    .color(foreground),
+            );
+        }
+        let label = label.child(text.layout().flex_grow(1.0).flex_shrink(1.0));
         if item.close.is_some() {
             button.content(
                 HStack::new()
@@ -271,7 +349,7 @@ impl Tabs {
                     .gap(StackGap::None)
                     .child(
                         Padding::symmetric(theme.spacing.small, 0.0)
-                            .content(text)
+                            .content(label)
                             .layout()
                             .height(16.0)
                             .flex_grow(1.0)
@@ -288,7 +366,7 @@ impl Tabs {
                     .frame(self.width(theme), 16.0),
             )
         } else {
-            button.content(text.height(16.0))
+            button.content(label.height(16.0))
         }
     }
 
@@ -330,10 +408,10 @@ impl Tabs {
                     // The embedded control owns focus; the replaced label button
                     // must not retain a focus ring or intercept editing keys.
                     item.interaction.reset();
-                    content.frame(self.width(theme), theme.tabs.height - self.tongue(theme))
+                    content.frame(self.width(theme), self.height(theme) - self.tongue(theme))
                 } else {
                     self.item_button(item, theme)
-                        .frame(self.width(theme), theme.tabs.height - self.tongue(theme))
+                        .frame(self.width(theme), self.height(theme) - self.tongue(theme))
                 }
             }))
     }
@@ -352,7 +430,7 @@ impl Tabs {
 
     fn indicator_points(&self, theme: &Theme) -> Vec<Point> {
         let half_width = (self.width(theme) - self.inset(theme) * 2.0) / 2.0;
-        let half_height = (theme.tabs.height - self.tongue(theme) - self.inset(theme)) / 2.0;
+        let half_height = (self.height(theme) - self.tongue(theme) - self.inset(theme)) / 2.0;
         let radius = theme
             .tabs
             .radius
@@ -459,7 +537,7 @@ impl View for Tabs {
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
         constraints.constrain(Size::new(
             self.width(context.theme) * self.items.len() as f32,
-            context.theme.tabs.height,
+            self.height(context.theme),
         ))
     }
 
@@ -475,7 +553,7 @@ impl View for Tabs {
         if !self.enabled && self.interaction_state.indicator_shape.is_animating() {
             self.interaction_state.indicator_shape.reset();
         }
-        let strip_height = (context.theme.tabs.height - self.tongue(context.theme))
+        let strip_height = (self.height(context.theme) - self.tongue(context.theme))
             .min(bounds.size.height)
             .max(0.0);
         let strip_bounds = Rect::new(
@@ -612,11 +690,25 @@ impl View for Tabs {
             .borrow_mut()
             .retain(|value, _| self.items.iter().any(|item| item.value == *value));
         for (index, item) in self.items.iter().enumerate() {
-            if item.close.is_some() {
+            if item.close.is_some() && self.show_close(item) {
                 self.close_button(item).paint(
                     self.close_bounds(index, strip_bounds, context.theme),
                     context,
                 );
+            } else if item.modified {
+                let slot = self.close_bounds(index, strip_bounds, context.theme);
+                let size = context.theme.spacing.small;
+                super::Ellipse::new()
+                    .color(RectangleColor::Custom(context.theme.tabs.foreground))
+                    .paint(
+                        Rect::new(
+                            slot.origin.x + (slot.size.width - size) / 2.0,
+                            slot.origin.y + (slot.size.height - size) / 2.0,
+                            size,
+                            size,
+                        ),
+                        context,
+                    );
             }
         }
     }
@@ -638,7 +730,7 @@ impl View for Tabs {
             }
         }
         let stack = self.stack(context.theme);
-        let strip_height = (context.theme().tabs.height - self.tongue(context.theme()))
+        let strip_height = (self.height(context.theme()) - self.tongue(context.theme()))
             .min(bounds.size.height)
             .max(0.0);
         let strip_bounds = Rect::new(
@@ -870,6 +962,54 @@ mod tests {
     use crate::state::State;
     use crate::theme::Theme;
     use crate::typography::{TextMeasurer, Typography};
+
+    #[test]
+    fn compact_document_tabs_share_density_and_preserve_modified_metadata() {
+        for theme in [Theme::LIGHT, Theme::DARK] {
+            let selection = State::new(7usize);
+            let tabs = Tabs::new(selection.binding())
+                .document_style()
+                .size(ControlSize::Large)
+                .close_on_hover(true)
+                .closable_item(7, "main.rs", || {})
+                .item_symbol(7, SymbolName::File)
+                .item_modified(7, true);
+            let mut text = TextMeasurer::new();
+            let size = tabs.measure(
+                Constraints::loose(Size::new(800., 100.)),
+                &mut MeasureContext {
+                    theme: &theme,
+                    typography: &theme.typography,
+                    text_measurer: &mut text,
+                },
+            );
+            assert_eq!(size.height, theme.controls.large_height);
+            assert!(!tabs.show_close(&tabs.items[0]));
+            let mut display = DisplayList::new();
+            tabs.paint(
+                Rect::new(0., 0., size.width, size.height),
+                &mut PaintContext::new(&mut display, &theme, &theme.typography, &mut text),
+            );
+            assert!(
+                display
+                    .commands()
+                    .iter()
+                    .any(|c| matches!(c, DrawCommand::DrawSvg { .. }))
+            );
+            assert!(tabs.items[0].modified);
+            assert_eq!(tabs.items[0].label, "main.rs");
+            let mut cx = EventContext::new(&theme, &theme.typography, &mut text);
+            let bounds = Rect::new(0., 0., size.width, size.height);
+            tabs.handle_event(
+                bounds,
+                &ViewEvent::PointerMoved {
+                    position: Point::new(size.width - 16., size.height / 2.),
+                },
+                &mut cx,
+            );
+            assert!(tabs.show_close(&tabs.items[0]));
+        }
+    }
 
     #[test]
     fn close_hover_target_is_inset_from_each_tab_edge() {
