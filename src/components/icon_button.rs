@@ -47,6 +47,9 @@ pub enum IconButtonTone {
     #[default]
     Plain,
     Accent,
+    /// Transparent control using the theme's success colour for the glyph.
+    /// Hover, pressed, disabled and omochi behaviour remain standard.
+    Success,
 }
 
 pub struct IconButton {
@@ -110,7 +113,7 @@ impl IconButton {
 
     fn resolved_size(&self) -> ButtonSize {
         self.size.unwrap_or(match self.tone {
-            IconButtonTone::Plain => ButtonSize::Small,
+            IconButtonTone::Plain | IconButtonTone::Success => ButtonSize::Small,
             IconButtonTone::Accent => ButtonSize::Medium,
         })
     }
@@ -132,12 +135,15 @@ impl IconButton {
     fn appearance(&self, theme: &Theme) -> ControlAppearance {
         let state = self.visual_state();
         let palette = match self.tone {
-            IconButtonTone::Plain => theme.button.ghost,
+            IconButtonTone::Plain | IconButtonTone::Success => theme.button.ghost,
             IconButtonTone::Accent => theme.button.accent,
         };
         let mut appearance = palette.resolve(state);
+        if self.tone == IconButtonTone::Success {
+            appearance.foreground = theme.colors.success;
+        }
 
-        if self.tone == IconButtonTone::Plain
+        if matches!(self.tone, IconButtonTone::Plain | IconButtonTone::Success)
             && self.enabled
             && self.interaction_state.surface.is_animating()
         {
@@ -151,7 +157,7 @@ impl IconButton {
             appearance.border =
                 color_with_opacity(appearance.border, theme.button.disabled_opacity);
             appearance.foreground = match self.tone {
-                IconButtonTone::Plain => theme.colors.text_disabled,
+                IconButtonTone::Plain | IconButtonTone::Success => theme.colors.text_disabled,
                 IconButtonTone::Accent => {
                     color_with_opacity(appearance.foreground, theme.button.disabled_opacity)
                 }
@@ -371,6 +377,23 @@ mod spacing_tests {
                     }
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod success_tone_tests {
+    use super::*;
+
+    #[test]
+    fn success_tone_has_no_rest_background_and_follows_both_themes() {
+        for theme in [Theme::LIGHT, Theme::DARK] {
+            let button = IconButton::new(SymbolName::Play).tone(IconButtonTone::Success);
+            let rest = button.appearance(&theme);
+            assert_eq!(rest.foreground, theme.colors.success);
+            assert_eq!(rest.background.alpha, 0);
+            let disabled = button.enabled(false).appearance(&theme);
+            assert_eq!(disabled.foreground, theme.colors.text_disabled);
         }
     }
 }
