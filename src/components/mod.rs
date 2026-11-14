@@ -61,7 +61,7 @@ mod tooltip;
 mod vstack;
 mod zstack;
 
-pub use background::Background;
+pub use background::{Background, EmptyView};
 pub use dialog::Dialog;
 pub use divider::Divider;
 pub use form::{Form, FormSections};

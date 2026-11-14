@@ -71,6 +71,7 @@ pub struct PaintContext<'a> {
     accessibility_nodes: Option<&'a mut Vec<AccessibilityNode>>,
     command_statuses: Option<&'a mut Vec<CommandStatus>>,
     viewport_bounds: Option<Rect>,
+    scale_factor: f64,
     inherited_corner_radii: Vec<f32>,
     list_row_edges: Option<(bool, bool)>,
     control_foreground: Option<crate::theme::Color>,
@@ -127,6 +128,7 @@ impl<'a> PaintContext<'a> {
             accessibility_nodes: None,
             command_statuses: None,
             viewport_bounds: None,
+            scale_factor: 1.0,
             inherited_corner_radii: Vec::new(),
             list_row_edges: None,
             control_foreground: None,
@@ -153,6 +155,20 @@ impl<'a> PaintContext<'a> {
 
     pub fn with_viewport_bounds(mut self, bounds: Rect) -> Self {
         self.viewport_bounds = Some(bounds);
+        self
+    }
+
+    /// Physical pixels per logical point of the current window.
+    pub fn scale_factor(&self) -> f64 {
+        self.scale_factor
+    }
+
+    pub fn with_scale_factor(mut self, scale: f64) -> Self {
+        self.scale_factor = if scale.is_finite() && scale > 0.0 {
+            scale
+        } else {
+            1.0
+        };
         self
     }
 

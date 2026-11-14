@@ -4,6 +4,83 @@ use crate::theme::Color;
 
 pub const DEFAULT_FRAME_INTERVAL: Duration = Duration::from_millis(16);
 
+/// Critically damped motion sampled from elapsed time. Carry the sampled
+/// velocity into a retarget to preserve continuity when input interrupts it.
+#[derive(Clone, Copy, Debug)]
+pub struct SpringAnimation {
+    started_at: Instant,
+    from: f32,
+    target: f32,
+    velocity: f32,
+    frequency: f32,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SpringSample {
+    pub value: f32,
+    pub velocity: f32,
+    pub next_redraw_at: Option<Instant>,
+}
+
+impl SpringAnimation {
+    pub fn new(
+        from: f32,
+        target: f32,
+        velocity: f32,
+        started_at: Instant,
+        response: Duration,
+    ) -> Self {
+        let from = if from.is_finite() { from } else { 0.0 };
+        let target = if target.is_finite() { target } else { from };
+        let velocity = if velocity.is_finite() { velocity } else { 0.0 };
+        Self {
+            started_at,
+            from,
+            target,
+            velocity,
+            frequency: if response.is_zero() {
+                f32::INFINITY
+            } else {
+                3.8 / response.as_secs_f32().max(0.001)
+            },
+        }
+    }
+
+    pub fn sample(self, now: Instant) -> SpringSample {
+        if !self.frequency.is_finite() {
+            return SpringSample {
+                value: self.target,
+                velocity: 0.0,
+                next_redraw_at: None,
+            };
+        }
+        let elapsed = now.saturating_duration_since(self.started_at).as_secs_f32();
+        let displacement = self.from - self.target;
+        let coefficient = self.velocity + self.frequency * displacement;
+        let decay = (-self.frequency * elapsed).exp();
+        let value = self.target + (displacement + coefficient * elapsed) * decay;
+        let velocity = (self.velocity - self.frequency * coefficient * elapsed) * decay;
+        let tolerance = (displacement.abs() * 0.0005).max(0.0005);
+        if !self.frequency.is_finite()
+            || elapsed >= 3.0
+            || ((value - self.target).abs() < tolerance
+                && velocity.abs() < tolerance * self.frequency)
+        {
+            SpringSample {
+                value: self.target,
+                velocity: 0.0,
+                next_redraw_at: None,
+            }
+        } else {
+            SpringSample {
+                value,
+                velocity,
+                next_redraw_at: Some(now + DEFAULT_FRAME_INTERVAL),
+            }
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Easing {
     Linear,
@@ -329,6 +406,40 @@ impl AppearanceTransition {
 mod appearance_tests {
     use super::*;
     use crate::theme::{ControlAppearance, Motion};
+
+    #[test]
+    fn spring_retarget_preserves_position_and_velocity_without_frame_accumulation() {
+        let now = Instant::now();
+        let response = Duration::from_millis(220);
+        let opening = SpringAnimation::new(0.0, 1.0, 2.0, now, response);
+        let at = now + Duration::from_millis(100);
+        let before = opening.sample(at);
+        let closing = SpringAnimation::new(before.value, 0.0, before.velocity, at, response);
+        let after = closing.sample(at);
+        assert!((after.value - before.value).abs() < 0.00001);
+        assert!((after.velocity - before.velocity).abs() < 0.00001);
+        assert_eq!(closing.sample(at + Duration::from_secs(2)).value, 0.0);
+        assert!(
+            closing
+                .sample(at + Duration::from_secs(2))
+                .next_redraw_at
+                .is_none()
+        );
+        let direct = opening.sample(now + Duration::from_millis(250)).value;
+        for frame in 0..15 {
+            let _ = opening.sample(now + Duration::from_millis(frame * 16));
+        }
+        assert_eq!(
+            opening.sample(now + Duration::from_millis(250)).value,
+            direct
+        );
+        assert_eq!(
+            SpringAnimation::new(0.0, 1.0, 0.0, now, Duration::ZERO)
+                .sample(now)
+                .value,
+            1.0
+        );
+    }
 
     fn appearance(color: Color) -> ControlAppearance {
         ControlAppearance {

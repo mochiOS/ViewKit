@@ -410,6 +410,24 @@ where
                 }
             }
 
+            WindowEvent::Touch(touch) => {
+                let point = physical_position_to_logical(touch.location, window.scale_factor());
+                let phase = match touch.phase {
+                    winit::event::TouchPhase::Started => crate::platform::TouchPhase::Started,
+                    winit::event::TouchPhase::Moved => crate::platform::TouchPhase::Moved,
+                    winit::event::TouchPhase::Ended => crate::platform::TouchPhase::Ended,
+                    winit::event::TouchPhase::Cancelled => crate::platform::TouchPhase::Cancelled,
+                };
+                self.emit(
+                    window_id,
+                    PlatformEvent::Touch {
+                        id: touch.id,
+                        phase,
+                        x: point.0,
+                        y: point.1,
+                    },
+                );
+            }
             WindowEvent::CursorLeft { .. } => {
                 if let Some(state) = self.windows.get_mut(&window_id) {
                     state.pending_pointer_move = None;

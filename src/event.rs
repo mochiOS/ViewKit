@@ -47,6 +47,11 @@ impl ContextMenuRequest {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ViewEvent {
+    Touch {
+        id: u64,
+        phase: crate::platform::TouchPhase,
+        position: Point,
+    },
     /// Runtime lifecycle notification to old view trees after a rebuild.
     /// Identified components absent from the new tree release interaction.
     ReconcileComponents {
@@ -153,6 +158,7 @@ impl ViewEvent {
     pub fn position(&self) -> Option<Point> {
         match self {
             Self::PointerMoved { position }
+            | Self::Touch { position, .. }
             | Self::PointerPressed { position, .. }
             | Self::PointerReleased { position, .. }
             | Self::Scroll { position, .. }
@@ -165,6 +171,7 @@ impl ViewEvent {
             }
 
             Self::ReconcileComponents { .. }
+            | Self::Touch { .. }
             | Self::PointerLeft
             | Self::ModifiersChanged { .. }
             | Self::KeyPressed { .. }
@@ -531,6 +538,8 @@ impl<'a> EventContext<'a> {
 
 #[derive(Clone, Debug, Default)]
 pub struct EventDispatcher {
+    touch_pointer: Option<u64>,
+    touch_emulating: bool,
     pointer_position: Option<Point>,
     focus_order: Vec<Rect>,
     focused_bounds: Option<Rect>,
@@ -717,6 +726,80 @@ impl EventDispatcher {
         event: &PlatformEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
+        if let PlatformEvent::Touch { id, phase, x, y } = event {
+            use crate::platform::TouchPhase;
+            if *phase == TouchPhase::Started && self.touch_pointer.is_none() {
+                self.touch_pointer = Some(*id);
+            }
+            context.modifiers = self.modifiers;
+            let result = root.handle_event(
+                bounds,
+                &ViewEvent::Touch {
+                    id: *id,
+                    phase: *phase,
+                    position: Point::new(*x, *y),
+                },
+                context,
+            );
+            if self.touch_pointer != Some(*id) {
+                return result;
+            }
+            // Views that recognize gestures receive real contact IDs. Existing
+            // controls receive one primary pointer only when no view claims it.
+            let mut fallback = EventResult::Ignored;
+            if result == EventResult::Consumed {
+                if self.touch_emulating {
+                    fallback = self.dispatch(root, bounds, &PlatformEvent::PointerLeft, context);
+                }
+                self.touch_emulating = false;
+            } else if *phase == TouchPhase::Started || self.touch_emulating {
+                fallback = self.dispatch(
+                    root,
+                    bounds,
+                    &PlatformEvent::PointerMoved { x: *x, y: *y },
+                    context,
+                );
+                match phase {
+                    TouchPhase::Started => {
+                        self.touch_emulating = true;
+                        fallback = fallback.merge(self.dispatch(
+                            root,
+                            bounds,
+                            &PlatformEvent::PointerButton {
+                                button: PointerButton::Primary,
+                                state: ButtonState::Pressed,
+                            },
+                            context,
+                        ));
+                    }
+                    TouchPhase::Ended => {
+                        fallback = fallback.merge(self.dispatch(
+                            root,
+                            bounds,
+                            &PlatformEvent::PointerButton {
+                                button: PointerButton::Primary,
+                                state: ButtonState::Released,
+                            },
+                            context,
+                        ))
+                    }
+                    TouchPhase::Cancelled => {
+                        fallback = fallback.merge(self.dispatch(
+                            root,
+                            bounds,
+                            &PlatformEvent::PointerLeft,
+                            context,
+                        ))
+                    }
+                    TouchPhase::Moved => {}
+                }
+            }
+            if matches!(phase, TouchPhase::Ended | TouchPhase::Cancelled) {
+                self.touch_pointer = None;
+                self.touch_emulating = false;
+            }
+            return result.merge(fallback);
+        }
         let mut result = EventResult::Ignored;
         match event {
             PlatformEvent::ModifiersChanged { modifiers }
@@ -731,6 +814,8 @@ impl EventDispatcher {
         if let PlatformEvent::Focused(focused) = event {
             self.window_focused = *focused;
             if !focused {
+                self.touch_pointer = None;
+                self.touch_emulating = false;
                 self.pointer_position = None;
                 self.focused_bounds = None;
                 self.focused_identity = None;
@@ -959,6 +1044,7 @@ impl EventDispatcher {
             PlatformEvent::SelectAll => Some(ViewEvent::SelectAll),
 
             PlatformEvent::Resumed { .. }
+            | PlatformEvent::Touch { .. }
             | PlatformEvent::Resized { .. }
             | PlatformEvent::ScaleFactorChanged { .. }
             | PlatformEvent::RedrawRequested
@@ -978,6 +1064,140 @@ mod tests {
     use crate::typography::TextMeasurer;
     use crate::view::{PaintContext, View};
     use std::cell::Cell;
+
+    #[test]
+    fn touch_cancellation_never_clicks_and_secondary_contacts_do_not_emulate_a_mouse() {
+        use crate::platform::TouchPhase;
+        struct Recorder(std::cell::RefCell<Vec<ViewEvent>>);
+        impl View for Recorder {
+            fn paint(&self, _: Rect, _: &mut PaintContext<'_>) {}
+            fn handle_event(
+                &self,
+                _: Rect,
+                event: &ViewEvent,
+                _: &mut EventContext<'_>,
+            ) -> EventResult {
+                self.0.borrow_mut().push(event.clone());
+                EventResult::Ignored
+            }
+        }
+        let root = Recorder(Default::default());
+        let theme = Theme::LIGHT;
+        let mut text = TextMeasurer::new();
+        let mut context = EventContext::new(&theme, &theme.typography, &mut text);
+        let mut dispatcher = EventDispatcher::new();
+        let bounds = Rect::new(0.0, 0.0, 400.0, 300.0);
+        for (id, phase) in [
+            (1, TouchPhase::Started),
+            (2, TouchPhase::Started),
+            (2, TouchPhase::Ended),
+            (1, TouchPhase::Cancelled),
+        ] {
+            dispatcher.dispatch(
+                &root,
+                bounds,
+                &PlatformEvent::Touch {
+                    id,
+                    phase,
+                    x: 50.0,
+                    y: 50.0,
+                },
+                &mut context,
+            );
+        }
+        let events = root.0.borrow();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, ViewEvent::Touch { .. }))
+                .count(),
+            4
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, ViewEvent::PointerPressed { .. }))
+                .count(),
+            1
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, ViewEvent::PointerReleased { .. }))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, ViewEvent::PointerLeft))
+        );
+    }
+
+    #[test]
+    fn claiming_a_touch_gesture_cancels_the_previous_control_press() {
+        use crate::platform::TouchPhase;
+        struct Recognizer(std::cell::RefCell<Vec<ViewEvent>>);
+        impl View for Recognizer {
+            fn paint(&self, _: Rect, _: &mut PaintContext<'_>) {}
+            fn handle_event(
+                &self,
+                _: Rect,
+                event: &ViewEvent,
+                _: &mut EventContext<'_>,
+            ) -> EventResult {
+                self.0.borrow_mut().push(event.clone());
+                if matches!(
+                    event,
+                    ViewEvent::Touch {
+                        phase: TouchPhase::Moved | TouchPhase::Ended,
+                        ..
+                    }
+                ) {
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
+            }
+        }
+        let root = Recognizer(Default::default());
+        let theme = Theme::LIGHT;
+        let mut text = TextMeasurer::new();
+        let mut context = EventContext::new(&theme, &theme.typography, &mut text);
+        let mut dispatcher = EventDispatcher::new();
+        let bounds = Rect::new(0.0, 0.0, 400.0, 300.0);
+        for phase in [TouchPhase::Started, TouchPhase::Moved, TouchPhase::Ended] {
+            dispatcher.dispatch(
+                &root,
+                bounds,
+                &PlatformEvent::Touch {
+                    id: 7,
+                    phase,
+                    x: 50.0,
+                    y: 50.0,
+                },
+                &mut context,
+            );
+        }
+        let events = root.0.borrow();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, ViewEvent::PointerPressed { .. }))
+                .count(),
+            1
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, ViewEvent::PointerLeft))
+                .count(),
+            1
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, ViewEvent::PointerReleased { .. }))
+        );
+    }
 
     #[test]
     fn pointer_context_retains_modifiers_and_clears_them_on_focus_loss() {

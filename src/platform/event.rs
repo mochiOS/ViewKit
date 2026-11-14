@@ -3,6 +3,15 @@
 use crate::renderer::Viewport;
 use std::path::PathBuf;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]
+pub enum TouchPhase {
+    Started,
+    Moved,
+    Ended,
+    Cancelled,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]
 pub enum PointerButton {
@@ -87,6 +96,13 @@ impl KeyModifiers {
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]
 pub enum PlatformEvent {
+    /// Logical coordinates and stable identity of one physical contact.
+    Touch {
+        id: u64,
+        phase: TouchPhase,
+        x: f32,
+        y: f32,
+    },
     Resumed {
         viewport: Viewport,
     },

@@ -65,6 +65,7 @@ fn build_counter_tree(counter: i64) -> ViewNode {
             font_family: "Noto Sans JP".to_string(),
             cache_layout: true,
             center_visible_ink: false,
+            single_line: false,
         }),
     ));
 
