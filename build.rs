@@ -6,6 +6,10 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
+#[path = "build-support/font-copy.rs"]
+mod font_copy;
+use font_copy::copy_font;
+
 struct FontCandidate {
     path: PathBuf,
     family: String,
@@ -55,10 +59,10 @@ fn main() {
     let monospace = required_font("VIEWKIT_MONOSPACE_FONT_PATH", "UDEV Gothic");
 
     let target_path = out_dir.join("default_ui_font.ttf");
-    fs::copy(&candidate.path, &target_path)
+    copy_font(&candidate.path, &target_path)
         .unwrap_or_else(|err| panic!("failed to copy default font: {err}"));
     let monospace_target_path = out_dir.join("default_monospace_font.ttf");
-    fs::copy(&monospace.path, &monospace_target_path)
+    copy_font(&monospace.path, &monospace_target_path)
         .unwrap_or_else(|err| panic!("failed to copy default monospace font: {err}"));
 
     println!(
@@ -86,7 +90,7 @@ fn configure_japanese_fonts(out_dir: &Path) {
     if !path.is_file() {
         return;
     }
-    fs::copy(&path, out_dir.join("default_japanese_font.ttf"))
+    copy_font(&path, &out_dir.join("default_japanese_font.ttf"))
         .expect("failed to copy Japanese regular font");
     println!("cargo:rustc-cfg=viewkit_embedded_japanese_font");
     // Match the actual UI weights, so a host's semibold Mincho face cannot win
@@ -107,7 +111,7 @@ fn configure_japanese_fonts(out_dir: &Path) {
             let sibling = path.with_file_name(source);
             println!("cargo:rerun-if-changed={}", sibling.display());
             if sibling.is_file() {
-                fs::copy(&sibling, out_dir.join(output))
+                copy_font(&sibling, &out_dir.join(output))
                     .expect("failed to copy Japanese UI weight");
                 println!("cargo:rustc-cfg={cfg}");
             }
