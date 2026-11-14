@@ -1,3 +1,5 @@
+mod reorder;
+
 use crate::accessibility::{AccessibilityIdentity, AccessibilityNode, AccessibilityRole};
 use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
@@ -34,6 +36,8 @@ pub struct TabsInteractionState {
     selection_motion: MagneticSelectionMotion,
     items: Rc<RefCell<BTreeMap<usize, (ButtonInteractionState, ButtonInteractionState)>>>,
     activation_origin: Rc<std::cell::Cell<Option<Point>>>,
+    document_order: Rc<RefCell<Vec<usize>>>,
+    document_drag: Rc<std::cell::Cell<Option<reorder::DocumentDrag>>>,
 }
 
 impl TabsInteractionState {
@@ -44,6 +48,8 @@ impl TabsInteractionState {
             selection_motion: MagneticSelectionMotion::default(),
             items: Rc::new(RefCell::new(BTreeMap::new())),
             activation_origin: Rc::new(std::cell::Cell::new(None)),
+            document_order: Rc::new(RefCell::new(Vec::new())),
+            document_drag: Rc::new(std::cell::Cell::new(None)),
         }
     }
 }
@@ -95,10 +101,13 @@ impl Tabs {
         self.item_width = (width.is_finite() && width > 0.0).then_some(width);
         self
     }
-    /// 文書向けのタブ表示に切り替えます。グループの背景枠とインセットを使いません。
+    /// 文書向けのタブ表示に切り替えます。ドラッグは選択の移動ではなく並べ替えです。
+    /// 順序は共有InteractionStateに保持します。valueには安定した文書IDを指定してください。
+    /// compact_styleと埋め込み入力欄の既存の選択操作は変更しません。
     pub fn document_style(mut self) -> Self {
         self.document_style = true;
         self.compact_style = false;
+        self.restore_document_order();
         self
     }
     /// Uses a standalone segmented surface with shared continuous corners on
@@ -156,7 +165,11 @@ impl Tabs {
         on_close: impl FnMut() + 'static,
     ) -> Self {
         self = self.item(value, label);
-        self.items.last_mut().unwrap().close = Some(Rc::new(RefCell::new(Box::new(on_close))));
+        self.items
+            .iter_mut()
+            .find(|item| item.value == value)
+            .unwrap()
+            .close = Some(Rc::new(RefCell::new(Box::new(on_close))));
         self
     }
     pub fn item(mut self, value: usize, label: impl Into<String>) -> Self {
@@ -175,6 +188,7 @@ impl Tabs {
             close_interaction,
             close: None,
         });
+        self.restore_document_order();
         self
     }
 
@@ -194,6 +208,7 @@ impl Tabs {
             close_interaction,
             close: None,
         });
+        self.restore_document_order();
         self
     }
 
@@ -587,6 +602,11 @@ impl View for Tabs {
             context.display_list.push(DrawCommand::PopClip);
         }
         stack.paint(strip_bounds, context);
+        self.paint_document_drop(strip_bounds, context);
+        self.interaction_state
+            .document_order
+            .borrow_mut()
+            .retain(|value| self.items.iter().any(|item| item.value == *value));
         self.interaction_state
             .items
             .borrow_mut()
@@ -614,6 +634,7 @@ impl View for Tabs {
                     .cancel(bounds.origin.x);
                 self.interaction_state.indicator_shape.reset();
                 self.interaction_state.activation_origin.set(None);
+                self.interaction_state.document_drag.set(None);
             }
         }
         let stack = self.stack(context.theme);
@@ -670,6 +691,12 @@ impl View for Tabs {
                         return close_result.merge(result);
                     }
                 }
+            }
+        }
+
+        if self.document_style && !self.compact_style && self.selected_content.is_none() {
+            if let Some(result) = self.handle_document_drag(strip_bounds, event, context) {
+                return close_result.merge(result);
             }
         }
 
