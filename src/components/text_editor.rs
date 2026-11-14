@@ -653,7 +653,7 @@ impl TextEditor {
     }
 
     /// Shows guides at indentation boundaries in monospaced, unwrapped text.
-    /// Zero disables guides. Tabs advance to the next boundary, never one column.
+    /// Zero disables guides. Tabs follow the native text layout's tab stops.
     /// Only visible lines are visited; document storage and input are unchanged.
     pub fn indent_guides(mut self, columns: usize) -> Self {
         self.indent_guides = (columns > 0 && columns <= 16).then_some(columns);
@@ -1184,6 +1184,13 @@ impl View for TextEditor {
                 .text(" ")
                 .measure_unbounded_with_typography(context.text_measurer, context.typography)
                 .width;
+            let tab_columns = (self
+                .text("\t")
+                .measure_unbounded_with_typography(context.text_measurer, context.typography)
+                .width
+                / advance.max(1.0))
+            .round()
+            .max(1.0) as usize;
             for index in visible_lines.clone() {
                 let line = &value[lines[index].clone()];
                 let indentation =
@@ -1191,7 +1198,7 @@ impl View for TextEditor {
                         .take_while(|c| matches!(c, ' ' | '\t'))
                         .fold(0, |col, c| {
                             if c == '\t' {
-                                (col / columns + 1) * columns
+                                (col / tab_columns + 1) * tab_columns
                             } else {
                                 col + 1
                             }
