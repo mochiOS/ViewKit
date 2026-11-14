@@ -18,6 +18,7 @@ pub struct Picker {
     size: crate::theme::ControlSize,
     label: String,
     enabled: bool,
+    toolbar: bool,
     radius: Option<CornerRadius>,
     interaction: ButtonInteractionState,
     options: Vec<PickerOption>,
@@ -38,11 +39,19 @@ impl Picker {
             size: crate::theme::ControlSize::Medium,
             label: label.into(),
             enabled: true,
+            toolbar: false,
             radius: None,
             interaction: ButtonInteractionState::new(),
             options: Vec::new(),
             active_request: Cell::new(None),
         }
+    }
+
+    /// Uses the standard ghost treatment for toolbar/status-bar selectors.
+    /// Menu dispatch, focus and the full label's hit target stay unchanged.
+    pub fn toolbar(mut self) -> Self {
+        self.toolbar = true;
+        self
     }
 
     pub fn enabled(mut self, enabled: bool) -> Self {
@@ -114,12 +123,16 @@ impl Picker {
 
         Button::with_interaction(self.interaction.clone())
             .content_padding(false)
-            .style(ButtonStyle::Custom {
-                background: theme.picker.background,
-                hovered_background: theme.picker.hovered_background,
-                border: theme.picker.border,
-                hovered_border: theme.picker.hovered_border,
-                foreground,
+            .style(if self.toolbar {
+                ButtonStyle::Ghost
+            } else {
+                ButtonStyle::Custom {
+                    background: theme.picker.background,
+                    hovered_background: theme.picker.hovered_background,
+                    border: theme.picker.border,
+                    hovered_border: theme.picker.hovered_border,
+                    foreground,
+                }
             })
             .radius(self.radius.unwrap_or(theme.picker.radius))
             .shadow(ShadowStyle::None)
@@ -138,10 +151,12 @@ impl Picker {
                         .gap(StackGap::Small)
                         .child(
                             Text::label(self.label.clone())
+                                .single_line(true)
                                 .accessibility_hidden(true)
                                 .color(foreground)
                                 .layout()
-                                .flex_grow(1.0),
+                                .flex_grow(1.0)
+                                .flex_shrink(1.0),
                         )
                         .child(Spacer::new())
                         .child(
@@ -220,6 +235,44 @@ impl View for Picker {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn toolbar_picker_elides_long_labels_and_keeps_its_menu_target() {
+        use crate::draw_command::{DisplayList, DrawCommand};
+        let theme = Theme::LIGHT;
+        let picker = Picker::new("a very long native application configuration name")
+            .toolbar()
+            .option("Debug", || {});
+        let bounds = Rect::new(0., 0., 130., 30.);
+        let mut text = crate::typography::TextMeasurer::new();
+        let mut list = DisplayList::new();
+        picker.paint(
+            bounds,
+            &mut PaintContext::new(&mut list, &theme, &theme.typography, &mut text),
+        );
+        assert!(
+            list.commands()
+                .iter()
+                .any(|c| matches!(c,DrawCommand::DrawText{command} if command.text.ends_with('…')))
+        );
+        let mut cx = EventContext::new(&theme, &theme.typography, &mut text);
+        for event in [
+            ViewEvent::PointerPressed {
+                position: Point::new(16., 15.),
+                button: crate::platform::PointerButton::Primary,
+            },
+            ViewEvent::PointerReleased {
+                position: Point::new(16., 15.),
+                button: crate::platform::PointerButton::Primary,
+            },
+        ] {
+            picker.handle_event(bounds, &event, &mut cx);
+        }
+        assert_eq!(
+            cx.take_context_menu_request().unwrap().items[0].label,
+            "Debug"
+        );
+    }
+
     use super::*;
     use crate::theme::Theme;
     use crate::typography::{TextMeasurer, Typography};

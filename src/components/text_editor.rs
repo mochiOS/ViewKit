@@ -57,6 +57,7 @@ struct TextEditorInteractionInner {
     scroll_x: f32,
     scroll_y: f32,
     reveal_caret: bool,
+    tail_attached: bool,
     vertical_scroll_drag: Option<f32>,
     horizontal_scroll_drag: Option<f32>,
     cached_layout_value: String,
@@ -92,6 +93,7 @@ impl Default for TextEditorInteractionInner {
             scroll_x: 0.0,
             scroll_y: 0.0,
             reveal_caret: true,
+            tail_attached: true,
             vertical_scroll_drag: None,
             horizontal_scroll_drag: None,
             cached_layout_value: String::new(),
@@ -229,7 +231,9 @@ impl TextEditorInteractionState {
         inner.undo.clear();
         inner.redo.clear();
         inner.last_edit_kind = None;
-        inner.selecting = false;
+        if prefix < old_end {
+            inner.selecting = false;
+        }
         inner.input_method = InputMethodState::default();
         update_statistics(&mut inner);
     }
@@ -537,6 +541,7 @@ pub struct TextEditor {
     font_size: Option<f32>,
     line_wrap: bool,
     current_line: bool,
+    follow_tail: bool,
     indent_guides: Option<usize>,
     bordered: bool,
     on_change: Option<RefCell<Box<dyn FnMut(&str)>>>,
@@ -557,6 +562,7 @@ impl TextEditor {
             font_size: None,
             line_wrap: false,
             current_line: false,
+            follow_tail: false,
             indent_guides: None,
             bordered: false,
             on_change: None,
@@ -575,6 +581,7 @@ impl TextEditor {
             font_size: None,
             line_wrap: false,
             current_line: false,
+            follow_tail: false,
             indent_guides: None,
             bordered: false,
             on_change: None,
@@ -628,6 +635,13 @@ impl TextEditor {
     /// Wraps long logical lines to the available editor width.
     pub fn line_wrap(mut self, line_wrap: bool) -> Self {
         self.line_wrap = line_wrap;
+        self
+    }
+
+    /// Follows appended output until the user scrolls or selects earlier text.
+    /// Scrolling back to the bottom resumes following. This never requests focus.
+    pub fn follow_tail(mut self, enabled: bool) -> Self {
+        self.follow_tail = enabled;
         self
     }
 
@@ -1038,6 +1052,9 @@ impl View for TextEditor {
             (content_width - content.size.width).max(0.0)
         };
         let maximum_y = (content_height - content.size.height).max(0.0);
+        if self.follow_tail && inner.tail_attached && !inner.selecting && selection.is_none() {
+            inner.scroll_y = maximum_y;
+        }
         inner.scroll_x = inner.scroll_x.clamp(0.0, maximum_x);
         inner.scroll_y = inner.scroll_y.clamp(0.0, maximum_y);
 
@@ -1061,6 +1078,13 @@ impl View for TextEditor {
                 inner.scroll_y = (cursor_y + line_height - content.size.height).min(maximum_y);
             }
             inner.reveal_caret = false;
+        }
+        if self.follow_tail
+            && inner.scroll_y >= maximum_y - 1.0
+            && !inner.selecting
+            && selection.is_none()
+        {
+            inner.tail_attached = true;
         }
         let scroll_x = inner.scroll_x;
         let scroll_y = inner.scroll_y;
@@ -1414,6 +1438,13 @@ impl View for TextEditor {
         event: &ViewEvent,
         context: &mut EventContext<'_>,
     ) -> EventResult {
+        if self.follow_tail
+            && matches!(event,
+            ViewEvent::Scroll { position, .. } | ViewEvent::PointerPressed { position, .. } if bounds.contains(*position))
+        {
+            self.interaction.inner.borrow_mut().tail_attached = false;
+        }
+
         if let ViewEvent::ReconcileComponents { retained } = event {
             if !retained.contains(&self.interaction.identity) {
                 self.handle_event(bounds, &ViewEvent::PointerLeft, context);
@@ -2448,6 +2479,48 @@ fn caret_state(interaction: &TextEditorInteractionState, now: Instant) -> (bool,
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn output_follows_without_focus_and_preserves_a_readers_scroll_and_selection() {
+        let theme = Theme::LIGHT;
+        let input = TextEditorInteractionState::new();
+        input.set_value((0..100).map(|i| format!("line {i}\n")).collect::<String>());
+        let editor = TextEditor::with_interaction(input.clone())
+            .read_only(true)
+            .follow_tail(true);
+        let mut text = TextMeasurer::new();
+        let bounds = Rect::new(0., 0., 300., 120.);
+        let paint = |text: &mut TextMeasurer| {
+            let mut list = crate::draw_command::DisplayList::new();
+            editor.paint(
+                bounds,
+                &mut PaintContext::new(&mut list, &theme, &theme.typography, text),
+            );
+        };
+        paint(&mut text);
+        assert!(input.scroll_offset().y > 0.0);
+        assert!(!input.is_focused());
+        let bottom = input.scroll_offset().y;
+        let mut cx = EventContext::new(&theme, &theme.typography, &mut text);
+        editor.handle_event(
+            bounds,
+            &ViewEvent::Scroll {
+                position: Point::new(80., 60.),
+                delta_x: 0.,
+                delta_y: -80.,
+            },
+            &mut cx,
+        );
+        paint(&mut text);
+        let reading = input.scroll_offset().y;
+        assert!(reading < bottom);
+        input.set_selection(0..4);
+        let updated = format!("{}new output\n", input.value());
+        input.synchronize_value(updated);
+        paint(&mut text);
+        assert_eq!(input.selection(), 0..4);
+        assert_eq!(input.scroll_offset().y, reading);
+    }
+
     use super::*;
 
     #[test]
