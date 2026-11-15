@@ -1,6 +1,6 @@
 //! リストコンポーネント
 
-use super::row_appearance::{RowAppearance, RowLeading};
+use super::row_appearance::{RowAppearance, RowLeading, paint_keyboard_focus};
 use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
@@ -345,6 +345,7 @@ impl ListRow {
             .content_padding(false)
             .style(appearance.button_style())
             .shadow(ShadowStyle::None)
+            .focus_ring(false)
             .alignment(ZStackAlignment::Leading)
             .enabled(self.enabled);
         button = if let Some(content) = &self.custom_content {
@@ -385,18 +386,25 @@ impl View for ListRow {
         if !context.window_active() {
             button.cancel_tracking();
         }
+        let radius = context.inherited_corner_radius().unwrap_or_else(|| {
+            context.theme.button.radius.resolve(
+                &context.theme.radius,
+                bounds.size.width,
+                bounds.size.height,
+            )
+        });
+        let mut focus_radii = [radius; 4];
         if let Some((first, last)) = self
             .edges
             .or_else(|| context.list_row_edges())
             .filter(|edges| *edges != (true, true))
         {
-            let radius = context.inherited_corner_radius().unwrap_or_else(|| {
-                context.theme.button.radius.resolve(
-                    &context.theme.radius,
-                    bounds.size.width,
-                    bounds.size.height,
-                )
-            });
+            focus_radii = [
+                if first { radius } else { 0.0 },
+                if first { radius } else { 0.0 },
+                if last { radius } else { 0.0 },
+                if last { radius } else { 0.0 },
+            ];
             context
                 .display_list
                 .push(DrawCommand::PushRoundedCornersClip {
@@ -413,6 +421,13 @@ impl View for ListRow {
         } else {
             button.paint(bounds, context);
         }
+        paint_keyboard_focus(
+            bounds,
+            focus_radii,
+            &self.interaction,
+            self.enabled,
+            context,
+        );
     }
 
     fn handle_event(

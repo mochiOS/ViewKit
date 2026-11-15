@@ -13,7 +13,7 @@ use super::{
     VStack, ZStackAlignment,
 };
 
-use super::row_appearance::{RowAppearance, RowLeading};
+use super::row_appearance::{RowAppearance, RowLeading, paint_keyboard_focus};
 
 type Callback = Rc<RefCell<Box<dyn FnMut()>>>;
 
@@ -211,6 +211,7 @@ impl SidebarItem {
             .style(appearance.button_style())
             .enabled(self.enabled)
             .shadow(ShadowStyle::None)
+            .focus_ring(false)
             .alignment(ZStackAlignment::Leading)
             .radius(theme.button.radius)
             .accessibility_role(AccessibilityRole::Button)
@@ -241,6 +242,18 @@ impl View for SidebarItem {
             button.cancel_tracking();
         }
         button.paint(bounds, context);
+        let radius = context.theme.button.radius.resolve(
+            &context.theme.radius,
+            bounds.size.width,
+            bounds.size.height,
+        );
+        paint_keyboard_focus(
+            bounds,
+            [radius; 4],
+            &self.interaction,
+            self.enabled,
+            context,
+        );
     }
 
     fn handle_event(

@@ -61,6 +61,25 @@ impl View for RowLeading {
     }
 }
 
+pub(super) fn paint_keyboard_focus(
+    bounds: Rect,
+    radii: [f32; 4],
+    interaction: &super::ButtonInteractionState,
+    enabled: bool,
+    context: &mut PaintContext<'_>,
+) {
+    if enabled && context.window_active() && interaction.is_focus_visible() {
+        context
+            .display_list
+            .push(DrawCommand::StrokeInsideRoundedCornersRect {
+                rect: bounds,
+                radii,
+                color: context.theme.button.focus_ring,
+                width: context.theme.button.focus_ring_width,
+            });
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(super) struct RowAppearance {
     pub foreground: Color,

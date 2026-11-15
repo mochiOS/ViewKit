@@ -223,3 +223,61 @@ fn custom_artwork_uses_the_symbol_gutter_and_keeps_its_intrinsic_size() {
         }
     }
 }
+
+#[test]
+fn keyboard_focus_stays_inside_joined_rows_and_does_not_imply_selection() {
+    for mut theme in [Theme::LIGHT, Theme::DARK] {
+        theme.motion = theme.motion.reduced();
+        for edges in [(true, true), (true, false), (false, false), (false, true)] {
+            for sidebar in [false, true] {
+                let state = ButtonInteractionState::new();
+                let view: Box<dyn View> = if sidebar {
+                    Box::new(SidebarItem::with_interaction(state.clone(), "Title"))
+                } else {
+                    Box::new(
+                        ListRow::with_interaction(state.clone(), "Title")
+                            .adjacent_rows(!edges.0, !edges.1),
+                    )
+                };
+                let bounds = Rect::new(10., 20., 260., 48.);
+                let mut text = TextMeasurer::new();
+                let mut context = EventContext::new(&theme, &theme.typography, &mut text);
+                view.handle_event(
+                    bounds,
+                    &ViewEvent::KeyboardFocusRequested {
+                        bounds: Some(bounds),
+                    },
+                    &mut context,
+                );
+                let pointer = paint(view.as_ref(), &theme, true, false);
+                assert!(!pointer.commands().iter().any(|command| matches!(command,
+                    DrawCommand::StrokeInsideRoundedCornersRect { color, .. } if *color == theme.button.focus_ring)));
+                view.handle_event(
+                    bounds,
+                    &ViewEvent::FocusVisibilityChanged { visible: true },
+                    &mut context,
+                );
+                let keyboard = paint(view.as_ref(), &theme, true, false);
+                let (rect, radii) = keyboard
+                    .commands()
+                    .iter()
+                    .find_map(|command| match command {
+                        DrawCommand::StrokeInsideRoundedCornersRect {
+                            rect, radii, color, ..
+                        } if *color == theme.button.focus_ring => Some((*rect, *radii)),
+                        _ => None,
+                    })
+                    .expect("keyboard focus must survive the row's clip");
+                assert_eq!(rect, bounds);
+                if !sidebar {
+                    assert_eq!(radii[0] > 0., edges.0);
+                    assert_eq!(radii[2] > 0., edges.1);
+                }
+                assert_eq!(background(&keyboard), background(&pointer));
+                let inactive = paint(view.as_ref(), &theme, false, false);
+                assert!(!inactive.commands().iter().any(|command| matches!(command,
+                    DrawCommand::StrokeInsideRoundedCornersRect { color, .. } if *color == theme.button.focus_ring)));
+            }
+        }
+    }
+}
