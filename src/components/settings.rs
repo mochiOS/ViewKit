@@ -392,7 +392,8 @@ impl SettingsRow {
     }
 
     /// Uses native control typography and vertically centered labels. On narrow
-    /// windows the control moves below the label instead of crushing its text.
+    /// windows the control moves below the label, aligned to its leading edge,
+    /// instead of crushing its text. Read-only rows retain compact text height.
     pub fn compact(mut self) -> Self {
         self.compact = true;
         self
@@ -454,19 +455,13 @@ impl SettingsRow {
             (
                 Size::new(width, height),
                 Rect::new(0.0, padding, width, labels.height),
-                Rect::new(
-                    width - control.width,
-                    control_y,
-                    control.width,
-                    control.height,
-                ),
+                Rect::new(0.0, control_y, control.width, control.height),
             )
         } else {
-            let height = labels
-                .height
-                .max(control.height)
-                .max(context.theme.controls.height)
-                + padding * 2.0;
+            let height = (labels.height.max(control.height) + padding * 2.0).max(
+                crate::theme::RowDensity::Compact
+                    .minimum_height(context.theme.layout.list_row_height),
+            );
             (
                 Size::new(width, height),
                 Rect::new(
@@ -609,6 +604,7 @@ impl View for SettingsRow {
 }
 
 /// Convenience constructor for a read-only value aligned like a control.
+/// Values use the standard label size, matching picker and text-field content.
 pub fn settings_value(
     title: impl Into<String>,
     description: impl Into<String>,
@@ -616,7 +612,7 @@ pub fn settings_value(
 ) -> SettingsRow {
     SettingsRow::new(
         title,
-        Text::styled(value.into(), TextRole::Body)
+        Text::styled(value.into(), TextRole::Label)
             .alignment(TextAlignment::End)
             .tone(TextTone::Secondary),
     )
@@ -650,7 +646,7 @@ mod tests {
         use crate::components::Button;
         use crate::geometry::Point;
         use crate::platform::PointerButton;
-        for width in [280.0, 440.0, 640.0] {
+        for width in [120.0, 200.0, 280.0, 440.0, 640.0] {
             let calls = Rc::new(Cell::new(0));
             let click = calls.clone();
             let row = SettingsRow::new(
@@ -675,6 +671,9 @@ mod tests {
             assert!(control.origin.x >= 0.0);
             assert!(control.origin.x + control.size.width <= size.width);
             assert!(control.origin.y + control.size.height <= size.height);
+            if control.origin.y >= labels.origin.y + labels.size.height {
+                assert_eq!(control.origin.x, labels.origin.x);
+            }
             let bounds = Rect::new(0.0, 0.0, size.width, size.height);
             let position = Point::new(
                 control.origin.x + control.size.width / 2.0,
@@ -699,6 +698,43 @@ mod tests {
             );
             assert_eq!(calls.get(), 1, "control at width {width}");
         }
+    }
+
+    #[test]
+    fn read_only_rows_use_control_typography_without_reserving_an_input_field_height() {
+        use crate::draw_command::DrawCommand;
+        let theme = Theme::LIGHT;
+        let mut text = TextMeasurer::new();
+        let row = settings_value("Version", "", "27.0").compact();
+        let size = row.measure(
+            Constraints::loose(Size::new(640., f32::INFINITY)),
+            &mut MeasureContext {
+                theme: &theme,
+                typography: &theme.typography,
+                text_measurer: &mut text,
+            },
+        );
+        assert!(
+            size.height
+                >= crate::theme::RowDensity::Compact.minimum_height(theme.layout.list_row_height)
+        );
+        assert!(size.height < theme.controls.height + theme.spacing.small * 2.);
+        let mut list = DisplayList::new();
+        row.paint(
+            Rect::new(0., 0., size.width, size.height),
+            &mut PaintContext::new(&mut list, &theme, &theme.typography, &mut text),
+        );
+        let lines: Vec<_> = list
+            .commands()
+            .iter()
+            .filter_map(|command| match command {
+                DrawCommand::DrawText { command } => Some(command),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].font_size, lines[1].font_size);
+        assert_eq!(lines[0].bounds.origin.y, lines[1].bounds.origin.y);
     }
 
     #[test]
