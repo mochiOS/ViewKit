@@ -161,6 +161,17 @@ impl Tabs {
         }
     }
 
+    fn leading_size(&self, item: &TabItem, theme: &Theme) -> f32 {
+        if item.leading.is_some() {
+            theme
+                .layout
+                .list_leading_size
+                .min((self.height(theme) - theme.spacing.small).max(0.0))
+        } else {
+            theme.layout.compact_icon_size
+        }
+    }
+
     fn show_close(&self, item: &TabItem) -> bool {
         !self.hover_close
             || item.interaction.is_hovered()
@@ -340,6 +351,8 @@ impl Tabs {
                 item.label.clone()
             })
             .accessibility_selected(selected);
+        let leading_size = self.leading_size(item, theme);
+        let content_height = leading_size.max(16.0);
         let text = Text::label(item.label.clone())
             .accessibility_hidden(true)
             .font_size(13.0)
@@ -358,10 +371,7 @@ impl Tabs {
             label = label.child(
                 leading
                     .clone()
-                    .frame(
-                        theme.layout.compact_icon_size,
-                        theme.layout.compact_icon_size,
-                    )
+                    .frame(leading_size, leading_size)
                     .flex_shrink(0.0),
             );
         } else if let Some(symbol) = item.symbol {
@@ -381,7 +391,7 @@ impl Tabs {
                         Padding::symmetric(theme.spacing.small, 0.0)
                             .content(label)
                             .layout()
-                            .height(16.0)
+                            .height(content_height)
                             .flex_grow(1.0)
                             .flex_shrink(1.0),
                     )
@@ -393,10 +403,10 @@ impl Tabs {
                             .flex_grow(0.0)
                             .flex_shrink(0.0),
                     )
-                    .frame(self.width(theme), 16.0),
+                    .frame(self.width(theme), content_height),
             )
         } else {
-            button.content(label.height(16.0))
+            button.content(label.height(content_height))
         }
     }
 
@@ -1039,8 +1049,14 @@ mod tests {
                 }
             })
             .unwrap();
-        assert_eq!(image.bounds.size.width, theme.layout.compact_icon_size);
-        assert_eq!(image.bounds.size.height, theme.layout.compact_icon_size);
+        assert_eq!(
+            image.bounds.size.width,
+            tabs.leading_size(&tabs.items[1], &theme)
+        );
+        assert_eq!(
+            image.bounds.size.height,
+            tabs.leading_size(&tabs.items[1], &theme)
+        );
         let mut context = EventContext::new(&theme, &theme.typography, &mut text);
         let position = Point::new(Tabs::width(&tabs, &theme) + 24., theme.tabs.height / 2.);
         tabs.handle_event(
