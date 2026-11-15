@@ -5,7 +5,7 @@ use super::input_geometry::{field_text_line, input_text_role};
 use crate::accessibility::AccessibilityRole;
 use crate::event::{ContextMenuItem, ContextMenuRequest, EventContext, EventResult, ViewEvent};
 use crate::geometry::{Point, Rect, Size};
-use crate::platform::PointerButton;
+use crate::platform::{Key, PointerButton};
 use crate::theme::{CornerRadius, ShadowStyle, Theme};
 use crate::typography::Typography;
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
@@ -291,6 +291,7 @@ impl View for Picker {
             if let Some(index) = command_id.and_then(|id| id.checked_sub(1))
                 && let Some(option) = self.options.get(index as usize)
                 && option.enabled
+                && self.enabled
             {
                 (option.on_select.borrow_mut())();
                 context.request_redraw();
@@ -301,16 +302,20 @@ impl View for Picker {
         let result = self
             .button(context.theme)
             .handle_event(bounds, event, context);
-        if self.enabled
-            && result.is_consumed()
-            && matches!(
-                event,
-                ViewEvent::PointerReleased {
-                    position,
-                    button: PointerButton::Primary,
-                } if bounds.contains(*position)
-            )
-        {
+        let activated = matches!(
+            event,
+            ViewEvent::KeyPressed {
+                key: Key::Enter | Key::Space,
+                ..
+            }
+        ) || matches!(
+            event,
+            ViewEvent::PointerReleased {
+                position,
+                button: PointerButton::Primary,
+            } if bounds.contains(*position)
+        );
+        if self.enabled && result.is_consumed() && activated {
             self.open_menu(bounds, context);
         }
         result
@@ -360,6 +365,49 @@ mod tests {
     use super::*;
     use crate::theme::Theme;
     use crate::typography::{TextMeasurer, Typography};
+
+    #[test]
+    fn keyboard_opens_only_the_focused_enabled_picker_and_disabled_results_do_not_apply() {
+        for key in [Key::Enter, Key::Space] {
+            let selected = Rc::new(Cell::new(false));
+            let target = selected.clone();
+            let mut picker = Picker::new("Current").option("Other", move || target.set(true));
+            let bounds = Rect::new(20., 30., 200., 30.);
+            let mut text = TextMeasurer::new();
+            let mut cx = EventContext::new(&Theme::LIGHT, &Typography::DEFAULT, &mut text);
+            let press = ViewEvent::KeyPressed {
+                key,
+                modifiers: crate::platform::KeyModifiers::default(),
+            };
+            picker.handle_event(bounds, &press, &mut cx);
+            assert!(cx.take_context_menu_request().is_none());
+            picker.handle_event(
+                bounds,
+                &ViewEvent::KeyboardFocusRequested {
+                    bounds: Some(bounds),
+                },
+                &mut cx,
+            );
+            picker.handle_event(bounds, &press, &mut cx);
+            let request = cx
+                .take_context_menu_request()
+                .expect("focused picker opens with keyboard");
+            assert_eq!(request.items[0].label, "Other");
+            assert_eq!(request.position, Point::new(20., 60.));
+            picker = picker.enabled(false);
+            picker.handle_event(
+                bounds,
+                &ViewEvent::ContextMenuResult {
+                    request_id: request.request_id,
+                    command_id: Some(1),
+                },
+                &mut cx,
+            );
+            assert!(!selected.get());
+            picker.handle_event(bounds, &press, &mut cx);
+            assert!(cx.take_context_menu_request().is_none());
+        }
+    }
 
     #[test]
     fn options_open_a_menu_and_dispatch_the_selected_callback() {
