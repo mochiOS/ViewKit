@@ -328,7 +328,11 @@ impl Tabs {
             .accessibility_hidden(true)
             .font_size(13.0)
             .weight(if selected { 600 } else { 500 })
-            .alignment(crate::typography::TextAlignment::Center)
+            .alignment(if item.symbol.is_some() {
+                crate::typography::TextAlignment::Start
+            } else {
+                crate::typography::TextAlignment::Center
+            })
             .color(foreground)
             .single_line(true);
         let mut label = HStack::new()
