@@ -27,6 +27,7 @@ pub mod renderer;
 pub mod runtime;
 pub mod state;
 pub mod svg;
+pub mod system_icon;
 pub mod theme;
 pub mod typography;
 pub mod view;

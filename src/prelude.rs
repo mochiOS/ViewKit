@@ -25,6 +25,7 @@ pub use crate::runtime::{
 };
 pub use crate::state::{Binding, State};
 pub use crate::svg::{SvgData, SvgError};
+pub use crate::system_icon::SystemIcon;
 pub use crate::theme::{
     Color, ControlSize, CornerRadius, FigmaTokens, RowDensity, ShadowStyle, Theme,
 };
