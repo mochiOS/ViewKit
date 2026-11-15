@@ -166,6 +166,29 @@ mod tests {
     use std::cell::Cell;
     use std::rc::Rc;
 
+    #[test]
+    fn system_integrated_and_toolbar_chrome_share_the_existing_surface_color() {
+        for theme in [Theme::LIGHT, Theme::DARK] {
+            assert_eq!(
+                theme.shell.title_bar_background,
+                theme.colors.surface_subtle
+            );
+            assert_eq!(
+                super::super::TitleBar::new().config(&theme).background,
+                theme.shell.title_bar_background
+            );
+            let mut list = DisplayList::new();
+            let mut text = TextMeasurer::new();
+            Toolbar::new(Recorder(Rc::new(Cell::new(None)))).paint(
+                Rect::new(0., 0., 640., theme.layout.top_bar_height),
+                &mut PaintContext::new(&mut list, &theme, &theme.typography, &mut text),
+            );
+            assert!(list.commands().iter().any(|command| matches!(command,
+                crate::draw_command::DrawCommand::FillRect { color, .. }
+                    if *color == theme.shell.title_bar_background)));
+        }
+    }
+
     struct Recorder(Rc<Cell<Option<Rect>>>);
 
     impl View for Recorder {
