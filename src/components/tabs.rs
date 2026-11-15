@@ -22,6 +22,7 @@ struct TabItem {
     value: usize,
     label: String,
     symbol: Option<SymbolName>,
+    leading: Option<Rc<dyn View>>,
     modified: bool,
     enabled: bool,
     interaction: ButtonInteractionState,
@@ -126,6 +127,19 @@ impl Tabs {
     pub fn item_symbol(mut self, value: usize, symbol: SymbolName) -> Self {
         if let Some(item) = self.items.iter_mut().find(|item| item.value == value) {
             item.symbol = Some(symbol);
+            item.leading = None;
+        }
+        self
+    }
+
+    /// Places decorative artwork in the standard icon slot of an existing tab.
+    /// The tab retains ownership of layout, selection, dragging and input; the
+    /// leading view is painted only and cannot intercept tab or close gestures.
+    /// Setting a symbol afterwards replaces the custom artwork, and vice versa.
+    pub fn item_leading_view(mut self, value: usize, view: impl View + 'static) -> Self {
+        if let Some(item) = self.items.iter_mut().find(|item| item.value == value) {
+            item.leading = Some(Rc::new(view));
+            item.symbol = None;
         }
         self
     }
@@ -243,6 +257,7 @@ impl Tabs {
             value,
             label: label.into(),
             symbol: None,
+            leading: None,
             modified: false,
             enabled: true,
             interaction,
@@ -265,6 +280,7 @@ impl Tabs {
             value,
             label: label.into(),
             symbol: None,
+            leading: None,
             modified: false,
             enabled: false,
             interaction,
@@ -328,7 +344,7 @@ impl Tabs {
             .accessibility_hidden(true)
             .font_size(13.0)
             .weight(if selected { 600 } else { 500 })
-            .alignment(if item.symbol.is_some() {
+            .alignment(if item.symbol.is_some() || item.leading.is_some() {
                 crate::typography::TextAlignment::Start
             } else {
                 crate::typography::TextAlignment::Center
@@ -338,7 +354,17 @@ impl Tabs {
         let mut label = HStack::new()
             .gap(StackGap::Small)
             .alignment(StackAlignment::Center);
-        if let Some(symbol) = item.symbol {
+        if let Some(leading) = &item.leading {
+            label = label.child(
+                leading
+                    .clone()
+                    .frame(
+                        theme.layout.compact_icon_size,
+                        theme.layout.compact_icon_size,
+                    )
+                    .flex_shrink(0.0),
+            );
+        } else if let Some(symbol) = item.symbol {
             label = label.child(
                 Icon::new(symbol)
                     .size(theme.layout.compact_icon_size)
@@ -966,6 +992,76 @@ mod tests {
     use crate::state::State;
     use crate::theme::Theme;
     use crate::typography::{TextMeasurer, Typography};
+
+    #[test]
+    fn custom_artwork_preserves_tab_input_and_uses_the_native_icon_slot() {
+        struct Artwork(Rc<std::cell::Cell<usize>>);
+        impl View for Artwork {
+            fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
+                let pixels =
+                    crate::image::ImageData::from_rgba8(1, 1, vec![255, 0, 0, 255]).unwrap();
+                super::super::Image::new(pixels).paint(bounds, context);
+            }
+
+            fn handle_event(
+                &self,
+                _: Rect,
+                _: &ViewEvent,
+                _: &mut EventContext<'_>,
+            ) -> EventResult {
+                self.0.set(self.0.get() + 1);
+                EventResult::Consumed
+            }
+        }
+        let events = Rc::new(std::cell::Cell::new(0));
+        let selection = State::new(1usize);
+        let tabs = Tabs::new(selection.binding())
+            .document_style()
+            .item(1, "one.txt")
+            .item(2, "two.rs")
+            .item_leading_view(2, Artwork(events.clone()));
+        let theme = Theme::LIGHT;
+        let bounds = Rect::new(0., 0., 500., theme.tabs.height);
+        let mut text = TextMeasurer::new();
+        let mut display = DisplayList::new();
+        tabs.paint(
+            bounds,
+            &mut PaintContext::new(&mut display, &theme, &theme.typography, &mut text),
+        );
+        let image = display
+            .commands()
+            .iter()
+            .find_map(|command| {
+                if let DrawCommand::DrawImage { command } = command {
+                    Some(command)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        assert_eq!(image.bounds.size.width, theme.layout.compact_icon_size);
+        assert_eq!(image.bounds.size.height, theme.layout.compact_icon_size);
+        let mut context = EventContext::new(&theme, &theme.typography, &mut text);
+        let position = Point::new(Tabs::width(&tabs, &theme) + 24., theme.tabs.height / 2.);
+        tabs.handle_event(
+            bounds,
+            &ViewEvent::PointerPressed {
+                position,
+                button: PointerButton::Primary,
+            },
+            &mut context,
+        );
+        tabs.handle_event(
+            bounds,
+            &ViewEvent::PointerReleased {
+                position,
+                button: PointerButton::Primary,
+            },
+            &mut context,
+        );
+        assert_eq!(selection.get(), 2);
+        assert_eq!(events.get(), 0);
+    }
 
     #[test]
     fn compact_document_tabs_share_density_and_preserve_modified_metadata() {
