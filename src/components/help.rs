@@ -91,6 +91,9 @@ impl<V: View> View for Help<V> {
                 c.request_redraw();
             }
         }
+        if matches!(e,ViewEvent::PointerPressed { position,.. } if b.contains(*position)) {
+            self.state.dismiss();
+        }
         self.content.handle_event(b, e, c)
     }
 }
@@ -119,7 +122,15 @@ impl<V: View> View for HelpHost<V> {
         let Some(anchor) = self.state.0.borrow().clone() else {
             return;
         };
-        if b.intersection(anchor.bounds).is_none() {
+        // Integrated chrome is painted by DecoratedRoot outside its clipped
+        // body. Its controls may share this host; place their help inside the
+        // body rather than discarding an anchor just above it.
+        let adjacent_titlebar = anchor.bounds.origin.y < b.origin.y
+            && anchor.bounds.origin.y + anchor.bounds.size.height
+                >= b.origin.y - c.theme.layout.top_bar_height
+            && anchor.bounds.origin.x < b.origin.x + b.size.width
+            && anchor.bounds.origin.x + anchor.bounds.size.width > b.origin.x;
+        if b.intersection(anchor.bounds).is_none() && !adjacent_titlebar {
             self.state.dismiss();
             return;
         }
@@ -142,7 +153,7 @@ impl<V: View> View for HelpHost<V> {
             b.origin.x,
             (b.origin.x + b.size.width - size.width).max(b.origin.x),
         );
-        let below = anchor.bounds.origin.y + anchor.bounds.size.height + gap;
+        let below = (anchor.bounds.origin.y + anchor.bounds.size.height + gap).max(b.origin.y);
         let y = if below + size.height <= b.origin.y + b.size.height {
             below
         } else {
@@ -158,7 +169,7 @@ impl<V: View> View for HelpHost<V> {
                 | ViewEvent::PointerPressed { .. }
                 | ViewEvent::KeyPressed { .. }
                 | ViewEvent::Scroll { .. }
-                | ViewEvent::FocusChanged { focused: false }
+                | ViewEvent::FocusChanged { .. }
         ) {
             self.state.dismiss();
         }
@@ -169,6 +180,28 @@ impl<V: View> View for HelpHost<V> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn integrated_titlebar_help_is_visible_inside_the_body_clip() {
+        use crate::{
+            draw_command::{DisplayList, DrawCommand},
+            theme::Theme,
+            typography::TextMeasurer,
+        };
+        let state = HelpState::new();
+        state.hover("Build", Rect::new(20., 8., 32., 32.), true);
+        state.0.borrow_mut().as_mut().unwrap().since -= DELAY;
+        let host = HelpHost::new(super::super::EmptyView, state);
+        let bounds = Rect::new(0., 48., 300., 200.);
+        let theme = Theme::LIGHT;
+        let mut text = TextMeasurer::new();
+        let mut list = DisplayList::new();
+        host.paint(
+            bounds,
+            &mut PaintContext::new(&mut list, &theme, &theme.typography, &mut text),
+        );
+        assert!(list.commands().iter().any(|c|matches!(c,DrawCommand::DrawText {command} if command.text=="Build" && command.bounds.origin.y>=bounds.origin.y)));
+    }
 
     #[test]
     fn leaving_another_control_cannot_cancel_the_current_anchor() {
