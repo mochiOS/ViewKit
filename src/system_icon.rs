@@ -11,6 +11,8 @@ use std::sync::OnceLock;
 pub enum SystemIcon {
     /// The blue folder artwork used by Files.app, including its original canvas padding.
     Folder,
+    /// The generic document artwork used when no application supplies a file icon.
+    File,
 }
 
 impl SystemIcon {
@@ -29,6 +31,14 @@ impl SystemIcon {
                             .expect("the built-in folder SVG must be valid")
                     })
                     .clone()
+            }
+            Self::File => {
+                static FILE: OnceLock<SvgData> = OnceLock::new();
+                FILE.get_or_init(|| {
+                    SvgData::decode(include_bytes!("../resources/system-icons/file.svg"))
+                        .expect("the built-in file SVG must be valid")
+                })
+                .clone()
             }
         }
     }
@@ -58,5 +68,22 @@ mod tests {
         let center = pixels.pixel(32, 32).unwrap();
         assert_eq!(center.alpha(), 255);
         assert!(center.blue() > center.green() && center.green() > center.red());
+    }
+
+    #[test]
+    fn file_artwork_is_shared_and_preserves_its_document_face() {
+        let file = SystemIcon::File.svg();
+        assert_eq!(file, SystemIcon::File.svg());
+        assert_eq!(file.size(), (64.0, 64.0));
+        let mut pixels = tiny_skia::Pixmap::new(64, 64).unwrap();
+        resvg::render(
+            file.tree(),
+            tiny_skia::Transform::identity(),
+            &mut pixels.as_mut(),
+        );
+        assert_eq!(pixels.pixel(0, 0).unwrap().alpha(), 0);
+        let face = pixels.pixel(32, 32).unwrap();
+        assert_eq!(face.alpha(), 255);
+        assert!(face.red() > 235 && face.green() > 235 && face.blue() > 235);
     }
 }
