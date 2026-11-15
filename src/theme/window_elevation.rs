@@ -43,3 +43,13 @@ pub const INACTIVE_BORDER_ALPHA: u8 = 16;
 
 /// Shared desktop surface corner setback, in logical pixels.
 pub const CORNER_RADIUS: f32 = 26.5;
+
+impl Layer {
+    /// Converts the logical shadow extent into physical pixels without changing opacity.
+    pub fn scaled(self, scale: f32) -> Self {
+        let scale = if scale.is_finite() && scale > 0.0 { scale.clamp(0.25, 8.0) } else { 1.0 };
+        Self { alpha: self.alpha, offset_y: (self.offset_y as f32 * scale).round() as i32,
+            blur_radius: (self.blur_radius as f32 * scale).ceil() as u32,
+            spread: (self.spread as f32 * scale).ceil() as u32 }
+    }
+}
