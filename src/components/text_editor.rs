@@ -73,6 +73,7 @@ struct TextEditorInteractionInner {
     last_edit_at: Option<Instant>,
     input_method: InputMethodState,
     candidate_panel: Option<CandidatePanelLayout>,
+    painted_caret: Option<(u64, usize, Point, Rect)>,
     hovered_candidate: Option<usize>,
 }
 
@@ -109,6 +110,7 @@ impl Default for TextEditorInteractionInner {
             last_edit_at: None,
             input_method: InputMethodState::default(),
             candidate_panel: None,
+            painted_caret: None,
             hovered_candidate: None,
         }
     }
@@ -181,6 +183,22 @@ impl TextEditorInteractionState {
     pub fn scroll_offset(&self) -> crate::geometry::Point {
         let inner = self.inner.borrow();
         crate::geometry::Point::new(inner.scroll_x, inner.scroll_y)
+    }
+
+    /// Returns the last painted caret rectangle in window coordinates.
+    /// Stale geometry is withheld after text, selection or scroll changes until
+    /// the next paint. Hosts can anchor completion or inspection overlays without
+    /// duplicating shaping, wrapping or DPI calculations.
+    pub fn caret_bounds(&self) -> Option<Rect> {
+        let inner = self.inner.borrow();
+        inner
+            .painted_caret
+            .and_then(|(revision, cursor, scroll, bounds)| {
+                (revision == inner.revision
+                    && cursor == inner.cursor
+                    && scroll == Point::new(inner.scroll_x, inner.scroll_y))
+                .then_some(bounds)
+            })
     }
 
     /// 外部Documentの更新を反映し、選択位置・スクロール・フォーカスを維持します。
@@ -539,6 +557,7 @@ pub struct TextEditor {
     read_only: bool,
     monospaced: bool,
     font_size: Option<f32>,
+    padding: Option<f32>,
     line_wrap: bool,
     current_line: bool,
     follow_tail: bool,
@@ -560,6 +579,7 @@ impl TextEditor {
             read_only: false,
             monospaced: false,
             font_size: None,
+            padding: None,
             line_wrap: false,
             current_line: false,
             follow_tail: false,
@@ -579,6 +599,7 @@ impl TextEditor {
             read_only: false,
             monospaced: false,
             font_size: None,
+            padding: None,
             line_wrap: false,
             current_line: false,
             follow_tail: false,
@@ -633,6 +654,22 @@ impl TextEditor {
     }
 
     /// Wraps long logical lines to the available editor width.
+    /// Overrides the native content inset in logical pixels. Rendering, hit
+    /// testing, selection, scrollbars and IME anchors share this inset. Omit it
+    /// to keep the theme default; negative or non-finite values resolve to zero.
+    pub fn content_padding(mut self, padding: f32) -> Self {
+        self.padding = Some(if padding.is_finite() {
+            padding.max(0.0)
+        } else {
+            0.0
+        });
+        self
+    }
+
+    fn padding(&self, theme: &crate::theme::Theme) -> f32 {
+        self.padding.unwrap_or(theme.spacing.large)
+    }
+
     pub fn line_wrap(mut self, line_wrap: bool) -> Self {
         self.line_wrap = line_wrap;
         self
@@ -720,7 +757,7 @@ impl TextEditor {
     }
 
     fn index_at_point(&self, point: Point, bounds: Rect, context: &mut EventContext<'_>) -> usize {
-        let padding = context.theme.spacing.large;
+        let padding = self.padding(context.theme);
         let line_height = self.event_line_height(context).max(1.0);
         let content = Self::content_bounds(bounds, padding);
         let mut inner = self.interaction.inner.borrow_mut();
@@ -874,7 +911,7 @@ impl TextEditor {
 
     fn event_document_size(&self, bounds: Rect, context: &mut EventContext<'_>) -> Size {
         let line_height = self.event_line_height(context).max(1.0);
-        let content = Self::content_bounds(bounds, context.theme.spacing.large);
+        let content = Self::content_bounds(bounds, self.padding(context.theme));
         let mut inner = self.interaction.inner.borrow_mut();
         refresh_line_width_cache(
             &mut inner,
@@ -903,7 +940,7 @@ impl TextEditor {
         bounds: Rect,
         context: &mut EventContext<'_>,
     ) -> bool {
-        let padding = context.theme.spacing.large;
+        let padding = self.padding(context.theme);
         let viewport = Self::content_bounds(bounds, padding);
         let document = self.event_document_size(bounds, context);
         let offset = {
@@ -978,7 +1015,7 @@ impl TextEditor {
             return false;
         }
 
-        let viewport = Self::content_bounds(bounds, context.theme.spacing.large);
+        let viewport = Self::content_bounds(bounds, self.padding(context.theme));
         let document = self.event_document_size(bounds, context);
         let geometry =
             editor_scrollbar_geometry(viewport, document, offset, context.theme.scrollbar);
@@ -1017,7 +1054,7 @@ impl View for TextEditor {
         if bounds.size.width <= 0.0 || bounds.size.height <= 0.0 {
             return;
         }
-        let padding = context.theme.spacing.large;
+        let padding = self.padding(context.theme);
         let content = Self::content_bounds(bounds, padding);
         let mut inner = self.interaction.inner.borrow_mut();
         inner.enabled = self.enabled;
@@ -1100,6 +1137,19 @@ impl View for TextEditor {
             bounds,
             focused && !self.read_only && can_redo,
         ));
+        let painted_revision = self.interaction.revision();
+        self.interaction.inner.borrow_mut().painted_caret = Some((
+            painted_revision,
+            cursor,
+            Point::new(scroll_x, scroll_y),
+            Rect::new(
+                content.origin.x + cursor_x - scroll_x,
+                content.origin.y + cursor_line as f32 * line_height - scroll_y,
+                context.theme.text_field.caret_width,
+                line_height,
+            ),
+        ));
+
         let has_selection = selection.is_some();
         context.record_command_status(CommandStatus::new(
             commands::COPY,
@@ -1519,7 +1569,7 @@ impl View for TextEditor {
                     context.set_cursor(CursorIcon::Text);
                 }
                 if selecting {
-                    let content = Self::content_bounds(bounds, context.theme.spacing.large);
+                    let content = Self::content_bounds(bounds, self.padding(context.theme));
                     {
                         let mut inner = self.interaction.inner.borrow_mut();
                         if position.y < content.origin.y {
@@ -2486,6 +2536,54 @@ fn caret_state(interaction: &TextEditorInteractionState, now: Instant) -> (bool,
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn compact_content_insets_share_paint_hit_testing_and_caret_geometry() {
+        let state = TextEditorInteractionState::new();
+        state.set_value("abc\ndef");
+        state.set_selection(0..0);
+        let field = TextEditor::with_interaction(state.clone()).content_padding(8.0);
+        let theme = Theme::LIGHT;
+        let bounds = Rect::new(20.0, 30.0, 300.0, 100.0);
+        let mut text = crate::typography::TextMeasurer::new();
+        let mut display = crate::draw_command::DisplayList::new();
+        field.paint(
+            bounds,
+            &mut PaintContext::new(&mut display, &theme, &theme.typography, &mut text),
+        );
+        let caret = state.caret_bounds().unwrap();
+        assert_eq!(caret.origin, Point::new(28.0, 38.0));
+        let mut context = EventContext::new(&theme, &theme.typography, &mut text);
+        field.handle_event(
+            bounds,
+            &ViewEvent::PointerPressed {
+                position: Point::new(29.0, 39.0),
+                button: PointerButton::Primary,
+            },
+            &mut context,
+        );
+        assert_eq!(state.selection(), 0..0);
+        state.set_selection(1..1);
+        assert!(state.caret_bounds().is_none());
+        field.paint(
+            bounds,
+            &mut PaintContext::new(&mut display, &theme, &theme.typography, &mut text),
+        );
+        assert!(state.caret_bounds().unwrap().origin.x > caret.origin.x);
+        state.set_value("changed");
+        assert!(state.caret_bounds().is_none());
+    }
+
+    #[test]
+    fn invalid_content_padding_never_creates_non_finite_geometry() {
+        let field = TextEditor::with_interaction(TextEditorInteractionState::new())
+            .content_padding(f32::NAN);
+        assert_eq!(field.padding(&Theme::LIGHT), 0.0);
+        assert_eq!(
+            TextEditor::with_interaction(TextEditorInteractionState::new()).padding(&Theme::LIGHT),
+            Theme::LIGHT.spacing.large
+        );
+    }
+
     #[test]
     fn output_follows_without_focus_and_preserves_a_readers_scroll_and_selection() {
         let theme = Theme::LIGHT;
