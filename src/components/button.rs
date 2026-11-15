@@ -674,6 +674,10 @@ impl View for Button {
 
         if visual_state == ControlVisualState::Disabled {
             appearance = appearance.with_opacity(context.theme.button.disabled_opacity);
+        } else if self.toolbar && !context.window_active()
+            && matches!(self.style, ButtonStyle::Ghost | ButtonStyle::Standard)
+        {
+            appearance.foreground = context.theme.shell.inactive_title;
         }
 
         let (appearance, next) = self.interaction.inner.borrow_mut().appearance.sample(
@@ -1848,6 +1852,69 @@ mod transparent_omochi_tests {
                     assert!(count > 0);
                 }
                 assert!(clicked.get());
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod toolbar_activation_tests {
+    use super::*;
+    use crate::{
+        draw_command::{DisplayList, DrawCommand},
+        typography::TextMeasurer,
+    };
+
+    #[test]
+    fn inactive_neutral_toolbar_foregrounds_do_not_change_action_semantics() {
+        for theme in [Theme::LIGHT, Theme::DARK] {
+            for (toolbar, style, enabled, expected_inactive) in [
+                (true, ButtonStyle::Ghost, true, true),
+                (true, ButtonStyle::Standard, true, true),
+                (true, ButtonStyle::Primary, true, false),
+                (false, ButtonStyle::Ghost, true, false),
+                (true, ButtonStyle::Ghost, false, false),
+            ] {
+                let mut button = Button::new("Open");
+                if toolbar {
+                    button = button.toolbar();
+                }
+                let button = button.style(style).enabled(enabled);
+                let mut list = DisplayList::new();
+                let mut text = TextMeasurer::new();
+                let mut nodes = Vec::new();
+                button.paint(
+                    Rect::new(0., 0., 100., 30.),
+                    &mut PaintContext::new(&mut list, &theme, &theme.typography, &mut text)
+                        .with_window_active(false)
+                        .with_accessibility_nodes(&mut nodes),
+                );
+                let foreground = list
+                    .commands()
+                    .iter()
+                    .find_map(|command| match command {
+                        DrawCommand::DrawText { command } if command.text == "Open" => {
+                            Some(command.color)
+                        }
+                        _ => None,
+                    })
+                    .unwrap();
+                let expected = if expected_inactive {
+                    theme.shell.inactive_title
+                } else if !enabled {
+                    style
+                        .resolve(&theme, ControlVisualState::Disabled)
+                        .with_opacity(theme.button.disabled_opacity)
+                        .foreground
+                } else {
+                    style.resolve(&theme, ControlVisualState::Rest).foreground
+                };
+                assert_eq!(foreground, expected);
+                if expected_inactive {
+                    assert!(foreground.contrast_ratio(theme.colors.surface_subtle) >= 4.5);
+                }
+                assert_eq!(nodes[0].enabled, enabled);
+                assert_eq!(nodes[0].label.as_deref(), Some("Open"));
             }
         }
     }
