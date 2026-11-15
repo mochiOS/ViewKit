@@ -578,13 +578,9 @@ mod tests {
                 0.,
             ));
             assert!(layers.len() <= 32);
-            assert_eq!(
-                layers
-                    .iter()
-                    .map(|(_, color)| u32::from(color.alpha))
-                    .sum::<u32>(),
-                48
-            );
+            let alpha=layers.iter().fold(0u8,|accumulated,(_,color)|
+                mochios_viewkit_gpu_protocol::raster_quality::source_over([0,0,0,accumulated],[0,0,0,color.alpha],255)[3]);
+            assert!(alpha.abs_diff(48)<=1,"source-over, not the sum of layer alphas, defines shadow opacity");
             assert!(layers.iter().all(|(expansion, _)| expansion.is_finite()));
         }
     }

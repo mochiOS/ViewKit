@@ -18,6 +18,7 @@ pub mod geometry;
 #[cfg(any(target_os = "linux", target_os = "mochios", test))]
 mod gpu_clip;
 pub mod image;
+mod image_sampling;
 pub mod layout;
 pub mod omochi;
 pub mod platform;

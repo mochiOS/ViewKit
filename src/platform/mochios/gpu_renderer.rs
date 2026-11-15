@@ -54,6 +54,7 @@ struct ImageRasterCacheEntry {
 #[cfg(target_os = "linux")]
 pub(crate) struct ExternalImage {
     pub image: ImageData,
+    pub sampling: crate::draw_command::ImageSampling,
     pub vertices: std::ops::Range<u32>,
 }
 
@@ -89,6 +90,7 @@ pub(crate) struct GpuSceneRenderer {
     frame_height: u32,
     frame_valid: bool,
     atlas_full: bool,
+    geometry_failed: bool,
 }
 
 impl GpuSceneRenderer {
@@ -112,6 +114,7 @@ impl GpuSceneRenderer {
             frame_height: 0,
             frame_valid: false,
             atlas_full: false,
+            geometry_failed: false,
         }
     }
 
@@ -201,7 +204,11 @@ impl GpuSceneRenderer {
                         viewport,
                     );
                 }
-                DrawCommand::FillRect { rect, color } => self.solid_rect(*rect, *color, viewport),
+                DrawCommand::FillRect { rect, color } => {
+                    for (rect,coverage) in crate::renderer::PixelGrid::new(viewport.scale_factor).coverage(*rect) {
+                        self.solid_rect(rect,Color {alpha:(color.alpha as f32*coverage).round() as u8,..*color},viewport);
+                    }
+                },
                 DrawCommand::FillRoundedCornersRect { rect, radii, color } => {
                     self.fan(*rect, *radii, *color, viewport, false)
                 }
@@ -272,6 +279,9 @@ impl GpuSceneRenderer {
                 }
             }
         }
+        if self.geometry_failed {
+            return Err(MochiOsBackendError::InvalidWindowSize);
+        }
         self.encode(viewport, output)?;
         self.frame_width = viewport.physical_width;
         self.frame_height = viewport.physical_height;
@@ -286,6 +296,7 @@ impl GpuSceneRenderer {
         self.clips.clear();
         self.atlas_dirty_rows = None;
         self.atlas_full = false;
+        self.geometry_failed = false;
         if self.atlas.is_empty() {
             let atlas_len = (ATLAS_WIDTH as usize)
                 .checked_mul(ATLAS_HEIGHT as usize)
@@ -429,17 +440,11 @@ impl GpuSceneRenderer {
         let mut shapes = current.shapes.clone();
         if let Some(radii) = radii {
             let shape = crate::continuous_corner::shape(rect, radii);
-            shapes.push(ClipShape::Rounded {
-                rect,
-                radii: shape.radii,
-                polygon: crate::continuous_corner::polygon(
-                    rect,
-                    shape.radii,
-                    crate::continuous_corner::polygon_segments(
-                        shape.max_radius() * self.curve_scale,
-                    ),
-                ),
-            });
+            let polygon = crate::continuous_corner::polygon(rect, shape.radii,
+                crate::continuous_corner::polygon_segments(shape.max_radius() * self.curve_scale));
+            let coverage = crate::gpu_clip::coverage_clip(rect,shape.radii,self.curve_scale);
+            if coverage.is_none() { self.geometry_failed = true; }
+            shapes.push(ClipShape::Rounded { rect, radii: shape.radii, polygon, coverage });
         } else {
             shapes.push(ClipShape::Rect(rect));
         }
@@ -895,12 +900,21 @@ impl GpuSceneRenderer {
     fn image(
         &mut self,
         command: &ImageCommand,
-        _scale: f32,
+        scale: f32,
         viewport: Viewport,
     ) -> Result<(), MochiOsBackendError> {
         if command.bounds.intersection(self.current_clip()).is_none() {
             return Ok(());
         }
+        use crate::draw_command::ImageSampling;
+        let width = (command.bounds.size.width * scale).ceil() as u32;
+        let height = (command.bounds.size.height * scale).ceil() as u32;
+        let image = if command.sampling == ImageSampling::Bicubic {
+            crate::image_sampling::prepare(&command.image, width, height, command.sampling)
+                .ok_or(MochiOsBackendError::InvalidWindowSize)?
+        } else {
+            command.image.clone()
+        };
         #[cfg(target_os = "linux")]
         {
             let start = self.vertices.len() as u32;
@@ -913,7 +927,8 @@ impl GpuSceneRenderer {
             let end = self.vertices.len() as u32;
             if end > start {
                 self.external_images.push(ExternalImage {
-                    image: command.image.clone(),
+                    image,
+                    sampling: command.sampling,
                     vertices: start..end,
                 });
             }
@@ -921,21 +936,41 @@ impl GpuSceneRenderer {
         }
         #[cfg(not(target_os = "linux"))]
         {
+            // The native shared atlas has a linear sampler. A nearest draw is
+            // exact after 1:1 preparation only on integral physical bounds;
+            // fractional nearest draws use the correct CPU path instead.
+            let image = if command.sampling == ImageSampling::Nearest {
+                if [
+                    command.bounds.origin.x * scale,
+                    command.bounds.origin.y * scale,
+                    command.bounds.size.width * scale,
+                    command.bounds.size.height * scale,
+                ]
+                .iter()
+                .any(|v| !v.is_finite() || (*v - v.round()).abs() > 0.0001)
+                {
+                    return Err(MochiOsBackendError::InvalidWindowSize);
+                }
+                crate::image_sampling::prepare(&image, width, height, command.sampling)
+                    .ok_or(MochiOsBackendError::InvalidWindowSize)?
+            } else {
+                image
+            };
             let atlas = if let Some(entry) = self
                 .image_raster_cache
                 .iter()
-                .find(|entry| entry.image == command.image)
+                .find(|entry| entry.image == image)
             {
                 entry.atlas
             } else {
                 if self.image_raster_cache.len() >= IMAGE_RASTER_CACHE_CAPACITY {
                     return Err(self.atlas_capacity_error());
                 }
-                let pixels = rgba_to_bgra(command.image.premultiplied_rgba8());
+                let pixels = rgba_to_bgra(image.premultiplied_rgba8());
                 let atlas =
-                    self.pack_bgra(command.image.width(), command.image.height(), &pixels)?;
+                    self.pack_bgra(image.width(), image.height(), &pixels)?;
                 self.image_raster_cache.push(ImageRasterCacheEntry {
-                    image: command.image.clone(),
+                    image: image.clone(),
                     atlas,
                 });
                 atlas
@@ -1078,12 +1113,13 @@ impl GpuSceneRenderer {
                 command.alignment.to_cosmic(),
             );
         }
-        let origin_x = (command.bounds.origin.x * scale).round();
+        let origin_x =
+            crate::renderer::PixelGrid::new(scale as f64).physical(command.bounds.origin.x);
         let origin_y = command.bounds.origin.y * scale;
         let mut borrowed = buffer.borrow_with(font_system);
         let mut glyphs = Vec::new();
         for run in borrowed.layout_runs() {
-            let baseline_y = (origin_y + run.line_y).round();
+            let baseline_y = crate::renderer::PixelGrid::new(1.0).physical(origin_y + run.line_y);
             for glyph in run.glyphs {
                 glyphs.push(glyph.physical((origin_x, baseline_y), 1.0));
             }
@@ -1239,46 +1275,62 @@ impl GpuSceneRenderer {
         {
             return;
         }
-        if clip.shapes.iter().all(|shape| {
-            triangle
-                .iter()
-                .all(|vertex| shape.contains(vertex.position))
-        }) {
+        let fringe = 0.5 / valid_scale_factor(viewport.scale_factor);
+        let fully_inside = |shape: &ClipShape, vertex: &ClipVertex| match shape {
+            ClipShape::Rect(_) => shape.contains(vertex.position),
+            ClipShape::Rounded { rect, coverage, .. } => coverage.as_ref().is_some_and(|c| {
+                c.contains_interior(
+                    [
+                        vertex.position.0 - rect.origin.x,
+                        vertex.position.1 - rect.origin.y,
+                    ],
+                    fringe,
+                )
+            }),
+        };
+        if clip
+            .shapes
+            .iter()
+            .all(|shape| triangle.iter().all(|v| fully_inside(shape, v)))
+        {
             for vertex in triangle {
                 self.push_clipped_vertex(vertex, viewport);
             }
             return;
         }
-        let mut polygon = triangle.to_vec();
+        let mut triangles = vec![triangle];
         for shape in &clip.shapes {
-            if polygon.iter().all(|vertex| shape.contains(vertex.position)) {
-                continue;
+            let mut next = Vec::new();
+            for triangle in triangles {
+                if triangle.iter().all(|v| fully_inside(shape,v)) {next.push(triangle);continue;}
+                match shape {
+                    ClipShape::Rect(rect) => {
+                        let polygon=clip_polygon(triangle.to_vec(), &[
+                            (rect.origin.x,rect.origin.y),
+                            (rect.origin.x+rect.size.width,rect.origin.y),
+                            (rect.origin.x+rect.size.width,rect.origin.y+rect.size.height),
+                            (rect.origin.x,rect.origin.y+rect.size.height)]);
+                        for i in 1..polygon.len().saturating_sub(1) {
+                            next.push([polygon[0],polygon[i],polygon[i+1]]);
+                        }
+                    }
+                    ClipShape::Rounded {rect,coverage,..} => {
+                        use mochios_viewkit_gpu_protocol::coverage::Vertex as CoverageVertex;
+                        let input=triangle.map(|v| CoverageVertex {position:[v.position.0-rect.origin.x,v.position.1-rect.origin.y], uv:v.uv,color:v.color});
+                        let Some(output)=coverage.as_ref().and_then(|c| c.triangle(input,fringe)) else {
+                            self.geometry_failed=true;return;
+                        };
+                        next.extend(output.into_iter().map(|t| t.map(|v| ClipVertex {position:(v.position[0]+rect.origin.x,v.position[1]+rect.origin.y),uv:v.uv,color:v.color})));
+                    }
+                }
+                if next.len()>8192 {self.geometry_failed=true;return;}
             }
-            polygon = match shape {
-                ClipShape::Rect(rect) => clip_polygon(
-                    polygon,
-                    &[
-                        (rect.origin.x, rect.origin.y),
-                        (rect.origin.x + rect.size.width, rect.origin.y),
-                        (
-                            rect.origin.x + rect.size.width,
-                            rect.origin.y + rect.size.height,
-                        ),
-                        (rect.origin.x, rect.origin.y + rect.size.height),
-                    ],
-                ),
-                ClipShape::Rounded {
-                    polygon: boundary, ..
-                } => clip_polygon(polygon, boundary),
-            };
-            if polygon.len() < 3 {
-                return;
-            }
+            triangles=next;
         }
-        for index in 1..polygon.len() - 1 {
-            self.push_clipped_vertex(polygon[0], viewport);
-            self.push_clipped_vertex(polygon[index], viewport);
-            self.push_clipped_vertex(polygon[index + 1], viewport);
+        for triangle in triangles {
+            for vertex in triangle {
+                self.push_clipped_vertex(vertex, viewport);
+            }
         }
     }
 

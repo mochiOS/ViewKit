@@ -262,29 +262,19 @@ pub(super) fn shadow_layers(shadow: Shadow) -> Vec<(f32, Color)> {
     if blur == 0.0 {
         return vec![(spread, shadow.color)];
     }
-    let layers = blur
-        .ceil()
-        .clamp(2.0, 32.0)
-        .min(f32::from(shadow.color.alpha).max(1.0)) as u32;
-    let weight_sum = (1..=layers)
-        .map(|i| 1.0 - (i as f32 / layers as f32) * 0.75)
-        .sum::<f32>();
-    let mut remaining = u32::from(shadow.color.alpha);
+    use mochios_viewkit_gpu_protocol::raster_quality::{
+        incremental_alpha, shadow_falloff, source_over,
+    };
+    let layers = blur.ceil().clamp(2.0, 32.0) as u32;
+    let mut accumulated = 0u8;
     let mut result = Vec::with_capacity(layers as usize);
-    for layer in (1..=layers).rev() {
+    for layer in (0..layers).rev() {
         let progress = layer as f32 / layers as f32;
-        let mut alpha =
-            (f32::from(shadow.color.alpha) * (1.0 - progress * 0.75) / weight_sum).round() as u32;
-        alpha = alpha.min(remaining);
-        if layer == 1 {
-            alpha = remaining;
-        }
-        remaining -= alpha;
+        let target = (shadow.color.alpha as f32 * shadow_falloff(progress)).round() as u8;
+        let alpha = incremental_alpha(target, accumulated);
+        accumulated = source_over([0, 0, 0, accumulated], [0, 0, 0, alpha], 255)[3];
         if alpha > 0 {
-            result.push((
-                spread + blur * progress,
-                shadow.color.with_alpha(alpha as u8),
-            ));
+            result.push((spread + blur * progress, shadow.color.with_alpha(alpha)));
         }
     }
     result

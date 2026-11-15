@@ -548,11 +548,22 @@ fn draw_image_command(
         return Ok(());
     }
 
+    let prepared = if command.sampling == ImageSampling::Bicubic {
+        crate::image_sampling::prepare(
+            &command.image,
+            destination_width.ceil() as u32,
+            destination_height.ceil() as u32,
+            command.sampling,
+        )
+    } else {
+        None
+    };
+    let image = prepared.as_ref().unwrap_or(&command.image);
     blit_image(
         target,
-        command.image.premultiplied_rgba8(),
-        image_width as usize,
-        image_height as usize,
+        image.premultiplied_rgba8(),
+        image.width() as usize,
+        image.height() as usize,
         translate_x,
         translate_y,
         destination_width,
@@ -560,7 +571,7 @@ fn draw_image_command(
         dirty_bounds,
         display_scale,
         sanitize_image_opacity(command.opacity),
-        command.sampling,
+        if prepared.is_some() {ImageSampling::Bilinear} else {command.sampling},
         clip,
     );
     Ok(())
@@ -617,9 +628,10 @@ fn blit_image(
                 ImageSampling::Nearest => {
                     sample_nearest(source, source_width, source_height, source_x, source_y)
                 }
-                ImageSampling::Bilinear | ImageSampling::Bicubic => {
+                ImageSampling::Bilinear => {
                     sample_bilinear(source, source_width, source_height, source_x, source_y)
                 }
+                ImageSampling::Bicubic => crate::image_sampling::bicubic(source,source_width,source_height,source_x,source_y),
             };
             let target_index = (target_y * target_width + target_x) * 4;
             let mask = clip_data
@@ -683,14 +695,15 @@ fn source_pixel(source: &[u8], width: usize, x: usize, y: usize) -> [u8; 4] {
 }
 
 fn blend_premultiplied(target: &mut [u8], source: [u8; 4], factor: u32) {
-    let source_alpha = (source[3] as u32 * factor + 127) / 255;
-    let inverse_alpha = 255 - source_alpha;
-    for channel in 0..3 {
-        let source_channel = (source[channel] as u32 * factor + 127) / 255;
-        target[channel] =
-            (source_channel + (target[channel] as u32 * inverse_alpha + 127) / 255).min(255) as u8;
-    }
-    target[3] = (source_alpha + (target[3] as u32 * inverse_alpha + 127) / 255).min(255) as u8;
+    let Some(pixel) = target.get(..4).and_then(|p| <[u8; 4]>::try_from(p).ok()) else {
+        return;
+    };
+    let blended = mochios_viewkit_gpu_protocol::raster_quality::source_over(
+        pixel,
+        source,
+        factor.min(255) as u8,
+    );
+    target[..4].copy_from_slice(&blended);
 }
 
 fn draw_svg_command(
@@ -822,7 +835,7 @@ fn draw_text_command(
     let line_height = (command.line_height * scale).max(font_size);
     let width = (command.bounds.size.width * scale).max(0.0);
     let height = (command.bounds.size.height * scale).max(0.0);
-    let origin_x = (command.bounds.origin.x * scale).round();
+    let origin_x = crate::renderer::PixelGrid::new(scale as f64).physical(command.bounds.origin.x);
     let origin_y = command.bounds.origin.y * scale;
     let create_buffer = |font_system: &mut FontSystem| {
         let metrics = Metrics::new(font_size, line_height);
@@ -880,7 +893,7 @@ fn draw_text_command(
 
     let mut physical_glyphs = Vec::new();
     for run in buffer.layout_runs() {
-        let baseline_y = (origin_y + run.line_y).round();
+        let baseline_y = crate::renderer::PixelGrid::new(1.0).physical(origin_y + run.line_y);
         for glyph in run.glyphs {
             physical_glyphs.push(glyph.physical((origin_x, baseline_y), 1.0));
         }

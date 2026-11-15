@@ -465,6 +465,18 @@ where
                 .map_err(|error| error.at("window title configuration"))?;
         }
         let gpu_enabled = renderer_caps(compositor) & RENDERER_CAP_GPU_SCENE != 0;
+        perf_log(&format!(
+            "viewkit/mochios quality physical={}x{} logical={}x{} scale={} gpu={} atlas={}x{} vertices={} alpha=premultiplied color=encoded-unorm text=grayscale-hinted clip=coverage-fringe\n",
+            viewport.physical_width,
+            viewport.physical_height,
+            viewport.logical_size.width,
+            viewport.logical_size.height,
+            viewport.scale_factor,
+            gpu_enabled,
+            mochios_viewkit_gpu_protocol::ATLAS_WIDTH,
+            mochios_viewkit_gpu_protocol::ATLAS_HEIGHT,
+            mochios_viewkit_gpu_protocol::MAX_VERTICES
+        ));
         let shared_buffer = if gpu_enabled {
             SharedBuffer::new_gpu_scene(width as usize, height as usize)
                 .map_err(|error| error.at("GPU shared buffer allocation"))?

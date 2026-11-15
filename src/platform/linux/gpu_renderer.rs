@@ -41,6 +41,7 @@ pub enum GpuRendererError {
 pub struct GpuRenderer {
     image_bind_group_layout: wgpu::BindGroupLayout,
     image_sampler: wgpu::Sampler,
+    nearest_sampler: wgpu::Sampler,
     image_textures: Vec<ImageTexture>,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -65,6 +66,7 @@ pub struct GpuRenderer {
 
 struct ImageTexture {
     image: ImageData,
+    sampling: crate::draw_command::ImageSampling,
     _texture: wgpu::Texture,
     bind_group: wgpu::BindGroup,
 }
@@ -149,6 +151,21 @@ impl GpuRenderer {
             1
         };
         let multisample_view = multisample_target(&device, &config, sample_count);
+        if std::env::var_os("VIEWKIT_RENDERER_DIAGNOSTICS").is_some() {
+            eprintln!(
+                "[ViewKit] quality physical={}x{} logical={}x{} scale={} samples={} format={:?} atlas={}x{} vertices={} alpha=premultiplied color=encoded-unorm text=grayscale-hinted image=cached-physical-cubic",
+                viewport.physical_width,
+                viewport.physical_height,
+                viewport.logical_size.width,
+                viewport.logical_size.height,
+                viewport.scale_factor,
+                sample_count,
+                format,
+                ATLAS_WIDTH,
+                ATLAS_HEIGHT,
+                super::gpu_scene::MAX_SCENE_VERTICES
+            );
+        }
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("ViewKit GPU scene atlas layout"),
@@ -274,8 +291,15 @@ impl GpuRenderer {
             mapped_at_creation: false,
         });
 
+        let nearest_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("ViewKit nearest image sampler"),
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
         Ok(Self {
             image_bind_group_layout: bind_group_layout,
+            nearest_sampler,
             image_sampler: atlas_sampler,
             image_textures: Vec::new(),
             surface,
@@ -425,20 +449,20 @@ impl Renderer for GpuRenderer {
                 self.scene_renderer
                     .external_images
                     .iter()
-                    .any(|draw| draw.image == texture.image)
+                    .any(|draw| draw.image == texture.image && draw.sampling == texture.sampling)
             });
         }
         let images: Vec<_> = self
             .scene_renderer
             .external_images
             .iter()
-            .map(|draw| draw.image.clone())
+            .map(|draw| (draw.image.clone(),draw.sampling))
             .collect();
-        for image in images {
+        for (image, sampling) in images {
             if self
                 .image_textures
                 .iter()
-                .any(|texture| texture.image == image)
+                .any(|texture| texture.image == image && texture.sampling == sampling)
             {
                 continue;
             }
@@ -513,12 +537,13 @@ impl Renderer for GpuRenderer {
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&self.image_sampler),
+                        resource: wgpu::BindingResource::Sampler(if sampling==crate::draw_command::ImageSampling::Nearest {&self.nearest_sampler} else {&self.image_sampler}),
                     },
                 ],
             });
             self.image_textures.push(ImageTexture {
                 image,
+                sampling,
                 _texture: texture,
                 bind_group,
             });
@@ -590,7 +615,7 @@ impl Renderer for GpuRenderer {
                 let texture = self
                     .image_textures
                     .iter()
-                    .find(|texture| texture.image == draw.image)
+                    .find(|texture| texture.image == draw.image && texture.sampling == draw.sampling)
                     .ok_or(GpuRendererError::InvalidScene)?;
                 pass.set_bind_group(0, &texture.bind_group, &[]);
                 pass.draw(draw.vertices.clone(), 0..1);

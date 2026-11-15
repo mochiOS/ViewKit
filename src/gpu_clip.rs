@@ -15,6 +15,7 @@ pub(crate) enum ClipShape {
         rect: Rect,
         radii: [f32; 4],
         polygon: Vec<(f32, f32)>,
+        coverage: Option<std::sync::Arc<mochios_viewkit_gpu_protocol::coverage::Clip>>,
     },
 }
 
@@ -193,6 +194,7 @@ mod tests {
             rect,
             radii: [12.0; 4],
             polygon: vec![(12.0, 0.0), (88.0, 0.0), (100.0, 12.0)],
+            coverage: None,
         };
         assert_eq!(shape.polygon().len(), 3);
         assert!(!shape.contains((0.0, 0.0)));
@@ -332,5 +334,113 @@ mod optimization_tests {
             }
             eprintln!("clip {label}: {:?}", start.elapsed());
         }
+    }
+}
+
+/// Cached local-space AA regions; moving a shape does not regenerate its geometry.
+pub(crate) fn coverage_clip(
+    rect: Rect,
+    radii: [f32; 4],
+    scale: f32,
+) -> Option<std::sync::Arc<mochios_viewkit_gpu_protocol::coverage::Clip>> {
+    use mochios_viewkit_gpu_protocol::coverage::Clip;
+    use std::{cell::RefCell, sync::Arc};
+    thread_local! {static CACHE:RefCell<Vec<([u32;7],Arc<Clip>)>>=const {RefCell::new(Vec::new())};}
+    let key = [
+        rect.size.width.to_bits(),
+        rect.size.height.to_bits(),
+        radii[0].to_bits(),
+        radii[1].to_bits(),
+        radii[2].to_bits(),
+        radii[3].to_bits(),
+        scale.to_bits(),
+    ];
+    CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(index) = cache.iter().position(|(k, _)| *k == key) {
+            let entry = cache.remove(index);
+            let clip = entry.1.clone();
+            cache.push(entry);
+            return Some(clip);
+        }
+        let local = Rect::new(0., 0., rect.size.width, rect.size.height);
+        let radius = radii.iter().copied().fold(0., f32::max);
+        let polygon = crate::continuous_corner::polygon(
+            local,
+            radii,
+            crate::continuous_corner::polygon_segments(radius * scale),
+        );
+        let clip = Arc::new(Clip::for_fringe(&polygon, 0.5 / scale)?);
+        let cost = clip.storage_bytes();
+        let mut used: usize = cache.iter().map(|(_, c)| c.storage_bytes()).sum();
+        while !cache.is_empty() && (cache.len() >= 64 || used + cost > 4 * 1024 * 1024) {
+            used = used.saturating_sub(cache.remove(0).1.storage_bytes());
+        }
+        if cost <= 4 * 1024 * 1024 {
+            cache.push((key, clip.clone()));
+        }
+        Some(clip)
+    })
+}
+
+#[cfg(test)]
+mod coverage_cache_tests {
+    use super::*;
+    #[test]
+    fn moving_a_clip_reuses_local_geometry_but_dpi_changes_it() {
+        let a = coverage_clip(Rect::new(0., 0., 200., 100.), [26.5; 4], 1.).unwrap();
+        let b = coverage_clip(Rect::new(187., -43., 200., 100.), [26.5; 4], 1.).unwrap();
+        let high = coverage_clip(Rect::new(0., 0., 200., 100.), [26.5; 4], 2.).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&a, &b));
+        assert!(!std::sync::Arc::ptr_eq(&a, &high));
+        assert!(a.storage_bytes() < 1024 * 1024);
+    }
+}
+
+#[cfg(test)]
+mod quality_benchmark {
+    use super::*;
+    #[test]
+    #[ignore = "manual CPU comparison; timing is not a CI pass/fail condition"]
+    fn compare_hard_clip_and_cached_coverage() {
+        let rect = Rect::new(0., 0., 800., 600.);
+        let points = crate::continuous_corner::polygon(
+            rect,
+            [26.5; 4],
+            crate::continuous_corner::polygon_segments(26.5),
+        );
+        let start = std::time::Instant::now();
+        let coverage = coverage_clip(rect, [26.5; 4], 1.).unwrap();
+        let cold = start.elapsed();
+        let triangle = [(-2., 2.), (22., 2.), (22., 30.)].map(|position| ClipVertex {
+            position,
+            uv: [0.; 2],
+            color: [1.; 4],
+        });
+        let input = triangle.map(|v| mochios_viewkit_gpu_protocol::coverage::Vertex {
+            position: [v.position.0, v.position.1],
+            uv: v.uv,
+            color: v.color,
+        });
+        let start = std::time::Instant::now();
+        for _ in 0..5000 {
+            std::hint::black_box(clip_polygon(
+                std::hint::black_box(triangle.to_vec()),
+                &points,
+            ));
+        }
+        let hard = start.elapsed();
+        let start = std::time::Instant::now();
+        let mut triangles = 0;
+        for _ in 0..5000 {
+            triangles =
+                std::hint::black_box(coverage.triangle(std::hint::black_box(input), 0.5).unwrap())
+                    .len();
+        }
+        let aa = start.elapsed();
+        eprintln!(
+            "corner clip: cold={cold:?}, hard/5000={hard:?}, cached-AA/5000={aa:?}, AA triangles={triangles}, cached bytes={}",
+            coverage.storage_bytes()
+        );
     }
 }

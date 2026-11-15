@@ -301,7 +301,7 @@ mod tests {
     }
 
     #[test]
-    fn four_k_wallpaper_keeps_resolution_clipping_and_draw_order() {
+    fn four_k_wallpaper_uses_cached_physical_filtering_without_the_glyph_atlas() {
         let image = ImageData::from_rgba8(3840, 2160, vec![255; 3840 * 2160 * 4]).unwrap();
         let mut list = DisplayList::new();
         list.push(DrawCommand::Clear {
@@ -329,8 +329,14 @@ mod tests {
         let decoded = mochios_viewkit_gpu_protocol::decode(&bytes).unwrap();
         assert_eq!(scene.external_images.len(), 1);
         let draw = &scene.external_images[0];
-        assert_eq!(draw.image.dimensions(), (3840, 2160));
-        assert_eq!(draw.image, image);
+        assert_eq!(
+            image.dimensions(),
+            (3840, 2160),
+            "source remains full resolution"
+        );
+        assert_eq!(draw.image.dimensions(), (1280, 800));
+        let filtered = draw.image.clone();
+        assert_eq!(draw.sampling, ImageSampling::Bicubic);
         assert!(draw.vertices.start > 0);
         assert!(draw.vertices.end < decoded.vertex_count());
         for vertex in decoded.vertices
@@ -350,6 +356,10 @@ mod tests {
             scene.external_images.len(),
             1,
             "draw ranges reset each frame"
+        );
+        assert_eq!(
+            scene.external_images[0].image, filtered,
+            "filtering is cached between frames"
         );
     }
 
@@ -448,7 +458,18 @@ mod tests {
                 let y = (f32::from_le_bytes(v[4..8].try_into().unwrap()) + 1.0) * 400.0;
                 assert!(x.is_finite() && y.is_finite());
                 let p = (x + (70.0 - x) * 0.0002, y + (60.0 - y) * 0.0002);
-                assert!(shape.contains(p), "{radii:?}: {x} {y}");
+                if !shape.contains(p) {
+                    // Coverage extends at most half a pixel beyond each local
+                    // tangent. At a polygon vertex that is sqrt(2)/2 pixels.
+                    let polygon=crate::continuous_corner::polygon(rect,radii,crate::continuous_corner::polygon_segments(shape.max_radius()));
+                    let distance=polygon.iter().zip(polygon.iter().cycle().skip(1)).take(polygon.len()).map(|(a,b)| {
+                        let dx=b.0-a.0;let dy=b.1-a.1;let length=dx*dx+dy*dy;
+                        let t=if length>0.0 {((x-a.0)*dx+(y-a.1)*dy)/length}else{0.0}.clamp(0.0,1.0);
+                        ((x-a.0-t*dx).powi(2)+(y-a.1-t*dy).powi(2)).sqrt()
+                    }).fold(f32::INFINITY,f32::min);
+                    let alpha=f32::from_le_bytes(v[32..36].try_into().unwrap());
+                    assert!(distance<=0.73 && alpha<=0.51,"{radii:?}: {x} {y}, distance={distance}, alpha={alpha}");
+                }
             }
         }
     }
