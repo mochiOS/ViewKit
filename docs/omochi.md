@@ -171,3 +171,53 @@ Sliderの既存の値域・刻み・ドラッグ終了時のcommit、選択部�
 
 今回の適用範囲に縦型のレベルSlider・Tabs・Stepper・スクロールバーは含みません。
 入力欄は参照と同じく、文字入力を安定させる面として保ちます。
+
+## Layout and raster consistency
+
+`StackAlignment::FirstBaseline` aligns mixed text sizes through the shared
+`View::first_baseline` measurement hook. `Text`, input fields, field labels,
+stack containers, padding, identified views, and boxed/shared views propagate
+this metric. Non-text content falls back to its bottom edge. Existing centered
+stacks retain their behavior; use baseline alignment for label/value lines.
+
+`ListRow::density(RowDensity::{Compact, Regular, Touch})` selects common row
+metrics. The regular desktop minimum follows the toolbar-height token (48px),
+compact rows use 32px, and touch rows use 64px. These are minimums; wrapped text,
+subtitles, and larger accessibility text continue to grow. Sidebar selections
+use the same semantic corner radius as other row controls.
+
+All these dimensions are logical pixels. `renderer::PixelGrid` supplies the
+shared physical-pixel rounding rule and a one-physical-pixel hairline width.
+Text origins/baselines snap consistently; shaped glyph advances retain their
+subpixel positions. Fractional rectangular fills use area coverage rather than
+relying on the backend's MSAA setting.
+
+Raster colors use **premultiplied encoded RGBA8 / UNORM source-over**, including
+coverage masks. This is the current compatibility contract, not linear-light or
+color-managed rendering. Do not enable sRGB decoding for an atlas alone while
+leaving theme vertex colors encoded. `Color::relative_luminance` and contrast
+helpers linearize sRGB only to evaluate contrast, not to change surface blending.
+
+`ImageSampling::Bicubic` prepares Catmull–Rom filtered pixels for the physical
+destination size, followed by bilinear placement. Negative filter lobes are
+clamped to preserve premultiplied alpha. Prepared images use an LRU cache with
+32 entries and a 64MiB retained-source-plus-output budget; individual outputs
+are capped at 32MiB. Large CPU draws retain a direct cubic fallback. GPU image
+requests beyond that preparation budget fail explicitly rather than silently
+substituting another filter. Linux has a separate nearest sampler. The native
+linear atlas handles nearest images at integral physical bounds after 1:1
+preparation; fractional nearest placement selects the correct CPU path.
+
+The shared convex coverage code caches full-coverage and disjoint edge regions
+in local coordinates. Translation reuses them, while size, radius, or DPI
+changes invalidate them. Framework/compositor caches are bounded to 64 shapes
+and 4MiB each. CPU corner masks also remain bounded. Native compositor borders
+use fractional physical widths and cached normal-offset corner masks.
+
+For renderer comparisons, set `VIEWKIT_RENDERER_DIAGNOSTICS=1` on Linux and
+inspect ViewKit startup/fallback logs on mochiOS. Compare logical/physical size,
+scale, atlas limits, image resources, MSAA, and the blend contract. Native
+1024×512 atlas limits and the host's external image textures still differ;
+large native images can use the full-quality CPU renderer. Software tests do
+not replace a display-level check of small text, thin borders, wallpaper
+contrast, and shadow banding.
