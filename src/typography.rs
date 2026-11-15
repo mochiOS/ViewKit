@@ -51,6 +51,7 @@ pub struct TextMeasurer {
     measurements: HashMap<TextMeasurementKey, Size>,
     ink_measurements: HashMap<TextMeasurementKey, Option<(f32, f32)>>,
     ink_cache: SwashCache,
+    baselines: HashMap<TextMeasurementKey, Option<f32>>,
 }
 
 impl Default for TextMeasurer {
@@ -68,6 +69,7 @@ impl TextMeasurer {
             measurements: HashMap::new(),
             ink_measurements: HashMap::new(),
             ink_cache: SwashCache::new(),
+            baselines: HashMap::new(),
         }
     }
 
@@ -76,6 +78,7 @@ impl TextMeasurer {
             self.font_system = None;
             self.measurements.clear();
             self.ink_measurements.clear();
+            self.baselines.clear();
             self.ink_cache = SwashCache::new();
         }
         if family.starts_with("mochi-font:") {
@@ -102,6 +105,7 @@ impl TextMeasurer {
             self.font_scale = next;
             self.measurements.clear();
             self.ink_measurements.clear();
+            self.baselines.clear();
         }
     }
 
@@ -114,6 +118,45 @@ impl TextMeasurer {
             self.measurements.clear();
         }
         self.measurements.insert(key, size);
+    }
+
+    pub(crate) fn first_baseline(&mut self, key: TextMeasurementKey) -> Option<f32> {
+        self.synchronize_font_family(&key.font_family);
+        if let Some(value) = self.baselines.get(&key) {
+            return *value;
+        }
+        let system = self.font_system_mut();
+        let mut buffer = cosmic_text::Buffer::new(
+            system,
+            cosmic_text::Metrics::new(
+                f32::from_bits(key.font_size_bits),
+                f32::from_bits(key.line_height_bits),
+            ),
+        );
+        {
+            let mut borrowed = buffer.borrow_with(system);
+            borrowed.set_size(key.maximum_width_bits.map(f32::from_bits), None);
+            let attrs = cosmic_text::Attrs::new()
+                .family(crate::font::resolve_font_family(&key.font_family))
+                .weight(cosmic_text::Weight(key.weight));
+            borrowed.set_text(
+                &key.text,
+                &attrs,
+                cosmic_text::Shaping::Advanced,
+                key.alignment.to_cosmic(),
+            );
+            borrowed.shape_until_scroll(true);
+        }
+        let value = buffer
+            .layout_runs()
+            .next()
+            .map(|run| run.line_y)
+            .filter(|v| v.is_finite());
+        if self.baselines.len() >= TEXT_MEASUREMENT_CACHE_CAPACITY {
+            self.baselines.clear();
+        }
+        self.baselines.insert(key, value);
+        value
     }
 
     /// Visible glyph extents relative to a text command's origin, without line leading.
@@ -162,6 +205,7 @@ impl TextMeasurer {
         let bounds = (top.is_finite() && bottom > top).then_some((top, bottom));
         if self.ink_measurements.len() >= TEXT_MEASUREMENT_CACHE_CAPACITY {
             self.ink_measurements.clear();
+            self.baselines.clear();
         }
         self.ink_measurements.insert(key, bounds);
         bounds

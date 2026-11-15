@@ -93,14 +93,40 @@ impl HStack {
 }
 
 impl View for HStack {
+    fn first_baseline(&self, size: Size, context: &mut MeasureContext<'_>) -> Option<f32> {
+        crate::layout::stack_first_baseline(
+            StackDirection::Horizontal,
+            &self.children,
+            size,
+            self.gap,
+            self.alignment,
+            self.distribution,
+            context,
+        )
+    }
+
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
-        measure_stack(
+        let mut size = measure_stack(
             StackDirection::Horizontal,
             &self.children,
             self.gap,
             constraints,
             context,
-        )
+        );
+        if self.alignment == StackAlignment::FirstBaseline {
+            let mut ascent = 0.0f32;
+            let mut descent = 0.0f32;
+            for child in &self.children {
+                let child_size = child.measure(Constraints::loose(constraints.maximum), context);
+                let baseline = child
+                    .first_baseline(child_size, context)
+                    .unwrap_or(child_size.height);
+                ascent = ascent.max(baseline);
+                descent = descent.max(child_size.height - baseline);
+            }
+            size = constraints.constrain(Size::new(size.width, size.height.max(ascent + descent)));
+        }
+        size
     }
 
     fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
@@ -131,5 +157,55 @@ impl View for HStack {
             event,
             context,
         )
+    }
+}
+
+#[cfg(test)]
+mod baseline_tests {
+    use super::*;
+    use crate::{
+        components::Text,
+        theme::Theme,
+        typography::{TextMeasurer, Typography},
+    };
+    #[test]
+    fn mixed_language_and_different_font_sizes_share_a_baseline() {
+        let theme = Theme::LIGHT;
+        let typography = Typography::DEFAULT;
+        let mut measurer = TextMeasurer::new();
+        let mut cx = MeasureContext {
+            theme: &theme,
+            typography: &typography,
+            text_measurer: &mut measurer,
+        };
+        let stack = HStack::new()
+            .alignment(StackAlignment::FirstBaseline)
+            .child(Text::new("English 日本語").font_size(13.).line_height(18.))
+            .child(Text::new("Aa 漢字").font_size(24.).line_height(32.));
+        let size = stack.measure(Constraints::loose(Size::new(600., 100.)), &mut cx);
+        let bounds = layout_stack(
+            StackDirection::Horizontal,
+            &stack.children,
+            Rect::new(0., 0., size.width, size.height),
+            stack.gap,
+            stack.alignment,
+            stack.distribution,
+            &theme,
+            &mut cx,
+        );
+        let a = bounds[0].origin.y
+            + stack.children[0]
+                .first_baseline(bounds[0].size, &mut cx)
+                .unwrap();
+        let b = bounds[1].origin.y
+            + stack.children[1]
+                .first_baseline(bounds[1].size, &mut cx)
+                .unwrap();
+        assert!((a - b).abs() < 0.001);
+        assert!(
+            bounds
+                .iter()
+                .all(|r| r.origin.y >= 0. && r.origin.y + r.size.height <= size.height + 0.001)
+        );
     }
 }

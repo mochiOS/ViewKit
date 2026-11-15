@@ -6,6 +6,12 @@ impl<T> View for Box<T>
 where
     T: View + ?Sized,
 {
+    fn first_baseline(&self, size: Size, context: &mut MeasureContext<'_>) -> Option<f32> {
+        (**self).first_baseline(size, context)
+    }
+    fn stack_flex_shrink(&self) -> f32 {
+        (**self).stack_flex_shrink()
+    }
     fn owns_toolbar_insets(&self) -> bool {
         (**self).owns_toolbar_insets()
     }
@@ -32,6 +38,9 @@ impl<T> View for std::rc::Rc<T>
 where
     T: View + ?Sized,
 {
+    fn first_baseline(&self, size: Size, context: &mut MeasureContext<'_>) -> Option<f32> {
+        (**self).first_baseline(size, context)
+    }
     fn stack_flex_shrink(&self) -> f32 {
         (**self).stack_flex_shrink()
     }

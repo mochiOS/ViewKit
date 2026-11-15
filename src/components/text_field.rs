@@ -633,6 +633,18 @@ fn field_text_line(
 }
 
 impl View for TextFieldLabel {
+    fn first_baseline(&self, size: Size, context: &mut MeasureContext<'_>) -> Option<f32> {
+        let text = field_text_line(
+            Rect::new(0., 0., size.width, size.height),
+            self.size.text_style(context.typography),
+            context.text_measurer.font_scale(),
+            context.theme.text_field.text_offset_y,
+        );
+        Text::styled(&self.label, self.size.text_role())
+            .first_baseline(text.size, context)
+            .map(|b| text.origin.y + b)
+    }
+
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
         let text = Text::styled(&self.label, self.size.text_role())
             .single_line(true)
@@ -1022,6 +1034,20 @@ impl TextField {
 }
 
 impl View for TextField {
+    fn first_baseline(&self, size: Size, context: &mut MeasureContext<'_>) -> Option<f32> {
+        let geometry = self.geometry(
+            Rect::new(0., 0., size.width, size.height),
+            context.theme,
+            context.typography,
+            context.text_measurer.font_scale(),
+        );
+        let value = self.display_text();
+        let value = if value.is_empty() { "Ag" } else { &value };
+        Text::styled(value, self.size.text_role())
+            .first_baseline(geometry.text.size, context)
+            .map(|b| geometry.text.origin.y + b)
+    }
+
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
         let display_text = self.display_text();
         let text = Text::styled(display_text, self.size.text_role());

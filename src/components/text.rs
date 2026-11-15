@@ -376,6 +376,33 @@ impl IntoViewNode for Text {
 }
 
 impl View for Text {
+    fn first_baseline(&self, size: Size, context: &mut MeasureContext<'_>) -> Option<f32> {
+        let style = self.resolved_style(context.typography);
+        let scale = context.text_measurer.font_scale();
+        let font_size = resolved_font_size(style.size) * scale;
+        let line_height = resolved_line_height(font_size, style.line_height * scale);
+        let key = TextMeasurementKey {
+            text: self.value.clone(),
+            font_family: self.resolved_family(style.family).to_owned(),
+            font_size_bits: font_size.to_bits(),
+            line_height_bits: line_height.to_bits(),
+            maximum_width_bits: Some(size.width.to_bits()),
+            weight: style.weight.0.clamp(1, 1000),
+            alignment: self.alignment,
+        };
+        let baseline = context.text_measurer.first_baseline(key.clone())?;
+        let offset = if self.center_visible_ink {
+            context
+                .text_measurer
+                .vertical_ink_bounds(key)
+                .map(|(top, bottom)| (size.height - top - bottom) * 0.5)
+                .unwrap_or(0.0)
+        } else {
+            0.0
+        };
+        Some(baseline + offset)
+    }
+
     fn stack_flex_shrink(&self) -> f32 {
         0.0
     }

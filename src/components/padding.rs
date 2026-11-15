@@ -106,6 +106,12 @@ impl<C> View for Padding<C>
 where
     C: View,
 {
+    fn first_baseline(&self, size: Size, context: &mut MeasureContext<'_>) -> Option<f32> {
+        let bounds = self.content_bounds(Rect::new(0., 0., size.width, size.height));
+        self.content
+            .first_baseline(bounds.size, context)
+            .map(|baseline| bounds.origin.y + baseline)
+    }
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
         let insets = self.insets.sanitized();
 

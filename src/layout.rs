@@ -57,6 +57,8 @@ impl LayoutLength {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum StackAlignment {
+    /// Aligns first text baselines in a horizontal stack; vertical stacks use Start.
+    FirstBaseline,
     Start,
 
     #[default]
@@ -71,7 +73,7 @@ pub enum StackAlignment {
 impl StackAlignment {
     fn to_ui_alignment(self) -> AlignItems {
         match self {
-            Self::Start => AlignItems::Start,
+            Self::Start | Self::FirstBaseline => AlignItems::Start,
             Self::Center => AlignItems::Center,
             Self::End => AlignItems::End,
             Self::Stretch => AlignItems::Stretch,
@@ -187,6 +189,14 @@ pub struct StackChild {
 }
 
 impl StackChild {
+    pub(crate) fn first_baseline(
+        &self,
+        size: Size,
+        context: &mut MeasureContext<'_>,
+    ) -> Option<f32> {
+        self.view.first_baseline(size, context)
+    }
+
     pub(crate) fn owns_toolbar_insets(&self) -> bool {
         self.view.owns_toolbar_insets()
     }
@@ -522,7 +532,7 @@ impl StackAlignment {
     #[allow(unused)]
     fn to_ui_align_items(self) -> AlignItems {
         match self {
-            Self::Start => AlignItems::Start,
+            Self::Start | Self::FirstBaseline => AlignItems::Start,
             Self::Center => AlignItems::Center,
             Self::End => AlignItems::End,
             Self::Stretch => AlignItems::Stretch,
@@ -902,6 +912,24 @@ pub(crate) fn layout_stack(
         StackDirection::Vertical => bounds.origin.y,
     } + leading_space;
 
+    let baselines: Vec<_> =
+        if direction == StackDirection::Horizontal && alignment == StackAlignment::FirstBaseline {
+            children
+                .iter()
+                .zip(&items)
+                .map(|(child, item)| {
+                    let size = Size::new(item.main_size, item.cross_size.min(available_cross));
+                    child
+                        .view
+                        .first_baseline(size, measure_context)
+                        .filter(|v| v.is_finite() && *v >= 0.0)
+                        .unwrap_or(size.height)
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+    let shared_baseline = baselines.iter().copied().fold(0.0, f32::max);
     let mut result = Vec::with_capacity(items.len());
 
     for (index, item) in items.iter().enumerate() {
@@ -914,6 +942,7 @@ pub(crate) fn layout_stack(
 
         let cross_offset = match alignment {
             StackAlignment::Start | StackAlignment::Stretch => 0.0,
+            StackAlignment::FirstBaseline => baselines.get(index).map(|v| shared_baseline-v).unwrap_or(0.0),
 
             StackAlignment::Center => (available_cross - cross_size) / 2.0,
 
@@ -1055,4 +1084,32 @@ fn measured_ui_length(length: LayoutLength, measured: f32) -> LengthOrAuto {
             }
         }
     }
+}
+
+/// Propagates the first available child's baseline through stack containers.
+pub(crate) fn stack_first_baseline(
+    direction: StackDirection,
+    children: &[StackChild],
+    size: Size,
+    gap: StackGap,
+    alignment: StackAlignment,
+    distribution: StackDistribution,
+    context: &mut MeasureContext<'_>,
+) -> Option<f32> {
+    let theme = context.theme;
+    let bounds = layout_stack(
+        direction,
+        children,
+        Rect::new(0., 0., size.width, size.height),
+        gap,
+        alignment,
+        distribution,
+        theme,
+        context,
+    );
+    children.iter().zip(bounds).find_map(|(child, bounds)| {
+        child
+            .first_baseline(bounds.size, context)
+            .map(|b| bounds.origin.y + b)
+    })
 }

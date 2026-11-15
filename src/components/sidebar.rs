@@ -5,7 +5,7 @@ use crate::accessibility::{AccessibilityNode, AccessibilityRole};
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
 use crate::layout::{IntoStackChild, StackAlignment, StackGap, ViewExt};
-use crate::theme::{CornerRadius, ShadowStyle, Theme};
+use crate::theme::{ShadowStyle, Theme};
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
 use super::{
@@ -211,7 +211,7 @@ impl SidebarItem {
             .enabled(self.enabled)
             .shadow(ShadowStyle::None)
             .alignment(ZStackAlignment::Leading)
-            .radius(CornerRadius::Custom(6.0))
+            .radius(theme.button.radius)
             .accessibility_role(AccessibilityRole::Button)
             .accessibility_label(self.label.clone())
             .accessibility_selected(self.selected);

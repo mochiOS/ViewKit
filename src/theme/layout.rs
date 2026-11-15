@@ -95,7 +95,7 @@ impl LayoutTokens {
         browser_grid_cell_width: FigmaTokens::LAYOUT.sidebar_width / 2.0,
         browser_grid_cell_height: FigmaTokens::SPACING.space_64 + FigmaTokens::SPACING.space_48,
         bottom_bar_height: FigmaTokens::LAYOUT.toolbar_height,
-        list_row_height: FigmaTokens::SPACING.space_64,
+        list_row_height: FigmaTokens::LAYOUT.toolbar_height,
         list_leading_size: FigmaTokens::SPACING.space_24,
         status_marker_size: FigmaTokens::SPACING.space_8,
         avatar_small_size: FigmaTokens::SPACING.space_24,

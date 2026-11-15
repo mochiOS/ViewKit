@@ -108,6 +108,7 @@ impl View for List {
 }
 
 pub struct ListRow {
+    density: crate::theme::RowDensity,
     title: String,
     custom_content: Option<Rc<dyn View>>,
     subtitle: Option<String>,
@@ -128,6 +129,13 @@ pub struct ListRow {
 }
 
 impl ListRow {
+    /// Uses the shared compact, desktop, or touch row metrics. Text remains
+    /// intrinsically sized, so larger fonts and subtitles are never clipped.
+    pub fn density(mut self, density: crate::theme::RowDensity) -> Self {
+        self.density = density;
+        self
+    }
+
     pub fn new(title: impl Into<String>) -> Self {
         Self::with_interaction(ButtonInteractionState::new(), title)
     }
@@ -135,6 +143,7 @@ impl ListRow {
     /// Reuses interaction state when a virtualized list reconstructs its rows.
     pub fn with_interaction(interaction: ButtonInteractionState, title: impl Into<String>) -> Self {
         Self {
+            density: crate::theme::RowDensity::Regular,
             title: title.into(),
             custom_content: None,
             subtitle: None,
@@ -330,7 +339,7 @@ impl ListRow {
             );
         }
 
-        Padding::all(theme.list.row_padding).content(row)
+        Padding::all(self.density.padding(theme.list.row_padding)).content(row)
     }
 
     fn button(&self, theme: &Theme, active: bool) -> Button {
@@ -370,7 +379,7 @@ impl View for ListRow {
             .measure(constraints, context);
         constraints.constrain(Size::new(
             measured.width,
-            measured.height.max(context.theme.layout.list_row_height),
+            measured.height.max(self.density.minimum_height(context.theme.layout.list_row_height)),
         ))
     }
 
@@ -595,5 +604,37 @@ mod compact_text_tests {
             let compact=ListRow::new(title).subtitle(subtitle).single_line(true).measure(constraints,&mut context);
             assert!(compact.height<wrapped.height);assert!(compact.width<=140.);
         }
+    }
+}
+
+#[cfg(test)]
+mod density_tests {
+    use super::*;
+    use crate::{theme::RowDensity, typography::TextMeasurer};
+    #[test]
+    fn row_densities_grow_for_content_and_accessibility_text() {
+        let theme = Theme::LIGHT;
+        let mut text = TextMeasurer::new();
+        let mut cx = MeasureContext {
+            theme: &theme,
+            typography: &theme.typography,
+            text_measurer: &mut text,
+        };
+        let measure = |density, cx: &mut MeasureContext<'_>| {
+            ListRow::new("Document")
+                .density(density)
+                .measure(Constraints::loose(Size::new(300., 1000.)), cx)
+                .height
+        };
+        let compact = measure(RowDensity::Compact, &mut cx);
+        let regular = measure(RowDensity::Regular, &mut cx);
+        let touch = measure(RowDensity::Touch, &mut cx);
+        assert!(compact < regular && regular < touch);
+        cx.text_measurer.set_font_scale(2.);
+        let long = ListRow::new("Long document name with multiple lines")
+            .subtitle("Additional information which must remain visible")
+            .density(RowDensity::Compact)
+            .measure(Constraints::loose(Size::new(140., 1000.)), &mut cx);
+        assert!(long.height > touch);
     }
 }

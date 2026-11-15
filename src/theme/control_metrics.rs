@@ -43,3 +43,34 @@ impl ControlMetrics {
         button_min_width: FigmaTokens::SPACING.space_64,
     };
 }
+
+/// Density for native rows. Content may grow beyond the minimum when text wraps.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RowDensity {
+    /// Dense pointer-driven lists, with 32px minimum height.
+    Compact,
+    /// Standard desktop rows, using the theme's list minimum.
+    #[default]
+    Regular,
+    /// Larger touch targets, with 64px minimum height.
+    Touch,
+}
+impl RowDensity {
+    /// Resolves the minimum logical height from the common spacing system.
+    pub fn minimum_height(self, regular: f32) -> f32 {
+        match self {
+            Self::Compact => FigmaTokens::SPACING.space_32,
+            Self::Regular => regular,
+            Self::Touch => FigmaTokens::SPACING.space_64,
+        }
+    }
+    /// Resolves vertical and horizontal row insets from the base row padding.
+    pub fn padding(self, regular: f32) -> f32 {
+        regular
+            * match self {
+                Self::Compact => 0.5,
+                Self::Regular => 1.0,
+                Self::Touch => 1.5,
+            }
+    }
+}

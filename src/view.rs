@@ -355,6 +355,12 @@ impl RedrawSchedule {
 }
 
 pub trait View {
+    /// First text baseline measured from the view's top edge, in logical pixels.
+    /// Containers without text return `None` and align by their bottom edge.
+    fn first_baseline(&self, _size: Size, _context: &mut MeasureContext<'_>) -> Option<f32> {
+        None
+    }
+
     /// Layout containers use this to avoid adding toolbar padding twice to
     /// content (such as ActionToolbar) that already owns its chrome insets.
     fn owns_toolbar_insets(&self) -> bool {

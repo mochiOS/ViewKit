@@ -68,6 +68,18 @@ impl VStack {
 }
 
 impl View for VStack {
+    fn first_baseline(&self, size: Size, context: &mut MeasureContext<'_>) -> Option<f32> {
+        crate::layout::stack_first_baseline(
+            StackDirection::Vertical,
+            &self.children,
+            size,
+            self.gap,
+            self.alignment,
+            self.distribution,
+            context,
+        )
+    }
+
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
         measure_stack(
             StackDirection::Vertical,

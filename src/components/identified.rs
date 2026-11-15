@@ -20,6 +20,9 @@ impl<V: View> Identified<V> {
     }
 }
 impl<V: View> View for Identified<V> {
+    fn first_baseline(&self, size: Size, context: &mut MeasureContext<'_>) -> Option<f32> {
+        self.content.first_baseline(size, context)
+    }
     fn measure(&self, c: Constraints, cx: &mut MeasureContext<'_>) -> Size {
         self.content.measure(c, cx)
     }

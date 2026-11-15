@@ -25,7 +25,9 @@ pub use crate::runtime::{
 };
 pub use crate::state::{Binding, State};
 pub use crate::svg::{SvgData, SvgError};
-pub use crate::theme::{Color, ControlSize, CornerRadius, FigmaTokens, ShadowStyle, Theme};
+pub use crate::theme::{
+    Color, ControlSize, CornerRadius, FigmaTokens, RowDensity, ShadowStyle, Theme,
+};
 pub use crate::typography::{TextAlignment, TextRole};
 pub use crate::view::View;
 
