@@ -26,6 +26,34 @@ pub(crate) struct ClipRegion {
 }
 
 impl ClipShape {
+    pub(crate) fn fully_contains(&self, point: (f32, f32), fringe: f32) -> bool {
+        let Self::Rounded {
+            rect,
+            radii,
+            coverage,
+            ..
+        } = self
+        else {
+            return self.contains(point);
+        };
+        let x = point.0 - rect.origin.x;
+        let y = point.1 - rect.origin.y;
+        let radius = radii.iter().copied().fold(0., f32::max) + fringe;
+        let within = x >= fringe
+            && y >= fringe
+            && x <= rect.size.width - fringe
+            && y <= rect.size.height - fringe;
+        if within
+            && (x >= radius && x <= rect.size.width - radius
+                || y >= radius && y <= rect.size.height - radius)
+        {
+            return true;
+        }
+        coverage
+            .as_ref()
+            .is_some_and(|c| c.contains_interior([x, y], fringe))
+    }
+
     pub(crate) fn contains(&self, point: (f32, f32)) -> bool {
         match self {
             Self::Rect(rect) => rect_contains(*rect, point),
@@ -442,5 +470,39 @@ mod quality_benchmark {
             "corner clip: cold={cold:?}, hard/5000={hard:?}, cached-AA/5000={aa:?}, AA triangles={triangles}, cached bytes={}",
             coverage.storage_bytes()
         );
+    }
+}
+
+#[cfg(test)]
+mod interior_fast_path_tests {
+    use super::*;
+    #[test]
+    fn interior_strips_match_the_cached_clip_at_fractional_dpi() {
+        for radii in [[0.; 4], [26.5; 4], [50., 0., 4., 15.]] {
+            for scale in [0.75, 1., 1.25, 2.] {
+                let rect = Rect::new(17., -20., 140., 100.);
+                let fringe = 0.5 / scale;
+                let polygon = crate::continuous_corner::polygon(rect, radii, 32);
+                let coverage = coverage_clip(rect, radii, scale).unwrap();
+                let shape = ClipShape::Rounded {
+                    rect,
+                    radii,
+                    polygon,
+                    coverage: Some(coverage.clone()),
+                };
+                for y in (-1..102).step_by(3) {
+                    for x in (-1..142).step_by(3) {
+                        let local = [x as f32 + 0.375, y as f32 + 0.375];
+                        assert_eq!(
+                            shape.fully_contains(
+                                (rect.origin.x + local[0], rect.origin.y + local[1]),
+                                fringe
+                            ),
+                            coverage.contains_interior(local, fringe)
+                        );
+                    }
+                }
+            }
+        }
     }
 }

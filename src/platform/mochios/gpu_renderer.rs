@@ -1276,18 +1276,8 @@ impl GpuSceneRenderer {
             return;
         }
         let fringe = 0.5 / valid_scale_factor(viewport.scale_factor);
-        let fully_inside = |shape: &ClipShape, vertex: &ClipVertex| match shape {
-            ClipShape::Rect(_) => shape.contains(vertex.position),
-            ClipShape::Rounded { rect, coverage, .. } => coverage.as_ref().is_some_and(|c| {
-                c.contains_interior(
-                    [
-                        vertex.position.0 - rect.origin.x,
-                        vertex.position.1 - rect.origin.y,
-                    ],
-                    fringe,
-                )
-            }),
-        };
+        let fully_inside =
+            |shape: &ClipShape, vertex: &ClipVertex| shape.fully_contains(vertex.position, fringe);
         if clip
             .shapes
             .iter()
