@@ -181,3 +181,45 @@ fn focus_loss_clears_hover_and_pending_press_without_activating_or_deselecting()
         assert!(nodes.iter().any(|node| node.selected));
     }
 }
+
+#[test]
+fn custom_artwork_uses_the_symbol_gutter_and_keeps_its_intrinsic_size() {
+    struct Artwork(Rc<Cell<Option<Rect>>>);
+    impl View for Artwork {
+        fn measure(
+            &self,
+            c: crate::view::Constraints,
+            _: &mut crate::view::MeasureContext<'_>,
+        ) -> crate::geometry::Size {
+            c.constrain(crate::geometry::Size::new(20., 20.))
+        }
+        fn paint(&self, bounds: Rect, _: &mut PaintContext<'_>) {
+            self.0.set(Some(bounds));
+        }
+    }
+    for theme in [Theme::LIGHT, Theme::DARK] {
+        let recorded = Rc::new(Cell::new(None));
+        let sidebar = SidebarItem::new("Title").leading(Artwork(recorded.clone()));
+        let row = ListRow::new("Title").leading_view(Artwork(recorded.clone()));
+        let reference = title(&paint(
+            &SidebarItem::new("Title").symbol(SymbolName::Folder),
+            &theme,
+            true,
+            false,
+        ))
+        .0;
+        for view in [&sidebar as &dyn View, &row] {
+            assert_eq!(
+                title(&paint(view, &theme, true, false)).0.origin.x,
+                reference.origin.x
+            );
+            let artwork = recorded.get().unwrap();
+            assert_eq!(artwork.size, crate::geometry::Size::new(20., 20.));
+            assert_eq!(
+                artwork.origin.x + 10.,
+                10. + theme.list.row_padding + theme.layout.list_leading_size / 2.
+            );
+            assert_eq!(artwork.origin.y + 10., 20. + 48. / 2.);
+        }
+    }
+}

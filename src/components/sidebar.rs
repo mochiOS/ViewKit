@@ -13,7 +13,7 @@ use super::{
     VStack, ZStackAlignment,
 };
 
-use super::row_appearance::RowAppearance;
+use super::row_appearance::{RowAppearance, RowLeading};
 
 type Callback = Rc<RefCell<Box<dyn FnMut()>>>;
 
@@ -110,6 +110,7 @@ impl SidebarItem {
     }
 
     /// シンボルの代わりに任意の先頭Viewを表示します。行の操作と選択表現は維持します。
+    /// 共通のアイコン枠内に自然寸法で中央配置し、隣のシンボル行とラベル位置を揃えます。
     pub fn leading(mut self, content: impl View + 'static) -> Self {
         self.leading = Some(Rc::new(content));
         self.symbol = None;
@@ -163,7 +164,7 @@ impl SidebarItem {
             .alignment(StackAlignment::Center)
             .gap(StackGap::Medium);
         if let Some(leading) = &self.leading {
-            content = content.child(Rc::clone(leading));
+            content = content.child(RowLeading(Rc::clone(leading)));
         } else if let Some(symbol) = self.symbol {
             content = content.child(
                 Icon::new(symbol)

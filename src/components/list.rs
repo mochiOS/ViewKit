@@ -1,6 +1,6 @@
 //! リストコンポーネント
 
-use super::row_appearance::RowAppearance;
+use super::row_appearance::{RowAppearance, RowLeading};
 use crate::draw_command::DrawCommand;
 use crate::event::{EventContext, EventResult, ViewEvent};
 use crate::geometry::{Rect, Size};
@@ -311,10 +311,7 @@ impl ListRow {
             .gap(StackGap::Medium);
 
         if let Some(leading) = self.leading_view.as_ref() {
-            row = row.child(Rc::clone(leading).frame(
-                theme.layout.list_leading_size,
-                theme.layout.list_leading_size,
-            ));
+            row = row.child(RowLeading(Rc::clone(leading)));
         } else if let Some(initials) = self.leading_avatar.as_ref() {
             row = row.child(Avatar::new(initials.clone()));
         } else if let Some(icon) = self.icon {
