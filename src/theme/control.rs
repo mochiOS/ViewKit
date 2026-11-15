@@ -561,7 +561,7 @@ impl PickerTokens {
             foreground: colors.text_primary,
             disabled_foreground: colors.text_disabled,
             indicator: colors.text_secondary,
-            horizontal_padding: FigmaTokens::SPACING.space_8,
+            horizontal_padding: super::ControlMetrics::HORIZONTAL_PADDING,
             vertical_padding: FigmaTokens::SPACING.space_2,
             radius: CornerRadius::Small,
         }

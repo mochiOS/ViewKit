@@ -1,4 +1,5 @@
 //! 単一行のテキストフィールド
+use super::input_geometry::{field_text_line, input_text_role};
 
 use super::{BorderStyle, Icon, Rectangle, RectangleColor, SymbolName, Text};
 use crate::command::{CommandStatus, standard as commands};
@@ -597,11 +598,7 @@ impl TextFieldSize {
     }
 
     const fn text_role(self) -> TextRole {
-        match self {
-            Self::Small => TextRole::Caption,
-            Self::Medium => TextRole::Label,
-            Self::Large => TextRole::Body,
-        }
+        input_text_role(self.control_size())
     }
 
     fn text_style(self, typography: &Typography) -> crate::typography::TextStyle {
@@ -614,22 +611,6 @@ impl TextFieldSize {
 pub struct TextFieldLabel {
     label: String,
     size: TextFieldSize,
-}
-
-fn field_text_line(
-    bounds: Rect,
-    style: crate::typography::TextStyle,
-    scale: f32,
-    offset: f32,
-) -> Rect {
-    let font_size = super::text::resolved_font_size(style.size) * scale;
-    let height = super::text::resolved_line_height(font_size, style.line_height * scale);
-    Rect::new(
-        bounds.origin.x,
-        bounds.origin.y + (bounds.size.height - height) * 0.5 + offset,
-        bounds.size.width,
-        height,
-    )
 }
 
 impl View for TextFieldLabel {

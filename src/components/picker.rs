@@ -1,18 +1,16 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+use super::input_geometry::{field_text_line, input_text_role};
 use crate::accessibility::AccessibilityRole;
 use crate::event::{ContextMenuItem, ContextMenuRequest, EventContext, EventResult, ViewEvent};
 use crate::geometry::{Point, Rect, Size};
-use crate::layout::{StackAlignment, StackGap, ViewExt};
 use crate::platform::PointerButton;
 use crate::theme::{CornerRadius, ShadowStyle, Theme};
+use crate::typography::Typography;
 use crate::view::{Constraints, MeasureContext, PaintContext, View};
 
-use super::{
-    Button, ButtonInteractionState, ButtonStyle, HStack, Icon, Padding, Spacer, SymbolName, Text,
-    ZStackAlignment,
-};
+use super::{Button, ButtonInteractionState, ButtonStyle, Icon, SymbolName, Text, ZStackAlignment};
 
 pub struct Picker {
     size: crate::theme::ControlSize,
@@ -59,6 +57,7 @@ impl Picker {
         self
     }
 
+    /// 入力欄と共通の高さ・文字サイズで表示します。既定値はMediumです。
     pub fn size(mut self, size: crate::theme::ControlSize) -> Self {
         self.size = size;
         self
@@ -140,40 +139,125 @@ impl Picker {
             .enabled(self.enabled)
             .accessibility_role(AccessibilityRole::ComboBox)
             .accessibility_label(self.label.clone())
-            .content(
-                Padding::symmetric(
-                    theme.picker.horizontal_padding,
-                    theme.picker.vertical_padding,
-                )
-                .content(
-                    HStack::new()
-                        .alignment(StackAlignment::Center)
-                        .gap(StackGap::Small)
-                        .child(
-                            Text::label(self.label.clone())
-                                .single_line(true)
-                                .accessibility_hidden(true)
-                                .color(foreground)
-                                .layout()
-                                .flex_grow(1.0)
-                                .flex_shrink(1.0),
-                        )
-                        .child(Spacer::new())
-                        .child(
-                            Icon::new(SymbolName::ChevronDown)
-                                .size(theme.layout.compact_icon_size)
-                                .color(theme.picker.indicator)
-                                .frame(
-                                    theme.layout.compact_icon_size,
-                                    theme.layout.compact_icon_size,
-                                ),
-                        ),
-                ),
-            )
+            .content(PickerContent {
+                label: self.label.clone(),
+                size: self.size,
+                enabled: self.enabled,
+                toolbar: self.toolbar,
+            })
+    }
+}
+
+struct PickerContent {
+    label: String,
+    size: crate::theme::ControlSize,
+    enabled: bool,
+    toolbar: bool,
+}
+
+impl PickerContent {
+    fn text_bounds(
+        &self,
+        bounds: Rect,
+        theme: &Theme,
+        typography: &Typography,
+        scale: f32,
+    ) -> (Rect, Rect) {
+        let padding = theme
+            .picker
+            .horizontal_padding
+            .min(bounds.size.width.max(0.) * 0.5);
+        let available = (bounds.size.width - padding * 2.).max(0.);
+        let icon = theme
+            .layout
+            .compact_icon_size
+            .min(available)
+            .min(bounds.size.height.max(0.));
+        let indicator = Rect::new(
+            bounds.origin.x + bounds.size.width - padding - icon,
+            bounds.origin.y + (bounds.size.height - icon) * 0.5,
+            icon,
+            icon,
+        );
+        let width = (available - icon - theme.spacing.small).max(0.);
+        let text = field_text_line(
+            Rect::new(
+                bounds.origin.x + padding,
+                bounds.origin.y,
+                width,
+                bounds.size.height,
+            ),
+            typography.style(input_text_role(self.size)),
+            scale,
+            theme.text_field.text_offset_y,
+        );
+        (text, indicator)
+    }
+}
+impl View for PickerContent {
+    fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
+        let text = Text::styled(&self.label, input_text_role(self.size)).measure(
+            Constraints::loose(Size::new(f32::INFINITY, f32::INFINITY)),
+            context,
+        );
+        constraints.constrain(Size::new(
+            text.width
+                + context.theme.picker.horizontal_padding * 2.
+                + context.theme.layout.compact_icon_size
+                + context.theme.spacing.small,
+            self.size.height(&context.theme.controls),
+        ))
+    }
+    fn paint(&self, bounds: Rect, context: &mut PaintContext<'_>) {
+        let (text, indicator) = self.text_bounds(
+            bounds,
+            context.theme,
+            context.typography,
+            context.text_measurer.font_scale(),
+        );
+        let foreground = if !self.enabled {
+            context.theme.picker.disabled_foreground
+        } else if self.toolbar {
+            context
+                .control_foreground()
+                .unwrap_or(context.theme.picker.foreground)
+        } else {
+            context.theme.picker.foreground
+        };
+        Text::styled(&self.label, input_text_role(self.size))
+            .single_line(true)
+            .accessibility_hidden(true)
+            .color(foreground)
+            .paint(text, context);
+        Icon::new(SymbolName::ChevronDown)
+            .size(indicator.size.width)
+            .color(if self.enabled {
+                context.theme.picker.indicator
+            } else {
+                foreground
+            })
+            .paint(indicator, context);
     }
 }
 
 impl View for Picker {
+    fn first_baseline(&self, size: Size, context: &mut MeasureContext<'_>) -> Option<f32> {
+        let content = PickerContent {
+            label: self.label.clone(),
+            size: self.size,
+            enabled: self.enabled,
+            toolbar: self.toolbar,
+        };
+        let (text, _) = content.text_bounds(
+            Rect::new(0., 0., size.width, size.height),
+            context.theme,
+            context.typography,
+            context.text_measurer.font_scale(),
+        );
+        Text::styled(&self.label, input_text_role(self.size))
+            .first_baseline(text.size, context)
+            .map(|baseline| baseline + text.origin.y)
+    }
     fn measure(&self, constraints: Constraints, context: &mut MeasureContext<'_>) -> Size {
         constraints.constrain(self.button(context.theme).measure(
             Constraints::new(
@@ -322,5 +406,112 @@ mod tests {
             &mut context,
         );
         assert!(selected.get());
+    }
+}
+
+#[cfg(test)]
+mod input_contract_tests {
+    use super::*;
+    use crate::{
+        components::{TextField, TextFieldInteractionState, TextFieldSize},
+        draw_command::{DisplayList, DrawCommand, TextCommand},
+        typography::TextMeasurer,
+    };
+
+    fn paint(view: &dyn View, bounds: Rect, theme: &Theme, scale: f32) -> DisplayList {
+        let mut list = DisplayList::new();
+        let mut text = TextMeasurer::new();
+        text.set_font_scale(scale);
+        view.paint(
+            bounds,
+            &mut PaintContext::new(&mut list, theme, &theme.typography, &mut text),
+        );
+        list
+    }
+    fn label(list: &DisplayList) -> &TextCommand {
+        list.commands()
+            .iter()
+            .find_map(|command| match command {
+                DrawCommand::DrawText { command } => Some(command),
+                _ => None,
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn picker_and_input_share_insets_text_lines_and_baselines_at_every_size() {
+        use crate::theme::ControlSize;
+        for mut theme in [Theme::LIGHT, Theme::DARK] {
+            theme.text_field.text_offset_y = 1.;
+            for (size, field_size) in [
+                (ControlSize::Small, TextFieldSize::Small),
+                (ControlSize::Medium, TextFieldSize::Medium),
+                (ControlSize::Large, TextFieldSize::Large),
+            ] {
+                for scale in [1., 1.5, 2.] {
+                    let picker = Picker::new("Value").size(size);
+                    let field = TextField::with_interaction(TextFieldInteractionState::new())
+                        .value("Value")
+                        .size(field_size);
+                    for width in [100., 260.] {
+                        let bounds = Rect::new(10., 20., width, size.height(&theme.controls));
+                        let a = paint(&picker, bounds, &theme, scale);
+                        let b = paint(&field, bounds, &theme, scale);
+                        assert_eq!(label(&a).bounds.origin, label(&b).bounds.origin);
+                        assert_eq!(label(&a).font_size, label(&b).font_size);
+                        assert_eq!(label(&a).line_height, label(&b).line_height);
+                        let mut text = TextMeasurer::new();
+                        text.set_font_scale(scale);
+                        let mut context = MeasureContext {
+                            theme: &theme,
+                            typography: &theme.typography,
+                            text_measurer: &mut text,
+                        };
+                        assert_eq!(
+                            picker.first_baseline(bounds.size, &mut context),
+                            field.first_baseline(bounds.size, &mut context)
+                        );
+                        assert_eq!(
+                            picker
+                                .measure(Constraints::loose(Size::new(400., 100.)), &mut context)
+                                .height,
+                            bounds.size.height
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn picker_elides_before_its_indicator_and_dims_the_disabled_indicator() {
+        for theme in [Theme::LIGHT, Theme::DARK] {
+            for width in [10., 80., 200.] {
+                let picker =
+                    Picker::new("A long value that does not fit in this picker").enabled(false);
+                let bounds = Rect::new(10., 20., width, 30.);
+                let list = paint(&picker, bounds, &theme, 1.);
+                for command in list.commands() {
+                    if let DrawCommand::DrawSvg { command } = command {
+                        assert_eq!(command.tint, Some(theme.picker.disabled_foreground));
+                        assert!(command.bounds.origin.x >= bounds.origin.x);
+                        assert!(
+                            command.bounds.origin.x + command.bounds.size.width
+                                <= bounds.origin.x + width
+                        );
+                        // VK Symbols centers visible artwork, not the SVG canvas.
+                        let svg = SymbolName::ChevronDown.svg().unwrap();
+                        let ink = svg.content_bounds();
+                        let center = command.bounds.origin.y
+                            + (ink.y + ink.height / 2.) * command.bounds.size.height / svg.height();
+                        assert!((center - 35.).abs() < 0.01);
+                    }
+                }
+                if width >= 80. {
+                    assert!(label(&list).text.ends_with('…'));
+                    assert_eq!(label(&list).color, theme.picker.disabled_foreground);
+                }
+            }
+        }
     }
 }
