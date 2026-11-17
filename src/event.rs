@@ -285,6 +285,7 @@ impl RedrawRequest {
 }
 
 pub struct EventContext<'a> {
+    environment: crate::environment::WindowEnvironment,
     pub(crate) theme: &'a Theme,
     pub(crate) typography: &'a Typography,
     pub(crate) text_measurer: &'a mut TextMeasurer,
@@ -308,6 +309,14 @@ pub struct EventContext<'a> {
 }
 
 impl<'a> EventContext<'a> {
+    /// 描画と同じウィンドウ環境。配置とヒット判定で共有します。
+    pub fn environment(&self) -> crate::environment::WindowEnvironment {
+        self.environment
+    }
+    pub fn with_environment(mut self, environment: crate::environment::WindowEnvironment) -> Self {
+        self.environment = environment;
+        self
+    }
     pub(crate) fn pane_container(&self) -> Option<Rect> {
         self.pane_container
     }
@@ -398,6 +407,7 @@ impl<'a> EventContext<'a> {
             command_target: None,
             corner_radii: Vec::new(),
             pane_container: None,
+            environment: Default::default(),
         }
     }
 
@@ -1044,6 +1054,7 @@ impl EventDispatcher {
             PlatformEvent::SelectAll => Some(ViewEvent::SelectAll),
 
             PlatformEvent::Resumed { .. }
+            | PlatformEvent::EnvironmentChanged { .. }
             | PlatformEvent::Touch { .. }
             | PlatformEvent::Resized { .. }
             | PlatformEvent::ScaleFactorChanged { .. }

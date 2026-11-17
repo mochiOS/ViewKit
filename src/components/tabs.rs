@@ -154,6 +154,7 @@ impl Tabs {
 
     fn height(&self, theme: &Theme) -> f32 {
         match self.size {
+            Some(ControlSize::Touch) => theme.controls.touch_height,
             Some(ControlSize::Small) => theme.controls.small_height,
             Some(ControlSize::Medium) => theme.controls.height,
             Some(ControlSize::Large) => theme.controls.large_height,

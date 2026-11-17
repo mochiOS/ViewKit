@@ -35,3 +35,4 @@ pub use crate::view::View;
 pub use crate::decoration::{
     DecorationError, DecorationLayout, DecorationMode, ResizeEdge, WindowState,
 };
+pub use crate::environment::{InputMode, InteractionMetrics, WindowEnvironment};

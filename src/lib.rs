@@ -10,6 +10,7 @@ mod contour;
 pub mod dispatch;
 pub mod draw_command;
 pub mod edge_insets;
+pub mod environment;
 pub mod event;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub mod ffi;

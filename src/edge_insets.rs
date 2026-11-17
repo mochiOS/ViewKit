@@ -1,4 +1,5 @@
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]
 pub struct EdgeInsets {
     pub top: f32,
     pub right: f32,

@@ -297,6 +297,7 @@ impl Default for WindowOptions {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ViewContext {
     viewport: Viewport,
+    environment: crate::environment::WindowEnvironment,
 }
 
 impl ViewContext {
@@ -304,7 +305,26 @@ impl ViewContext {
     ///
     /// この関数はViewKitランタイムからのみ使用されます。
     pub(crate) const fn new(viewport: Viewport) -> Self {
-        Self { viewport }
+        Self {
+            viewport,
+            environment: crate::environment::WindowEnvironment {
+                input_mode: crate::environment::InputMode::Pointer,
+                safe_area: crate::edge_insets::EdgeInsets::ZERO,
+                keyboard_occlusion: None,
+            },
+        }
+    }
+
+    pub(crate) fn with_environment(
+        mut self,
+        environment: crate::environment::WindowEnvironment,
+    ) -> Self {
+        self.environment = environment;
+        self
+    }
+    /// アプリが明示的な適応に使用できるウィンドウ環境。
+    pub const fn environment(&self) -> crate::environment::WindowEnvironment {
+        self.environment
     }
 
     /// ウィンドウの論理サイズを返します。

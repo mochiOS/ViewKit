@@ -63,6 +63,7 @@ pub struct MeasureContext<'a> {
 }
 
 pub struct PaintContext<'a> {
+    environment: crate::environment::WindowEnvironment,
     pub display_list: &'a mut DisplayList,
     pub theme: &'a Theme,
     pub typography: &'a Typography,
@@ -80,6 +81,14 @@ pub struct PaintContext<'a> {
 }
 
 impl<'a> PaintContext<'a> {
+    /// このウィンドウの入力方式・安全領域・キーボード遮蔽を返します。
+    pub fn environment(&self) -> crate::environment::WindowEnvironment {
+        self.environment
+    }
+    pub fn with_environment(mut self, environment: crate::environment::WindowEnvironment) -> Self {
+        self.environment = environment;
+        self
+    }
     pub(crate) fn pane_container(&self) -> Option<Rect> {
         self.pane_container
     }
@@ -120,6 +129,7 @@ impl<'a> PaintContext<'a> {
     ) -> Self {
         Self {
             display_list,
+            environment: Default::default(),
             theme,
             typography,
             text_measurer,

@@ -96,6 +96,10 @@ impl KeyModifiers {
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]
 pub enum PlatformEvent {
+    /// クライアント領域の論理座標による環境変更。非表示のキーボードはNone。
+    EnvironmentChanged {
+        environment: crate::environment::WindowEnvironment,
+    },
     /// Logical coordinates and stable identity of one physical contact.
     Touch {
         id: u64,

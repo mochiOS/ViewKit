@@ -579,6 +579,7 @@ pub enum TextFieldSize {
     Medium,
 
     Large,
+    Touch,
 }
 
 impl TextFieldSize {
@@ -587,6 +588,7 @@ impl TextFieldSize {
             Self::Small => crate::theme::ControlSize::Small,
             Self::Medium => crate::theme::ControlSize::Medium,
             Self::Large => crate::theme::ControlSize::Large,
+            Self::Touch => crate::theme::ControlSize::Touch,
         }
     }
     fn height(self, theme: &crate::theme::Theme) -> f32 {
@@ -603,6 +605,17 @@ impl TextFieldSize {
 
     fn text_style(self, typography: &Typography) -> crate::typography::TextStyle {
         typography.style(self.text_role())
+    }
+}
+
+impl From<crate::theme::ControlSize> for TextFieldSize {
+    fn from(size: crate::theme::ControlSize) -> Self {
+        match size {
+            crate::theme::ControlSize::Small => Self::Small,
+            crate::theme::ControlSize::Medium => Self::Medium,
+            crate::theme::ControlSize::Large => Self::Large,
+            crate::theme::ControlSize::Touch => Self::Touch,
+        }
     }
 }
 

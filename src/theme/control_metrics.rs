@@ -7,6 +7,8 @@ pub enum ControlSize {
     #[default]
     Medium,
     Large,
+    /// 指で操作するための最小寸法。
+    Touch,
 }
 
 impl ControlSize {
@@ -15,6 +17,7 @@ impl ControlSize {
             Self::Small => metrics.small_height,
             Self::Medium => metrics.height,
             Self::Large => metrics.large_height,
+            Self::Touch => metrics.touch_height,
         }
     }
 }
@@ -26,6 +29,7 @@ pub struct ControlMetrics {
     pub small_height: f32,
     pub height: f32,
     pub large_height: f32,
+    pub touch_height: f32,
     pub font_size: f32,
     pub line_height: f32,
     pub button_min_width: f32,
@@ -38,6 +42,7 @@ impl ControlMetrics {
         small_height: FigmaTokens::SPACING.space_24,
         height: 30.0, // omochi/playground/button: actual surface height, excluding SVG margins.
         large_height: FigmaTokens::SPACING.space_32,
+        touch_height: 44.0,
         font_size: 13.0,
         line_height: 18.0,
         button_min_width: FigmaTokens::SPACING.space_64,

@@ -47,6 +47,7 @@ pub enum ButtonSize {
     Medium,
 
     Large,
+    Touch,
 }
 
 impl ButtonSize {
@@ -55,12 +56,13 @@ impl ButtonSize {
             Self::Small => crate::theme::ControlSize::Small,
             Self::Medium => crate::theme::ControlSize::Medium,
             Self::Large => crate::theme::ControlSize::Large,
+            Self::Touch => crate::theme::ControlSize::Touch,
         }
     }
     const fn text_role(self) -> TextRole {
         match self {
             Self::Small => TextRole::Caption,
-            Self::Medium | Self::Large => TextRole::Label,
+            Self::Medium | Self::Large | Self::Touch => TextRole::Label,
         }
     }
 
@@ -71,7 +73,7 @@ impl ButtonSize {
     pub(crate) const fn icon_size(self, theme: &Theme) -> f32 {
         match self {
             Self::Small => theme.layout.compact_icon_size,
-            Self::Medium => theme.layout.control_icon_size,
+            Self::Medium | Self::Touch => theme.layout.control_icon_size,
             Self::Large => theme.layout.stepper_icon_size,
         }
     }
@@ -79,8 +81,19 @@ impl ButtonSize {
     const fn horizontal_padding(self, theme: &Theme) -> f32 {
         match self {
             Self::Small => theme.spacing.small,
-            Self::Medium => theme.button.horizontal_padding,
+            Self::Medium | Self::Touch => theme.button.horizontal_padding,
             Self::Large => theme.button.horizontal_padding + theme.spacing.extra_small,
+        }
+    }
+}
+
+impl From<crate::theme::ControlSize> for ButtonSize {
+    fn from(size: crate::theme::ControlSize) -> Self {
+        match size {
+            crate::theme::ControlSize::Small => Self::Small,
+            crate::theme::ControlSize::Medium => Self::Medium,
+            crate::theme::ControlSize::Large => Self::Large,
+            crate::theme::ControlSize::Touch => Self::Touch,
         }
     }
 }
@@ -403,7 +416,9 @@ impl Button {
     }
 
     fn symbol_size(&self, theme: &Theme) -> f32 {
-        if self.toolbar {
+        if self.toolbar && self.size == ButtonSize::Touch {
+            theme.layout.control_icon_size
+        } else if self.toolbar {
             theme.layout.compact_icon_size
         } else {
             self.size.icon_size(theme)
@@ -647,7 +662,7 @@ impl View for Button {
         let horizontal_padding = self.horizontal_padding(context.theme);
         let label_role = self.size.text_role();
         let mut label_style = context.typography.style(label_role);
-        if self.size == ButtonSize::Medium {
+        if matches!(self.size, ButtonSize::Medium | ButtonSize::Touch) {
             label_style.size = context.theme.controls.font_size;
             label_style.line_height = context.theme.controls.line_height;
         }
@@ -1202,7 +1217,7 @@ impl View for Button {
             };
 
             let text = Text::styled(label.as_ref(), label_role);
-            let text = if self.size == ButtonSize::Medium {
+            let text = if matches!(self.size, ButtonSize::Medium | ButtonSize::Touch) {
                 text.font_size(context.theme.controls.font_size)
                     .line_height(context.theme.controls.line_height)
             } else {

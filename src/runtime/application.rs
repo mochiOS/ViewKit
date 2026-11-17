@@ -182,6 +182,7 @@ where
 }
 
 struct WindowRuntime<Body> {
+    environment: crate::environment::WindowEnvironment,
     root: Option<crate::components::DecoratedRoot<Body>>,
     root_invalid: bool,
     pending_window_drag: Option<(u64, Point)>,
@@ -291,6 +292,10 @@ impl<Body> WindowRuntime<Body> {
             retired_roots: Vec::new(),
             alert: None,
             viewport: None,
+            environment: crate::environment::WindowEnvironment {
+                input_mode: crate::environment::InputMode::process_preference(),
+                ..Default::default()
+            },
             text_measurer,
             accessibility_nodes: Vec::new(),
             command_statuses: Vec::new(),
@@ -529,7 +534,12 @@ where
                 .titlebar
                 .or_else(|| integrated.then(crate::components::TitleBar::new))
         };
-        let context = ViewContext::new(viewport);
+        let context = ViewContext::new(viewport).with_environment(
+            self.windows
+                .get(&id)
+                .expect("window was ensured")
+                .environment,
+        );
         self.theme = self.app.theme().unwrap_or_else(|| self.appearance.theme());
         Theme::set_current(self.theme);
         let root = self.app.body_for(id, &context);
@@ -547,7 +557,8 @@ where
                     &self.theme,
                     &self.theme.typography,
                     &mut state.text_measurer,
-                );
+                )
+                .with_environment(state.environment);
                 old.handle_event(
                     bounds,
                     &crate::event::ViewEvent::ReconcileComponents {
@@ -776,6 +787,24 @@ where
     fn handle_event(&mut self, mut event: PlatformEvent, window: &dyn PlatformWindow) {
         self.sync_decoration(window);
         let window_id = window.id();
+        if matches!(
+            event,
+            PlatformEvent::Touch {
+                phase: crate::platform::TouchPhase::Started,
+                ..
+            }
+        ) {
+            self.ensure_window(window_id);
+            let state = self
+                .windows
+                .get_mut(&window_id)
+                .expect("window was ensured");
+            if state.environment.input_mode != crate::environment::InputMode::Touch {
+                state.environment.input_mode = crate::environment::InputMode::Touch;
+                self.rebuild_root(window_id, window.viewport());
+                window.request_redraw();
+            }
+        }
         let alert_window = self
             .windows
             .get(&window_id)
@@ -795,6 +824,16 @@ where
             }
         }
         match &event {
+            PlatformEvent::EnvironmentChanged { environment } => {
+                self.ensure_window(window_id);
+                self.windows
+                    .get_mut(&window_id)
+                    .expect("window was ensured")
+                    .environment = *environment;
+                self.rebuild_root(window_id, window.viewport());
+                window.request_redraw();
+                return;
+            }
             PlatformEvent::Resumed { viewport }
             | PlatformEvent::Resized { viewport }
             | PlatformEvent::ScaleFactorChanged { viewport } => {
@@ -897,7 +936,8 @@ where
                 &self.theme,
                 &self.theme.typography,
                 &mut state.text_measurer,
-            );
+            )
+            .with_environment(state.environment);
             // A deferred move retains only the authenticated press, never an
             // application-created token. Release/focus loss invalidate it.
             let release = matches!(
@@ -1075,6 +1115,7 @@ where
             &mut state.text_measurer,
         )
         .with_window_active(state.window_active)
+        .with_environment(state.environment)
         .with_viewport_bounds(viewport_bounds)
         .with_scale_factor(viewport.scale_factor)
         .with_redraw_schedule(&mut state.redraw_schedule)
@@ -1109,7 +1150,8 @@ where
                 &self.theme,
                 &self.theme.typography,
                 &mut state.text_measurer,
-            );
+            )
+            .with_environment(state.environment);
             let event = crate::event::ViewEvent::ReconcileComponents { retained };
             for (root, bounds) in state.retired_roots.drain(..) {
                 root.handle_event(bounds, &event, &mut cx);
@@ -1241,7 +1283,8 @@ where
                     &self.theme,
                     &self.theme.typography,
                     &mut state.text_measurer,
-                );
+                )
+                .with_environment(state.environment);
                 context.set_pane_container(Some(bounds));
                 state
                     .event_dispatcher
@@ -1567,6 +1610,66 @@ mod tests {
     use crate::state::State;
     use crate::view::{Constraints, MeasureContext};
     use std::rc::Rc;
+
+    #[test]
+    fn window_environment_reaches_body_paint_and_events_without_crossing_windows() {
+        use crate::environment::{InputMode, WindowEnvironment};
+        #[derive(Clone)]
+        struct Probe(Rc<Cell<WindowEnvironment>>);
+        impl View for Probe {
+            fn paint(&self, _: Rect, context: &mut PaintContext<'_>) {
+                self.0.set(context.environment());
+            }
+            fn handle_event(
+                &self,
+                _: Rect,
+                _: &crate::event::ViewEvent,
+                context: &mut EventContext<'_>,
+            ) -> crate::event::EventResult {
+                self.0.set(context.environment());
+                crate::event::EventResult::Consumed
+            }
+        }
+        struct ProbeApp(Rc<Cell<WindowEnvironment>>);
+        impl App for ProbeApp {
+            type Body = Probe;
+            fn new() -> Self {
+                unreachable!()
+            }
+            fn body(&self, context: &ViewContext) -> Probe {
+                self.0.set(context.environment());
+                Probe(self.0.clone())
+            }
+        }
+        let observed = Rc::new(Cell::new(WindowEnvironment::default()));
+        let mut runtime = ApplicationRuntime::new(ProbeApp(observed.clone()));
+        let first = TestWindow(WindowId::PRIMARY);
+        let second = TestWindow(WindowId::from_raw(2).unwrap());
+        let pointer = WindowEnvironment::default();
+        runtime.handle_event(
+            PlatformEvent::EnvironmentChanged {
+                environment: pointer,
+            },
+            &second,
+        );
+        let touch = WindowEnvironment {
+            input_mode: InputMode::Touch,
+            safe_area: crate::edge_insets::EdgeInsets::new(8., 0., 4., 0.),
+            keyboard_occlusion: Some(Rect::new(0., 70., 100., 30.)),
+        };
+        runtime.handle_event(
+            PlatformEvent::EnvironmentChanged { environment: touch },
+            &first,
+        );
+        assert_eq!(observed.get(), touch);
+        observed.set(pointer);
+        runtime.draw(&first, &mut DisplayList::new());
+        assert_eq!(observed.get(), touch);
+        observed.set(pointer);
+        runtime.handle_event(PlatformEvent::PointerMoved { x: 50., y: 50. }, &first);
+        assert_eq!(observed.get(), touch);
+        assert_eq!(runtime.windows[&second.id()].environment, pointer);
+    }
 
     #[test]
     fn state_change_expands_component_redraw_to_full_window() {

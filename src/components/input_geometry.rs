@@ -4,7 +4,7 @@ use crate::{geometry::Rect, theme::ControlSize, typography::TextRole};
 pub(super) const fn input_text_role(size: ControlSize) -> TextRole {
     match size {
         ControlSize::Small => TextRole::Caption,
-        ControlSize::Medium => TextRole::Label,
+        ControlSize::Medium | ControlSize::Touch => TextRole::Label,
         ControlSize::Large => TextRole::Body,
     }
 }
