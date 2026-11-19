@@ -231,7 +231,11 @@ impl SoftwareKeyboard {
         let Some(layout) = layouts.get(self.selected) else {
             return Vec::new();
         };
-        let width = layout.preferred_width(bounds.size.width, theme);
+        let width = if layout.kana {
+            bounds.size.width
+        } else {
+            layout.preferred_width(bounds.size.width, theme)
+        };
         let gap = theme.spacing.extra_small.min(width / 70.0);
         let inset = theme.spacing.medium.min(width / 28.0);
         let x = bounds.origin.x + (bounds.size.width - width) / 2.0 + inset;
@@ -281,28 +285,55 @@ impl SoftwareKeyboard {
         japanese: bool,
         context: &mut PaintContext<'_>,
     ) {
+        let panel = Rect::new(
+            bounds.origin.x,
+            bounds.origin.y,
+            bounds.size.width,
+            bounds.size.height + footer,
+        );
+        self.paint_panel(layouts, bounds, panel, footer > 0.0, japanese, context);
+    }
+
+    /// Paints a floating tray with room for caller-owned controls outside the key area.
+    pub fn paint_floating(
+        &self,
+        layouts: &[KeyboardLayout],
+        keys: Rect,
+        panel: Rect,
+        japanese: bool,
+        context: &mut PaintContext<'_>,
+    ) {
+        self.paint_panel(layouts, keys, panel, false, japanese, context);
+    }
+
+    fn paint_panel(
+        &self,
+        layouts: &[KeyboardLayout],
+        bounds: Rect,
+        panel: Rect,
+        docked: bool,
+        japanese: bool,
+        context: &mut PaintContext<'_>,
+    ) {
         let Some(layout) = layouts.get(self.selected) else {
             return;
         };
         let colors = context.theme.colors;
         let tray = colors.text_primary.with_alpha(36).over(colors.surface);
         let modifier = colors.text_primary.with_alpha(16).over(tray);
+        let label_scale = if layout.kana && bounds.size.width > 0.0 {
+            (bounds.size.width / layout.preferred_width(bounds.size.width, context.theme)).min(1.4)
+        } else {
+            1.0
+        };
         let background = Rectangle::new().color(RectangleColor::Custom(tray));
-        if footer > 0.0 {
-            background.paint(
-                Rect::new(
-                    bounds.origin.x,
-                    bounds.origin.y,
-                    bounds.size.width,
-                    bounds.size.height + footer,
-                ),
-                context,
-            );
+        if docked {
+            background.paint(panel, context);
         } else {
             background
                 .radius(CornerRadius::ExtraLarge)
                 .shadow(ShadowStyle::Card)
-                .paint(bounds, context);
+                .paint(panel, context);
         }
         for (index, (key, rect)) in self
             .keys(layouts, bounds, context.theme)
@@ -338,7 +369,7 @@ impl SoftwareKeyboard {
                 .paint(rect, context);
             if matches!(key, Key::Dismiss) {
                 Icon::new(SymbolName::ChevronDown)
-                    .size(context.theme.typography.body.size)
+                    .size(context.theme.typography.body.size * label_scale)
                     .color(colors.text_primary)
                     .paint(rect, context);
             } else {
@@ -347,7 +378,8 @@ impl SoftwareKeyboard {
                     Key::Layout | Key::Space => TextRole::Label,
                     _ => TextRole::TitleSmall,
                 };
-                let line_height = context.theme.typography.style(role).line_height;
+                let style = context.theme.typography.style(role);
+                let line_height = style.line_height * label_scale;
                 let text_rect = Rect::new(
                     rect.origin.x,
                     rect.origin.y + (rect.size.height - line_height).max(0.0) * 0.5,
@@ -358,6 +390,8 @@ impl SoftwareKeyboard {
                     .display_list
                     .push(crate::draw_command::DrawCommand::PushClip { rect });
                 Text::styled(&label, role)
+                    .font_size(style.size * label_scale)
+                    .line_height(line_height)
                     .alignment(TextAlignment::Center)
                     .paint(text_rect, context);
                 context
