@@ -1161,6 +1161,11 @@ where
             }
         }
         window.update_accessibility(&state.accessibility_nodes);
+        window.set_text_input_active(state.accessibility_nodes.iter().any(|node| {
+            node.role == crate::accessibility::AccessibilityRole::TextField
+                && node.focused
+                && node.enabled
+        }));
 
         dirty_bounds
     }

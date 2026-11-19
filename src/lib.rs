@@ -26,6 +26,7 @@ pub mod platform;
 pub mod prelude;
 pub mod renderer;
 pub mod runtime;
+pub mod software_keyboard;
 pub mod state;
 pub mod svg;
 pub mod system_icon;

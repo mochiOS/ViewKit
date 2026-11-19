@@ -26,8 +26,7 @@ const MAX_PACKET: usize = 64 * 1024 * 1024;
 const IO_BUDGET: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub enum Packet {
-    Decoration {
+pub enum Packet {    Decoration {
         id: u64,
         config: crate::decoration::DecorationConfig,
     },
@@ -100,6 +99,10 @@ pub enum Packet {
     DocumentOpened {
         process_id: Option<u32>,
         error: Option<String>,
+    },
+    TextInputActive {
+        id: u64,
+        active: bool,
     },
 }
 
@@ -338,6 +341,7 @@ struct PreviewWindow {
     decoration: Cell<crate::decoration::DecorationLayout>,
     input: Cell<u64>,
     press_serial: Cell<u64>,
+    text_input: Cell<bool>,
     pending: RefCell<Vec<Packet>>,
 }
 
@@ -355,12 +359,22 @@ impl PreviewWindow {
             decoration: Cell::new(crate::decoration::DecorationLayout::default()),
             input: Cell::new(0),
             press_serial: Cell::new(0),
+            text_input: Cell::new(false),
             pending: RefCell::new(Vec::new()),
         }
     }
 }
 
 impl PlatformWindow for PreviewWindow {
+    fn set_text_input_active(&self, active: bool) {
+        if self.text_input.replace(active) != active {
+            self.pending.borrow_mut().push(Packet::TextInputActive {
+                id: self.id.raw(),
+                active,
+            });
+        }
+    }
+
     fn configure_decoration(
         &self,
         config: crate::decoration::DecorationConfig,

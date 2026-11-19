@@ -7,6 +7,7 @@ pub(super) struct MochiOsWindow {
     compositor: u64,
     surface: u64,
     input_regions: std::cell::RefCell<Vec<Rect>>,
+    text_input: Cell<bool>,
     pub(super) input_serial: Cell<u64>,
     pub(super) press_serial: Cell<u64>,
     pub(super) decoration_layout: Cell<crate::decoration::DecorationLayout>,
@@ -26,6 +27,7 @@ impl MochiOsWindow {
             compositor,
             surface,
             input_regions: std::cell::RefCell::new(Vec::new()),
+            text_input: Cell::new(false),
             input_serial: Cell::new(0),
             press_serial: Cell::new(0),
             decoration_layout: Cell::new(crate::decoration::DecorationLayout::default()),
@@ -223,6 +225,29 @@ impl PlatformWindow for MochiOsWindow {
         )
         .and_then(|len| status_from_raw(reply.as_ptr(), len))
         .is_ok()
+    }
+
+    fn set_text_input_active(&self, active: bool) {
+        if self.text_input.get() == active {
+            return;
+        }
+        let request = mochios_viewkit_gpu_protocol::window_management::text_input_request(
+            self.surface,
+            active,
+        );
+        let mut reply = [0u8; 16];
+        if ipc_call_raw(
+            self.compositor,
+            request.as_ptr(),
+            request.len(),
+            reply.as_mut_ptr(),
+            reply.len(),
+        )
+        .and_then(|len| status_from_raw(reply.as_ptr(), len))
+        .is_ok()
+        {
+            self.text_input.set(active);
+        }
     }
 
     fn viewport(&self) -> Viewport {

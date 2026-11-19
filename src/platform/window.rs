@@ -177,6 +177,9 @@ pub trait PlatformWindow {
     fn update_accessibility(&self, nodes: &[AccessibilityNode]) {
         let _ = nodes;
     }
+
+    /// Reports whether a focused editable control can receive software keys.
+    fn set_text_input_active(&self, _active: bool) {}
 }
 
 pub trait PlatformApplication {

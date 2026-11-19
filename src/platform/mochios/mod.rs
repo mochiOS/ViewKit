@@ -120,6 +120,8 @@ fn surface_token_from_event(event: &[u8], len: usize) -> Option<u64> {
             | EVENT_CONFIGURE
             | EVENT_POINTER_SCROLL
             | EVENT_APPEARANCE_CHANGED
+            | mochios_viewkit_gpu_protocol::window_management::EVENT_SOFTWARE_KEY
+            | mochios_viewkit_gpu_protocol::window_management::EVENT_TEXT_INPUT_CHANGED
             | 15
     ) {
         16
@@ -1408,6 +1410,15 @@ where
                     self.app
                         .handle_event(PlatformEvent::KeyReleased { key, modifiers }, &state.window);
                 }
+            }
+            mochios_viewkit_gpu_protocol::window_management::EVENT_SOFTWARE_KEY => {
+                if let Some(key) = mochios_viewkit_gpu_protocol::window_management::software_key(a as u32) {
+                    let event = crate::software_keyboard::software_key_event(key);
+                    self.app.handle_event(event, &state.window);
+                }
+            }
+            mochios_viewkit_gpu_protocol::window_management::EVENT_TEXT_INPUT_CHANGED => {
+                state.window.request_redraw();
             }
             EVENT_CLOSE_REQUESTED => {
                 state.close_accepted = self.app.should_close_window(&state.window);

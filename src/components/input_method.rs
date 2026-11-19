@@ -141,6 +141,18 @@ impl InputMethodState {
             }
             return false;
         }
+        if text == "゛"
+            && self.marked.is_some()
+            && let Some(last) = self.raw.chars().next_back()
+            && let Some(variant) = next_kana_variant(last)
+        {
+            self.raw.pop();
+            self.raw.push(variant);
+            self.converting = false;
+            self.refresh(value, cursor, false);
+            self.refresh_candidates();
+            return true;
+        }
         if let Some(replacement) = japanese_punctuation(text) {
             if self.marked.is_some() {
                 self.commit(value, cursor);
@@ -155,7 +167,7 @@ impl InputMethodState {
         }
         if !text
             .chars()
-            .all(|character| character.is_ascii_alphabetic())
+            .all(|character| character.is_ascii_alphabetic() || is_reading_kana(character))
         {
             if self.marked.is_some() {
                 self.commit(value, cursor);
@@ -563,6 +575,11 @@ fn roman_to_hiragana(raw: &str, flush: bool) -> (String, String) {
     let mut input = raw;
     let mut output = String::new();
     while !input.is_empty() {
+        if let Some(character) = input.chars().next().filter(|character| is_reading_kana(*character)) {
+            output.push(character);
+            input = &input[character.len_utf8()..];
+            continue;
+        }
         let bytes = input.as_bytes();
         if input.starts_with("tch") {
             output.push('っ');
@@ -661,6 +678,50 @@ fn roman_to_hiragana(raw: &str, flush: bool) -> (String, String) {
         break;
     }
     (output, input.to_owned())
+}
+
+fn is_reading_kana(character: char) -> bool {
+    matches!(character, 'ぁ'..='ゖ' | 'ー')
+}
+
+fn next_kana_variant(character: char) -> Option<char> {
+    const GROUPS: &[&str] = &[
+        "あぁ",
+        "いぃ",
+        "うぅゔ",
+        "えぇ",
+        "おぉ",
+        "かが",
+        "きぎ",
+        "くぐ",
+        "けげ",
+        "こご",
+        "さざ",
+        "しじ",
+        "すず",
+        "せぜ",
+        "そぞ",
+        "ただ",
+        "ちぢ",
+        "つっづ",
+        "てで",
+        "とど",
+        "はばぱ",
+        "ひびぴ",
+        "ふぶぷ",
+        "へべぺ",
+        "ほぼぽ",
+        "やゃ",
+        "ゆゅ",
+        "よょ",
+        "わゎ",
+    ];
+    for group in GROUPS {
+        if let Some(index) = group.chars().position(|value| value == character) {
+            return group.chars().nth((index + 1) % group.chars().count());
+        }
+    }
+    None
 }
 
 fn is_syllable_prefix(value: &str) -> bool {
@@ -857,6 +918,24 @@ const ROMAJI: &[(&str, &str)] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn flick_kana_and_variants_are_one_ime_reading() {
+        let mut state = InputMethodState {
+            enabled_override: Some(true),
+            ..InputMethodState::default()
+        };
+        let mut value = String::new();
+        let mut cursor = 0;
+        for key in ["か", "ん", "し", "゛"] {
+            assert!(state.handle_text(&mut value, &mut cursor, None, key));
+        }
+        assert_eq!(value, "かんじ");
+        assert_eq!(state.candidate_reading, "かんじ");
+        assert_eq!(state.marked_range(), Some(0..value.len()));
+        assert!(state.backspace(&mut value, &mut cursor));
+        assert_eq!(value, "かん");
+    }
     use crate::{draw_command::DisplayList, theme::Theme, typography::TextMeasurer};
 
     #[test]
