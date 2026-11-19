@@ -81,6 +81,20 @@ pub struct KeyboardLayout {
     pub kana: bool,
 }
 
+impl KeyboardLayout {
+    pub fn preferred_width(&self, available: f32, theme: &Theme) -> f32 {
+        let units = if self.kana { 8.5 } else { 36.0 };
+        available.min(theme.controls.touch_height * units)
+    }
+
+    pub fn preferred_height(&self, width: f32, theme: &Theme) -> f32 {
+        let touch = theme.controls.touch_height;
+        let key = (width / if self.kana { 7.0 } else { 22.0 }).clamp(touch, touch * 1.35);
+        let rows = self.rows.len() as f32;
+        rows * key + (rows - 1.0) * theme.spacing.extra_small + 2.0 * theme.spacing.medium
+    }
+}
+
 /// The control tokens begin with '@'. Flick keys list center, left, up,
 /// right and down. A dash in a flick slot repeats the center.
 pub fn parse_layouts(text: &str) -> Option<Vec<KeyboardLayout>> {
@@ -217,22 +231,26 @@ impl SoftwareKeyboard {
         let Some(layout) = layouts.get(self.selected) else {
             return Vec::new();
         };
-        let width = bounds.size.width.min(theme.layout.content_max_width);
+        let width = layout.preferred_width(bounds.size.width, theme);
         let gap = theme.spacing.extra_small.min(width / 70.0);
-        let x = bounds.origin.x + (bounds.size.width - width) / 2.0;
-        let height = (bounds.size.height - gap) / layout.rows.len() as f32;
+        let inset = theme.spacing.medium.min(width / 28.0);
+        let x = bounds.origin.x + (bounds.size.width - width) / 2.0 + inset;
+        let vertical_inset = theme.spacing.medium.min(bounds.size.height / 8.0);
+        let rows = layout.rows.len() as f32;
+        let height = (bounds.size.height - 2.0 * vertical_inset + gap) / rows;
         let mut keys = Vec::new();
         for (row_index, row) in layout.rows.iter().enumerate() {
-            let weight = row.iter().map(|key| key.weight()).sum::<f32>();
-            let unit = (width - (row.len() + 1) as f32 * gap).max(0.0) / weight;
-            let mut left = x + gap;
+            let weight = |key: Key| if layout.kana { 1.0 } else { key.weight() };
+            let total = row.iter().copied().map(weight).sum::<f32>();
+            let unit = (width - 2.0 * inset - (row.len() - 1) as f32 * gap).max(0.0) / total;
+            let mut left = x;
             for key in row.iter().copied() {
-                let width = unit * key.weight();
+                let width = unit * weight(key);
                 keys.push((
                     key,
                     Rect::new(
                         left,
-                        bounds.origin.y + gap + row_index as f32 * height,
+                        bounds.origin.y + vertical_inset + row_index as f32 * height,
                         width,
                         (height - gap).max(0.0),
                     ),
@@ -250,14 +268,42 @@ impl SoftwareKeyboard {
         japanese: bool,
         context: &mut PaintContext<'_>,
     ) {
-        Rectangle::new()
-            .color(RectangleColor::Custom(
-                context.theme.shell.window_background,
-            ))
-            .paint(bounds, context);
+        self.paint_with_footer(layouts, bounds, 0.0, japanese, context);
+    }
+
+    /// Paints a docked keyboard tray through the navigation area. Keys occupy
+    /// only `bounds`, so pointer contacts that start in the footer remain free.
+    pub fn paint_with_footer(
+        &self,
+        layouts: &[KeyboardLayout],
+        bounds: Rect,
+        footer: f32,
+        japanese: bool,
+        context: &mut PaintContext<'_>,
+    ) {
         let Some(layout) = layouts.get(self.selected) else {
             return;
         };
+        let colors = context.theme.colors;
+        let tray = colors.text_primary.with_alpha(36).over(colors.surface);
+        let modifier = colors.text_primary.with_alpha(16).over(tray);
+        let background = Rectangle::new().color(RectangleColor::Custom(tray));
+        if footer > 0.0 {
+            background.paint(
+                Rect::new(
+                    bounds.origin.x,
+                    bounds.origin.y,
+                    bounds.size.width,
+                    bounds.size.height + footer,
+                ),
+                context,
+            );
+        } else {
+            background
+                .radius(CornerRadius::ExtraLarge)
+                .shadow(ShadowStyle::Card)
+                .paint(bounds, context);
+        }
         for (index, (key, rect)) in self
             .keys(layouts, bounds, context.theme)
             .into_iter()
@@ -276,41 +322,48 @@ impl SoftwareKeyboard {
                 Key::Return => "↵".into(),
                 Key::Erase => "⌫".into(),
                 Key::Ime => if japanese { "あ" } else { "A" }.into(),
-                Key::Dismiss => "⌄".into(),
+                Key::Dismiss => "Hide keyboard".into(),
                 Key::Layout => layout.name.clone(),
             };
-            let color = if pressed.is_some() || (matches!(key, Key::Shift) && self.shifted) {
-                context.theme.shell.selection_soft
+            let regular = matches!(key, Key::Text(..) | Key::Flick(..) | Key::Space);
+            let fill = if regular { colors.surface } else { modifier };
+            let fill = if pressed.is_some() || (matches!(key, Key::Shift) && self.shifted) {
+                colors.text_primary.with_alpha(48).over(fill)
             } else {
-                context.theme.colors.surface
+                fill
             };
             Rectangle::new()
                 .radius(CornerRadius::Medium)
-                .color(RectangleColor::Custom(color))
+                .color(RectangleColor::Custom(fill))
                 .paint(rect, context);
-            let role = if matches!(key, Key::Layout | Key::Space) {
-                TextRole::Caption
+            if matches!(key, Key::Dismiss) {
+                Icon::new(SymbolName::ChevronDown)
+                    .size(context.theme.typography.body.size)
+                    .color(colors.text_primary)
+                    .paint(rect, context);
             } else {
-                TextRole::Body
-            };
-            let text_rect = Rect::new(
-                rect.origin.x,
-                rect.origin.y
-                    + (rect.size.height - context.theme.typography.style(role).line_height)
-                        .max(0.0)
-                        * 0.5,
-                rect.size.width,
-                rect.size.height,
-            );
-            context
-                .display_list
-                .push(crate::draw_command::DrawCommand::PushClip { rect });
-            Text::styled(&label, role)
-                .alignment(TextAlignment::Center)
-                .paint(text_rect, context);
-            context
-                .display_list
-                .push(crate::draw_command::DrawCommand::PopClip);
+                let role = match key {
+                    Key::Text(..) | Key::Flick(_) => TextRole::TitleMedium,
+                    Key::Layout | Key::Space => TextRole::Label,
+                    _ => TextRole::TitleSmall,
+                };
+                let line_height = context.theme.typography.style(role).line_height;
+                let text_rect = Rect::new(
+                    rect.origin.x,
+                    rect.origin.y + (rect.size.height - line_height).max(0.0) * 0.5,
+                    rect.size.width,
+                    line_height,
+                );
+                context
+                    .display_list
+                    .push(crate::draw_command::DrawCommand::PushClip { rect });
+                Text::styled(&label, role)
+                    .alignment(TextAlignment::Center)
+                    .paint(text_rect, context);
+                context
+                    .display_list
+                    .push(crate::draw_command::DrawCommand::PopClip);
+            }
             let mut node = AccessibilityNode::new(AccessibilityRole::Button, rect);
             node.label = Some(label);
             context.record_accessibility(node);
