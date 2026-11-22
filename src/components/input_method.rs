@@ -1230,3 +1230,237 @@ mod tests {
         assert!(layout.has_multiple_pages());
     }
 }
+
+/// 外部エディターへ渡すIME更新です。確定文字列を先に渡し、続いて未確定文字列を置き換えます。
+/// 未確定文字列は差分追記ではなく、その時点の全体です。
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CompositionUpdate {
+    /// 新しく確定した文字列です。空文字列は挿入しません。
+    pub committed: String,
+    /// 現在の未確定文字列です。空の場合は以前の未確定表示を消します。
+    pub preedit: String,
+    /// 更新を適用した後、元のイベントもエディターへ配送します（フォーカス移動等）。
+    pub forward_event: bool,
+}
+/// WebView等、文書を別のエディターが所有する場合のmochiOS IMEセッションです。
+/// TextFieldと同じローマ字変換・候補・入力モードを使い、文書本文は保持しません。
+/// フォーカス中のエディターからのみ呼び出してください。
+/// パスワード等では`private=true`を指定し、候補サービスへ入力を送らないでください。
+#[derive(Clone, Default)]
+pub struct InputMethodClient {
+    state: InputMethodState,
+    value: String,
+    cursor: usize,
+    panel: Option<CandidatePanelLayout>,
+    candidate_pointer: bool,
+}
+impl InputMethodClient {
+    /// イベントを変換します。Someなら更新を適用し、forward_eventがtrueの場合だけ元のイベントも配送します。
+    /// Noneなら更新はなく、元のイベントをそのままエディターへ配送します。
+    /// `private`の場合、TextInputはそのまま確定し、未確定状態と候補を破棄します。
+    pub fn process(
+        &mut self,
+        event: &crate::event::ViewEvent,
+        private: bool,
+    ) -> Option<CompositionUpdate> {
+        use crate::{event::ViewEvent, platform::Key};
+        if private {
+            self.reset();
+            return match event {
+                ViewEvent::TextInput { text } => Some(CompositionUpdate {
+                    committed: text.clone(),
+                    preedit: String::new(),
+                    forward_event: false,
+                }),
+                _ => None,
+            };
+        }
+        let active = self.state.marked_range().is_some();
+        let mut forward_event = false;
+        let handled = match event {
+            ViewEvent::TextInput { text } => {
+                if !self
+                    .state
+                    .handle_text(&mut self.value, &mut self.cursor, None, text)
+                {
+                    self.value.insert_str(self.cursor, text);
+                    self.cursor += text.len();
+                }
+                true
+            }
+            ViewEvent::KeyPressed {
+                key: Key::Space,
+                modifiers,
+            } if modifiers.control() => {
+                self.state.commit(&mut self.value, &mut self.cursor);
+                self.state.toggle();
+                self.state.suppress = Some(' ');
+                true
+            }
+            ViewEvent::KeyPressed {
+                key: Key::Enter, ..
+            } if active => self
+                .state
+                .commit_before_text(&mut self.value, &mut self.cursor, '\n'),
+            ViewEvent::KeyPressed {
+                key: Key::Backspace,
+                ..
+            } if active => self.state.backspace(&mut self.value, &mut self.cursor),
+            ViewEvent::KeyPressed {
+                key: Key::Escape, ..
+            } if active => self.state.cancel(&mut self.value, &mut self.cursor),
+            ViewEvent::KeyPressed {
+                key: Key::ArrowDown,
+                ..
+            } if active => self.state.select_next(&mut self.value, &mut self.cursor, 1),
+            ViewEvent::KeyPressed {
+                key: Key::ArrowUp, ..
+            } if active => self
+                .state
+                .select_next(&mut self.value, &mut self.cursor, -1),
+            ViewEvent::KeyPressed {
+                key: Key::PageDown, ..
+            } if active => self.state.select_page(&mut self.value, &mut self.cursor, 1),
+            ViewEvent::KeyPressed {
+                key: Key::PageUp, ..
+            } if active => self
+                .state
+                .select_page(&mut self.value, &mut self.cursor, -1),
+            ViewEvent::FocusChanged { focused: false } if active => {
+                self.state.commit_on_blur(&mut self.value, &mut self.cursor);
+                forward_event = true;
+                true
+            }
+            ViewEvent::PointerPressed { position, .. }
+                if self.panel.as_ref().is_some_and(|p| p.contains(*position)) =>
+            {
+                self.candidate_pointer = true;
+                if let Some(index) = self.panel.as_ref().and_then(|p| p.candidate_at(*position)) {
+                    self.state.choose(&mut self.value, &mut self.cursor, index);
+                }
+                true
+            }
+            ViewEvent::PointerReleased { .. } if self.candidate_pointer => {
+                self.candidate_pointer = false;
+                true
+            }
+            ViewEvent::PointerPressed { .. } if active => {
+                self.state.commit(&mut self.value, &mut self.cursor);
+                forward_event = true;
+                true
+            }
+            ViewEvent::KeyPressed { key, modifiers }
+                if active
+                    && (modifiers.shortcut()
+                        || matches!(
+                            key,
+                            Key::Tab | Key::ArrowLeft | Key::ArrowRight | Key::Home | Key::End
+                        )) =>
+            {
+                self.state.commit(&mut self.value, &mut self.cursor);
+                forward_event = true;
+                true
+            }
+            _ => false,
+        };
+        if !handled {
+            return None;
+        }
+        let range = self.state.marked_range();
+        let prefix = range.as_ref().map_or(self.value.len(), |r| r.start);
+        let committed = self.value[..prefix].to_owned();
+        self.value.drain(..prefix);
+        self.cursor = self.cursor.saturating_sub(prefix);
+        if let Some(range) = range {
+            self.state.marked = Some(range.start - prefix..range.end - prefix);
+        }
+        Some(CompositionUpdate {
+            committed,
+            preedit: self.value.clone(),
+            forward_event,
+        })
+    }
+    /// 文書や入力先が変わったときに未確定状態と候補を破棄します。文書へ文字は挿入しません。
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+    /// エディターから通知された論理座標のカーソル位置に、標準の候補パネルを描画します。
+    pub fn paint_candidates(&mut self, anchor: Rect, context: &mut PaintContext<'_>) {
+        let (candidates, selected) = self.state.candidates();
+        self.panel = paint_candidates(anchor, candidates, selected, None, context);
+    }
+}
+#[cfg(test)]
+mod external_client_tests {
+    use super::*;
+    use crate::{
+        event::ViewEvent,
+        platform::{Key, KeyModifiers},
+    };
+    #[test]
+    fn external_composition_replaces_preedit_and_commits_only_once() {
+        let mut client = InputMethodClient::default();
+        client.state.enabled_override = Some(true);
+        let mut update = CompositionUpdate::default();
+        for c in "annpannman".chars() {
+            update = client
+                .process(
+                    &ViewEvent::TextInput {
+                        text: c.to_string(),
+                    },
+                    false,
+                )
+                .unwrap();
+            assert!(update.committed.is_empty());
+        }
+        assert_eq!(update.preedit, "あんぱんまn");
+        let commit = client
+            .process(
+                &ViewEvent::KeyPressed {
+                    key: Key::Enter,
+                    modifiers: KeyModifiers::default(),
+                },
+                false,
+            )
+            .unwrap();
+        assert_eq!(commit.committed, "あんぱんまん");
+        assert!(commit.preedit.is_empty());
+        let newline = client
+            .process(&ViewEvent::TextInput { text: "\n".into() }, false)
+            .unwrap();
+        assert!(newline.committed.is_empty());
+        assert!(newline.preedit.is_empty());
+    }
+    #[test]
+    fn leaving_an_editor_commits_before_forwarding_the_focus_event() {
+        let mut client = InputMethodClient::default();
+        client.state.enabled_override = Some(true);
+        client
+            .process(&ViewEvent::TextInput { text: "ka".into() }, false)
+            .unwrap();
+        let update = client
+            .process(&ViewEvent::FocusChanged { focused: false }, false)
+            .unwrap();
+        assert_eq!(update.committed, "か");
+        assert!(update.preedit.is_empty());
+        assert!(update.forward_event);
+        assert!(client.state.marked_range().is_none());
+    }
+    #[test]
+    fn private_input_never_retains_composition_or_requests_candidates() {
+        let mut client = InputMethodClient::default();
+        client.state.enabled_override = Some(true);
+        let update = client
+            .process(
+                &ViewEvent::TextInput {
+                    text: "password".into(),
+                },
+                true,
+            )
+            .unwrap();
+        assert_eq!(update.committed, "password");
+        assert!(update.preedit.is_empty());
+        assert!(client.value.is_empty());
+        assert!(client.state.candidates.is_empty());
+    }
+}

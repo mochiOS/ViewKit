@@ -1338,3 +1338,5 @@ pub use title_bar::TitleBar;
 
 mod identified;
 pub use identified::Identified;
+
+pub use input_method::{CompositionUpdate, InputMethodClient};
