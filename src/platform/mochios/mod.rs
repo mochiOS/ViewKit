@@ -272,7 +272,11 @@ impl DesktopBackground {
             },
         });
 
-        let mut font_system = create_font_system();
+        // This display list contains only Clear and DrawImage. Loading UI,
+        // fallback and user fonts cannot affect its pixels and blocks the UI.
+        let mut font_system = FontSystem::new_with_locale_and_db(
+            String::new(), cosmic_text::fontdb::Database::new(),
+        );
         let mut swash_cache = SwashCache::new();
         let mut text_layout_cache = HashMap::new();
         let mut pixmap = None;

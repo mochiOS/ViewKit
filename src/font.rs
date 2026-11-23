@@ -7,15 +7,22 @@ use cosmic_text::fontdb;
 use cosmic_text::{Fallback, Family, FontSystem, PlatformFallback};
 use unicode_script::Script;
 
+#[path = "../build-support/font-codec.rs"]
+mod font_codec;
+
+fn embedded_font(bytes: &[u8]) -> Vec<u8> {
+    font_codec::decode(bytes).expect("build-validated embedded font")
+}
+
 #[cfg(target_os = "mochios")]
 const DEFAULT_UI_FONT_BYTES: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/default_ui_font.ttf"));
+    include_bytes!(concat!(env!("OUT_DIR"), "/default_ui_font.ftz"));
 #[cfg(target_os = "mochios")]
 const DEFAULT_MONOSPACE_FONT_BYTES: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/default_monospace_font.ttf"));
+    include_bytes!(concat!(env!("OUT_DIR"), "/default_monospace_font.ftz"));
 #[cfg(viewkit_embedded_japanese_font)]
 const DEFAULT_JAPANESE_FONT_BYTES: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/default_japanese_font.ttf"));
+    include_bytes!(concat!(env!("OUT_DIR"), "/default_japanese_font.ftz"));
 
 const JAPANESE_FAMILIES: &[&str] = &[
     env!("VIEWKIT_DEFAULT_JAPANESE_FONT_FAMILY"),
@@ -57,11 +64,11 @@ impl Fallback for UiFontFallback {
 
 fn load_japanese_fonts(db: &mut fontdb::Database) {
     #[cfg(viewkit_embedded_japanese_font)]
-    db.load_font_data(DEFAULT_JAPANESE_FONT_BYTES.to_vec());
+    db.load_font_data(embedded_font(DEFAULT_JAPANESE_FONT_BYTES));
     #[cfg(viewkit_japanese_medium)]
-    db.load_font_data(include_bytes!(concat!(env!("OUT_DIR"), "/japanese_medium.ttf")).to_vec());
+    db.load_font_data(embedded_font(include_bytes!(concat!(env!("OUT_DIR"), "/japanese_medium.ftz"))));
     #[cfg(viewkit_japanese_semibold)]
-    db.load_font_data(include_bytes!(concat!(env!("OUT_DIR"), "/japanese_semibold.ttf")).to_vec());
+    db.load_font_data(embedded_font(include_bytes!(concat!(env!("OUT_DIR"), "/japanese_semibold.ftz"))));
     let _ = db;
 }
 
@@ -76,8 +83,8 @@ pub(crate) fn resolve_font_family(name: &str) -> Family<'_> {
 #[cfg(target_os = "mochios")]
 pub(crate) fn create_font_system() -> FontSystem {
     let mut db = fontdb::Database::new();
-    db.load_font_data(DEFAULT_UI_FONT_BYTES.to_vec());
-    db.load_font_data(DEFAULT_MONOSPACE_FONT_BYTES.to_vec());
+    db.load_font_data(embedded_font(DEFAULT_UI_FONT_BYTES));
+    db.load_font_data(embedded_font(DEFAULT_MONOSPACE_FONT_BYTES));
     load_japanese_fonts(&mut db);
     load_platform_fonts(&mut db);
     load_additional_fonts(&mut db);

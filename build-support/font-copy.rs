@@ -10,6 +10,14 @@ static NEXT_FILE: AtomicU64 = AtomicU64::new(0);
 /// even when a previous build copied a read-only SDK font into OUT_DIR.
 pub(crate) fn copy_font(source: &Path, destination: &Path) -> io::Result<()> {
     let bytes = fs::read(source)?;
+    write_font(&bytes, destination)
+}
+
+pub(crate) fn copy_compressed_font(source: &Path, destination: &Path) -> io::Result<()> {
+    write_font(&super::font_codec::encode(&fs::read(source)?)?, destination)
+}
+
+fn write_font(bytes: &[u8], destination: &Path) -> io::Result<()> {
     if fs::read(destination).is_ok_and(|old| old == bytes) {
         return Ok(());
     }
@@ -19,7 +27,10 @@ pub(crate) fn copy_font(source: &Path, destination: &Path) -> io::Result<()> {
         NEXT_FILE.fetch_add(1, Ordering::Relaxed)
     ));
     let result = (|| {
-        let mut output = fs::OpenOptions::new().write(true).create_new(true).open(&temporary)?;
+        let mut output = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
         output.write_all(&bytes)?;
         drop(output);
         fs::rename(&temporary, destination)
@@ -48,7 +59,10 @@ mod tests {
         fs::set_permissions(&destination, fs::Permissions::from_mode(0o444)).unwrap();
         let modified = fs::metadata(&destination).unwrap().modified().unwrap();
         copy_font(&source, &destination).unwrap();
-        assert_eq!(modified, fs::metadata(&destination).unwrap().modified().unwrap());
+        assert_eq!(
+            modified,
+            fs::metadata(&destination).unwrap().modified().unwrap()
+        );
         let replacement = root.join("replacement.ttf");
         fs::write(&replacement, b"second font").unwrap();
         fs::set_permissions(&replacement, fs::Permissions::from_mode(0o444)).unwrap();

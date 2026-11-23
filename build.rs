@@ -8,7 +8,10 @@ use serde_json::Value;
 
 #[path = "build-support/font-copy.rs"]
 mod font_copy;
-use font_copy::copy_font;
+#[path = "build-support/font-codec.rs"]
+mod font_codec;
+use font_copy::copy_compressed_font as copy_font;
+
 
 struct FontCandidate {
     path: PathBuf,
@@ -17,6 +20,8 @@ struct FontCandidate {
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=build-support/font-codec.rs");
+    println!("cargo:rerun-if-changed=build-support/font-copy.rs");
     let token_dir = Path::new("resources/var");
     for file in [
         "Light.tokens.json",
@@ -58,10 +63,10 @@ fn main() {
     let candidate = required_font("VIEWKIT_UI_FONT_PATH", "Inter Variable");
     let monospace = required_font("VIEWKIT_MONOSPACE_FONT_PATH", "UDEV Gothic");
 
-    let target_path = out_dir.join("default_ui_font.ttf");
+    let target_path = out_dir.join("default_ui_font.ftz");
     copy_font(&candidate.path, &target_path)
         .unwrap_or_else(|err| panic!("failed to copy default font: {err}"));
-    let monospace_target_path = out_dir.join("default_monospace_font.ttf");
+    let monospace_target_path = out_dir.join("default_monospace_font.ftz");
     copy_font(&monospace.path, &monospace_target_path)
         .unwrap_or_else(|err| panic!("failed to copy default monospace font: {err}"));
 
@@ -90,7 +95,7 @@ fn configure_japanese_fonts(out_dir: &Path) {
     if !path.is_file() {
         return;
     }
-    copy_font(&path, &out_dir.join("default_japanese_font.ttf"))
+    copy_font(&path, &out_dir.join("default_japanese_font.ftz"))
         .expect("failed to copy Japanese regular font");
     println!("cargo:rustc-cfg=viewkit_embedded_japanese_font");
     // Match the actual UI weights, so a host's semibold Mincho face cannot win
@@ -99,12 +104,12 @@ fn configure_japanese_fonts(out_dir: &Path) {
         for (source, output, cfg) in [
             (
                 "IBMPlexSansJP-Medium.ttf",
-                "japanese_medium.ttf",
+                "japanese_medium.ftz",
                 "viewkit_japanese_medium",
             ),
             (
                 "IBMPlexSansJP-SemiBold.ttf",
-                "japanese_semibold.ttf",
+                "japanese_semibold.ftz",
                 "viewkit_japanese_semibold",
             ),
         ] {
